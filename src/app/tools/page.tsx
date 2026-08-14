@@ -4,7 +4,15 @@ import { useState, useMemo } from "react";
 import type { LucideIcon } from "lucide-react";
 import { PageHeader } from "@/components/page-header";
 import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import {
   Search,
+  X,
+  ChevronDown,
   Image,
   Images,
   Scissors,
@@ -585,6 +593,7 @@ const tools: Tool[] = [
 export default function ToolsPage() {
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedCategory, setSelectedCategory] = useState("全部");
+  const [searchOpen, setSearchOpen] = useState(false);
 
   const filteredTools = useMemo(() => {
     return tools.filter((tool) => {
@@ -615,7 +624,8 @@ export default function ToolsPage() {
   return (
     <>
       <PageHeader description="高频使用的小工具集合，将重复性工作变成一键操作">
-        <div className="flex items-center gap-1 rounded-[2px] bg-[#ECECEC] px-2 py-1.5">
+        {/* 宽屏：完整胶囊 */}
+        <div className="hidden items-center gap-1 rounded-[2px] bg-[#ECECEC] px-2 py-1.5 xl:flex">
           <div className="relative">
             <Search className="absolute left-3.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-[#999999]" />
             <input
@@ -644,6 +654,64 @@ export default function ToolsPage() {
               </button>
             ))}
           </div>
+        </div>
+
+        {/* 窄屏：搜索收成图标，分类收成下拉 */}
+        <div className="flex items-center gap-1 rounded-[2px] bg-[#ECECEC] px-2 py-1.5 xl:hidden">
+          {searchOpen && (
+            <div className="relative">
+              <Search className="absolute left-3.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-[#999999]" />
+              <input
+                autoFocus
+                type="text"
+                placeholder="搜索工具"
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                className="h-8 w-40 rounded-[2px] bg-white pl-9 pr-3 text-[13px] text-[#000000] placeholder:text-[#999999] outline-none"
+              />
+            </div>
+          )}
+          <button
+            aria-label={searchOpen ? "关闭搜索" : "打开搜索"}
+            onClick={() => {
+              if (searchOpen) setSearchQuery("");
+              setSearchOpen(!searchOpen);
+            }}
+            className="flex h-8 w-8 items-center justify-center rounded-[2px] text-[#666666] transition-colors hover:bg-white hover:text-[#000000]"
+          >
+            {searchOpen ? (
+              <X className="h-3.5 w-3.5" />
+            ) : (
+              <Search className="h-3.5 w-3.5" />
+            )}
+          </button>
+
+          <div className="mx-1 h-4 w-px bg-[#E5E5E5]" />
+
+          <DropdownMenu>
+            <DropdownMenuTrigger className="flex h-8 items-center gap-1.5 rounded-[2px] bg-[#000000] px-3 text-xs font-medium text-white outline-none">
+              {selectedCategory}
+              <ChevronDown className="h-3 w-3" />
+            </DropdownMenuTrigger>
+            <DropdownMenuContent
+              align="end"
+              className="min-w-28 rounded-[2px]"
+            >
+              {categories.map((category) => (
+                <DropdownMenuItem
+                  key={category}
+                  onClick={() => setSelectedCategory(category)}
+                  className={`rounded-[2px] text-[13px] ${
+                    selectedCategory === category
+                      ? "font-medium text-[#000000]"
+                      : "text-[#666666]"
+                  }`}
+                >
+                  {category}
+                </DropdownMenuItem>
+              ))}
+            </DropdownMenuContent>
+          </DropdownMenu>
         </div>
       </PageHeader>
       <div className="space-y-8 px-6 py-4">

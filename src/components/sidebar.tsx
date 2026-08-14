@@ -27,7 +27,7 @@ const navItems = [
 
 function WaveFooter() {
   return (
-    <div className="mt-auto w-full">
+    <div className="mt-auto hidden w-full 2xl:block">
       <div className="relative h-16 w-full overflow-hidden bg-[#F5F5F5]">
         <div className="absolute inset-0 flex w-[200%] animate-wave-slow text-[#1890FF]/14">
           <svg
@@ -94,11 +94,11 @@ export function Sidebar() {
   };
 
   return (
-    <aside className="flex h-screen w-56 flex-col border-r border-[#E5E5E5] bg-[#F5F5F5]">
+    <aside className="flex h-screen w-20 flex-col border-r border-[#E5E5E5] bg-[#F5F5F5] 2xl:w-56">
       {/* Logo */}
       <div className="flex items-center gap-3 px-5 py-5">
         <div style={{ display: 'flex', margin: '0 auto' }}><LogoIcon className="h-9 w-9 text-black" />
-          <span className="text-lg font-semibold text-black" style={{ fontFamily: 'var(--font-sekuya)', lineHeight: 1, letterSpacing: '0.1em', marginLeft: '10px' }}>
+          <span className="hidden text-lg font-semibold text-black 2xl:inline" style={{ fontFamily: 'var(--font-sekuya)', lineHeight: 1, letterSpacing: '0.1em', marginLeft: '10px' }}>
             Nexus<br/>OS
           </span>
         </div>
@@ -116,6 +116,7 @@ export function Sidebar() {
             <Link
               key={item.href}
               href={item.href}
+              title={item.label}
               onClick={() => handleClick(item.href)}
               className={cn(
                 "group relative flex items-center justify-center overflow-hidden rounded-xl px-4 py-4 text-lg text-black transition-colors duration-200",
@@ -128,8 +129,8 @@ export function Sidebar() {
                   onAnimationEnd={handleAnimationEnd}
                 />
               )}
-              <item.icon className="absolute left-4 z-10 h-6 w-6" />
-              <span className="relative z-10">{item.label}</span>
+              <item.icon className="z-10 h-6 w-6 2xl:absolute 2xl:left-4" />
+              <span className="relative z-10 hidden 2xl:inline">{item.label}</span>
             </Link>
           );
         })}
