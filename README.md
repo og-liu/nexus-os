@@ -32,13 +32,26 @@ Nexus OS 是一个面向个人用户打造的智能工作空间，将日常工�
 
 ---
 
+## 环境要求
+
+- **Node.js**：18.17.0 或更高版本（推荐 20.x）
+- **包管理器**：pnpm 10.x
+
+> 项目使用 `pnpm` 作为包管理器，且依赖 `pnpm-lock.yaml` 锁定版本，因此不建议使用 npm 或 yarn 安装依赖。
+
 ## 快速开始
 
 ```bash
-# 安装依赖
+# 1. 切换到正确的 Node.js 版本（如果你使用 nvm）
+nvm use 20
+
+# 2. 安装 pnpm（如果尚未安装）
+npm install -g pnpm
+
+# 3. 安装依赖
 pnpm install
 
-# 启动开发服务器
+# 4. 启动开发服务器
 pnpm dev
 
 # 构建生产版本
@@ -47,6 +60,16 @@ pnpm build
 # 代码检查
 pnpm lint
 ```
+
+### 常见问题
+
+**Q：为什么必须用 pnpm？**
+
+pnpm 是一个快速、节省磁盘空间的包管理器。本项目在 `package.json` 中通过 `packageManager` 字段指定了 pnpm，并且使用 `pnpm-lock.yaml` 锁定依赖版本。用 npm/yarn 安装可能导致依赖不一致。
+
+**Q：执行 `pnpm dev` 报错 `Cannot find module 'node:events'`？**
+
+这说明当前 Node.js 版本过低。请使用 `nvm use 20` 切换到 Node 20，然后重新执行命令。
 
 ---
 
