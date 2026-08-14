@@ -6,27 +6,29 @@
 
 ## 配色规范
 
-项目采用统一的品牌色与语义色体系：
+项目采用**黑白灰**为主的设计语言（v0.1.0 中期由蓝色主色调演进而来），色彩仅保留给「状态」表达：
 
-### 品牌色
+### 主色体系
 
 | 用途 | 色值 | 说明 |
 |------|------|------|
-| 主色调 | `#1890FF` | 按钮、链接、图标高亮、导航激活态 |
-| 主色悬停 | `#40a9ff` | 主色调的 hover 状态 |
-| 导航激活背景 | `#d5e3f6` | 侧边栏当前路由高亮背景 |
+| 主黑 | `#000000` | 标题、主 CTA 按钮底色、选中态底色、短竖条标题装饰 |
+| 主黑悬停 | `#333333` | 黑色按钮的 hover 状态 |
+| 图标黑 | `#1F1F1F` | 卡片内工具/活动图标 |
+| 次要文字 | `#666666` | 可交互的次级图标/文字 |
+| 辅助文字 | `#8A8A8A` | 描述、标签文字 |
+| 弱化文字 | `#999999` | 时间戳、计数、占位符 |
+| 导航激活背景 | `#d5e3f6` | 侧边栏当前路由高亮背景（侧边栏保留的唯一彩色元素） |
 | 导航悬停背景 | `#ededed` | 侧边栏非激活项的 hover 背景 |
 
-### 语义色（工具/状态标识）
+### 状态色（仅用于状态点）
 
-| 语义 | Tailwind 类 | 使用场景 |
-|------|-------------|----------|
-| 蓝色（信息） | `text-blue-500` / `bg-blue-50` | 图片压缩等工具图标 |
-| 绿色（成功） | `text-green-500` / `bg-green-50` | OCR 识别、可用状态 |
-| 紫色（搜索） | `text-purple-500` / `bg-purple-50` | 以图找图等 |
-| 橙色（警告） | `text-orange-500` / `bg-orange-50` | 文件批处理、自动化 |
-| 粉色（转换） | `text-pink-500` / `bg-pink-50` | 格式转换 |
-| 青色（文本） | `text-cyan-500` / `bg-cyan-50` | 文本处理 |
+| 语义 | 色值 | 使用场景 |
+|------|------|----------|
+| 正常/运行中 | `#22C55E` | 自动化任务运行状态点 |
+| 未配置/已暂停 | `#D0D0D0` | AI Agent 未配置、任务暂停状态点 |
+
+状态点统一为 `h-1.5 w-1.5 rounded-full` 圆点 + 灰色文字说明，**不使用彩色 Badge 徽章**。
 
 ### 背景色
 
@@ -36,34 +38,70 @@
 | 主内容区背景 | `#ECECEC` |
 | 侧边栏背景 | `#F5F5F5` |
 | 页脚背景 | `#ECECEC` |
-| 统计卡片蓝 | `#F0F9FF` |
-| 统计卡片绿 | `#F6FDF6` |
-| 统计卡片橙 | `#FFF7F0` |
-| 活动列表项背景 | `#F8FAFC` |
+| 卡片背景 | `#FFFFFF`（白卡片） |
+| 卡片内嵌块 | `#F5F5F5`（白卡片内的统计块/工具块/图标底） |
+| 头部控件容器 | `#ECECEC`（PageHeader 右侧胶囊容器） |
 
-### 边框色
+层次规则：**灰页面 → 白卡片 → 灰内嵌块 → 白图标底**，相邻层级底色交替，不使用投影区分层次。
+
+### 边框与分隔线
 
 | 用途 | 色值 |
 |------|------|
 | 侧边栏右边框 | `#E5E5E5` |
 | PageHeader 下边框 | `#E8E8E8` |
+| 列表分隔线 / KPI 分隔线 | `#F0F0F0`（`divide-y` / `divide-x`） |
 
 ---
 
 ## 组件样式规范
 
-### Card 组件
+### 圆角
 
-所有业务卡片统一使用无边框 + 轻投影样式：
+全站统一使用 **2px 微圆角**（`rounded-[2px]`），适用于卡片、按钮、输入框、图标底块等一切矩形容器。例外：状态点、黑胶唱片、圆形播放按钮等本身为圆形的元素使用 `rounded-full`。
+
+### 卡片
+
+业务卡片**不使用 shadcn Card 组件**，直接使用原生 div：
 
 ```tsx
-<Card className="border-0 shadow-[0_1px_3px_rgba(0,0,0,0.05)]">
+<div className="rounded-[2px] bg-white p-5">
 ```
 
-悬停态可追加：
+- 无边框、无投影，靠底色层次区分
+- 可交互卡片（如工具卡）hover 态：`hover:-translate-y-0.5 hover:shadow-[0_4px_12px_rgba(0,0,0,0.08)]`
+
+### 短竖条标题（SectionTitle）
+
+卡片/分组标题统一使用「黑色短竖条 + 黑色小标题」模式：
 
 ```tsx
-className="border-0 shadow-[0_1px_3px_rgba(0,0,0,0.05)] hover:shadow-md transition-shadow"
+<div className="flex items-center gap-2">
+  <div className="h-3.5 w-[3px] bg-[#000000]" />
+  <h2 className="text-sm font-semibold text-[#000000]">标题</h2>
+</div>
+```
+
+可在右侧追加灰色计数（`text-xs text-[#999999]`）或「查看全部」链接。
+
+### 主 CTA 按钮
+
+页面主操作按钮统一黑底白字：
+
+```tsx
+className="rounded-[2px] bg-[#000000] text-white hover:bg-[#333333]"
+```
+
+### hover 反色动效
+
+可点击的图标块统一使用 group hover 反色：常态灰底（`bg-[#F5F5F5]` 或白底）黑图标，hover 时黑底白图标：
+
+```tsx
+<div className="group ...">
+  <div className="bg-[#F5F5F5] transition-colors group-hover:bg-[#000000]">
+    <Icon className="text-[#1F1F1F] transition-colors group-hover:text-white" />
+  </div>
+</div>
 ```
 
 ### PageHeader 组件
@@ -83,13 +121,13 @@ import { PageHeader } from "@/components/page-header";
 - 标题栏固定高度 `h-16`，所有页面保持一致
 - 不要在页面中自行实现标题栏
 
-### 状态标签
+### 状态标识
 
-工具/功能的状态展示使用统一模式：
+工具/功能/任务的状态展示使用**状态点**统一模式（不使用彩色 Badge）：
 
-- **可用**：`bg-green-50 text-green-600`
-- **开发中**：`bg-gray-100 text-gray-500`
-- **AI Agent 就绪**：`bg-green-50 text-green-600`（Badge 组件）
+- **正常/运行中**：`<span className="h-1.5 w-1.5 rounded-full bg-[#22C55E]" />`
+- **未配置/已暂停**：`<span className="h-1.5 w-1.5 rounded-full bg-[#D0D0D0]" />`
+- 开发中的工具卡片使用整体降透明度表达：`opacity-60 hover:opacity-100`
 
 ### 图标
 
@@ -131,13 +169,7 @@ import { Wrench, Bot, BookOpen } from "lucide-react";
 
 ### 页面内容区
 
-各页面内容统一使用以下间距：
-
-```tsx
-<div className="space-y-6 px-6 py-4">
-  {/* 页面内容 */}
-</div>
-```
+各页面内容统一使用 `px-6 py-4` 内边距，板块间距用 `space-y-4`（Dashboard）或 `space-y-8`（工具中心分组），网格间隙统一 `gap-3` / `gap-4`。
 
 ### 占位页面
 
@@ -157,14 +189,14 @@ import { Wrench, Bot, BookOpen } from "lucide-react";
 |------|------|----------|
 | 默认 | < 1280px | 基础样式 / 窄屏布局 |
 | `xl:` | ≥ 1280px | 工具中心完整搜索栏、内容网格增加列数 |
-| `2xl:` | ≥ 1536px | 侧边栏展开为完整模式（图标 + 文字 + 波浪动画） |
+| `2xl:` | ≥ 1536px | 侧边栏展开为完整模式（图标 + 文字） |
 
 **侧边栏响应式规则**：
 
-| 状态 | 宽度 | Logo | 导航 | 波浪动画 |
-|------|------|------|------|----------|
-| 窄屏（< 2xl） | `w-20` | 仅图标 | 仅图标，`title` 作为 tooltip | 隐藏 |
-| 宽屏（≥ 2xl） | `w-56` | 图标 + 文字 | 图标 + 文字 | 显示 |
+| 状态 | 宽度 | Logo | 导航 |
+|------|------|------|------|
+| 窄屏（< 2xl） | `w-20` | 仅图标 | 仅图标，`title` 作为 tooltip |
+| 宽屏（≥ 2xl） | `w-56` | 图标 + 文字 | 图标 + 文字 |
 
 **工具中心搜索栏**：
 

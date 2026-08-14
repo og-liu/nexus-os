@@ -15,7 +15,7 @@ export function PageHeader({
   return (
     <div
       className={cn(
-        "flex h-16 items-center justify-between border-b border-[#E8E8E8] bg-[#F5F5F5] px-6 text-black",
+        "sticky top-0 z-20 flex h-16 items-center justify-between border-b border-[#E8E8E8] bg-[#F5F5F5] px-6 text-black",
         className,
       )}
     >

@@ -34,12 +34,12 @@ Nexus OS/
 ```
 src/
 ├── app/                    # Next.js App Router 页面与布局
-│   ├── layout.tsx          # 根布局：侧边栏 + 主内容区 + 页脚，全局字体与样式注入
-│   ├── page.tsx            # 首页 Dashboard：系统概览、快捷工具、最近活动
+│   ├── layout.tsx          # 根布局：侧边栏 + 主内容区 + 页脚，主内容区设最小宽度 900px，全局字体与样式注入
+│   ├── page.tsx            # 首页 Dashboard：问候/时钟/农历/年度进度、每日一句、KPI 概览、快捷工具、最近活动、自动化任务、最新文章
 │   ├── globals.css         # 全局样式：Tailwind 导入、CSS 变量（shadcn 主题）、自定义动画
 │   ├── icon.svg            # 网站 favicon 图标
 │   │
-│   ├── tools/page.tsx      # 工具中心页面：客户端交互，57 个工具，搜索 + 分类筛选 + 分组展示
+│   ├── tools/page.tsx      # 工具中心页面：客户端交互，59 个工具，搜索 + 分类筛选 + 分组展示
 │   ├── files/page.tsx      # 文件管理页面（占位，待开发）
 │   ├── agent/page.tsx      # AI Agent 页面（占位，待开发）
 │   ├── knowledge/page.tsx  # 知识库页面（占位，待开发）
@@ -57,14 +57,17 @@ src/
 │   │   ├── switch.tsx      # 开关组件
 │   │   └── tabs.tsx        # 标签页组件
 │   │
-│   ├── sidebar.tsx         # 侧边导航栏：路由导航 + 波浪动画底部 + 涟漪点击效果
-│   ├── page-header.tsx     # 页面头部组件：统一的页面标题栏（各页面复用）
+│   ├── sidebar.tsx         # 侧边导航栏：路由导航 + 涟漪点击效果
+│   ├── page-header.tsx     # 页面头部组件：统一的页面标题栏（各页面复用），吸顶 + 固定高度 h-16
 │   ├── footer.tsx          # 页脚组件：版权信息 + ICP 备案链接
 │   └── logo-icon.tsx       # Logo SVG 图标组件（内联 SVG，Nexus 字母造型）
 │
 ├── fonts/                  # 本地字体文件
 │   ├── NotoSansSC-Variable.ttf  # 思源黑体可变字体（中文正文）
 │   └── Sekuya-Regular.ttf       # 装饰性英文字体（Logo 品牌名）
+│
+├── types/                  # TypeScript 类型声明
+│   └── lunar-javascript.d.ts  # lunar-javascript 库的类型补充声明
 │
 └── lib/
     └── utils.ts            # 工具函数：cn() — 合并 clsx + tailwind-merge 的类名处理
@@ -87,8 +90,8 @@ docs/
 
 | 页面 | 路由 | 状态 |
 |------|------|------|
-| 首页 Dashboard | `/` | ✅ 已完成（系统概览、快捷工具、最近活动） |
-| 工具中心 | `/tools` | ✅ 已完成（57 个工具、搜索 + 分类筛选、分组展示） |
+| 首页 Dashboard | `/` | ✅ 已完成（问候/时钟/农历/年度进度、每日一句、KPI、快捷工具、最近活动、自动化任务、最新文章、AI Agent、音乐播放器、便签、待办） |
+| 工具中心 | `/tools` | ✅ 已完成（59 个工具、搜索 + 分类筛选、分组展示） |
 | 文件管理 | `/files` | 🔲 占位 |
 | AI Agent | `/agent` | 🔲 占位 |
 | 知识库 | `/knowledge` | 🔲 占位 |

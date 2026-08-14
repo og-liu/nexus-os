@@ -9,7 +9,7 @@ export function Footer() {
           href="https://beian.miit.gov.cn/"
           target="_blank"
           rel="noopener noreferrer"
-          className="transition-colors hover:text-[#1890FF]"
+          className="transition-colors hover:text-[#000000]"
         >
           京ICP备2026008321号-1
         </Link>
@@ -17,7 +17,7 @@ export function Footer() {
           href="https://beian.mps.gov.cn/"
           target="_blank"
           rel="noopener noreferrer"
-          className="transition-colors hover:text-[#1890FF]"
+          className="transition-colors hover:text-[#000000]"
         >
           京公网安备 11010802045678号
         </Link>

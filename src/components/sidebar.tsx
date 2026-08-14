@@ -25,59 +25,6 @@ const navItems = [
   { href: "/settings", label: "设置", icon: Settings },
 ];
 
-function WaveFooter() {
-  return (
-    <div className="mt-auto hidden w-full 2xl:block">
-      <div className="relative h-16 w-full overflow-hidden bg-[#F5F5F5]">
-        <div className="absolute inset-0 flex w-[200%] animate-wave-slow text-[#1890FF]/14">
-          <svg
-            viewBox="0 0 600 60"
-            preserveAspectRatio="none"
-            className="h-full w-1/2"
-          >
-            <path
-              d="M0,40 Q50,15 100,40 T200,40 T300,40 T400,40 T500,40 T600,40 V60 H0 Z"
-              fill="currentColor"
-            />
-          </svg>
-          <svg
-            viewBox="0 0 600 60"
-            preserveAspectRatio="none"
-            className="h-full w-1/2"
-          >
-            <path
-              d="M0,40 Q50,15 100,40 T200,40 T300,40 T400,40 T500,40 T600,40 V60 H0 Z"
-              fill="currentColor"
-            />
-          </svg>
-        </div>
-        <div className="absolute inset-0 flex w-[200%] animate-wave text-[#1890FF]/28">
-          <svg
-            viewBox="0 0 600 60"
-            preserveAspectRatio="none"
-            className="h-full w-1/2"
-          >
-            <path
-              d="M0,44 Q60,20 120,44 T240,44 T360,44 T480,44 T600,44 V60 H0 Z"
-              fill="currentColor"
-            />
-          </svg>
-          <svg
-            viewBox="0 0 600 60"
-            preserveAspectRatio="none"
-            className="h-full w-1/2"
-          >
-            <path
-              d="M0,44 Q60,20 120,44 T240,44 T360,44 T480,44 T600,44 V60 H0 Z"
-              fill="currentColor"
-            />
-          </svg>
-        </div>
-      </div>
-    </div>
-  );
-}
-
 export function Sidebar() {
   const pathname = usePathname();
   const [rippleHref, setRippleHref] = useState<string | null>(null);
@@ -135,9 +82,6 @@ export function Sidebar() {
           );
         })}
       </nav>
-
-      {/* Footer wave animation */}
-      <WaveFooter />
     </aside>
   );
 }

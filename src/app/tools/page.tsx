@@ -67,6 +67,8 @@ import {
   Receipt,
   BookMarked,
   Contact,
+  NotepadText,
+  Quote,
 } from "lucide-react";
 
 type ToolStatus = "可用" | "开发中";
@@ -585,6 +587,24 @@ const tools: Tool[] = [
     icon: Contact,
     color: "text-orange-800",
     bg: "bg-orange-50",
+    status: "开发中",
+    category: "生活",
+  },
+  {
+    name: "便签",
+    description: "随手贴便签，首页常驻展示",
+    icon: NotepadText,
+    color: "text-amber-800",
+    bg: "bg-amber-50",
+    status: "开发中",
+    category: "生活",
+  },
+  {
+    name: "每日一句",
+    description: "每天更新一段正能量文案",
+    icon: Quote,
+    color: "text-sky-800",
+    bg: "bg-sky-50",
     status: "开发中",
     category: "生活",
   },

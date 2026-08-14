@@ -40,9 +40,9 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
       className={`${sekuya.variable} ${notoSansSC.variable} ${geistSans.variable} ${geistMono.variable} h-full antialiased`}
     >
       <body className="h-full bg-[#F5F7FA]">
-        <div className="flex h-screen">
+        <div className="flex h-screen overflow-x-auto">
           <Sidebar />
-          <div className="flex flex-1 flex-col overflow-hidden">
+          <div className="flex min-w-[900px] flex-1 flex-col overflow-hidden">
             <main className="flex-1 overflow-y-auto bg-[#ECECEC]">
               {children}
             </main>
