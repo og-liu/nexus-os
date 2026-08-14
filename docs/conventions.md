@@ -74,12 +74,13 @@ className="border-0 shadow-[0_1px_3px_rgba(0,0,0,0.05)] hover:shadow-md transiti
 import { PageHeader } from "@/components/page-header";
 
 <PageHeader description="页面描述文案">
-  {/* 可选：右侧操作区 */}
+  {/* 可选：右侧操作区（搜索框、筛选等） */}
 </PageHeader>
 ```
 
 - `description` 属性为页面标题（必填）
 - `children` 为右侧操作区域（可选）
+- 标题栏固定高度 `h-16`，所有页面保持一致
 - 不要在页面中自行实现标题栏
 
 ### 状态标签
@@ -99,6 +100,18 @@ import { Wrench, Bot, BookOpen } from "lucide-react";
 ```
 
 ---
+
+## 侧边栏导航顺序
+
+| 序号 | 路由 | 标签 | 图标 |
+|------|------|------|------|
+| 1 | `/` | 总览 | Brain |
+| 2 | `/agent` | Agent | Bot |
+| 3 | `/tools` | 工具 | Rocket |
+| 4 | `/files` | 文件 | FolderOpen |
+| 5 | `/knowledge` | 知识 | BookOpen |
+| 6 | `/automation` | 自动 | Zap |
+| 7 | `/settings` | 设置 | Settings |
 
 ## 布局规范
 

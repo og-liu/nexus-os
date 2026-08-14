@@ -4,8 +4,8 @@ import { useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import {
-  Home,
-  Wrench,
+  Brain,
+  Rocket,
   FolderOpen,
   Bot,
   BookOpen,
@@ -16,10 +16,10 @@ import { cn } from "@/lib/utils";
 import { LogoIcon } from "@/components/logo-icon";
 
 const navItems = [
-  { href: "/", label: "首页", icon: Home },
-  { href: "/tools", label: "工具", icon: Wrench },
+  { href: "/", label: "总览", icon: Brain },
+  { href: "/agent", label: "Agent", icon: Bot },
+  { href: "/tools", label: "工具", icon: Rocket },
   { href: "/files", label: "文件", icon: FolderOpen },
-  { href: "/agent", label: "AI", icon: Bot },
   { href: "/knowledge", label: "知识", icon: BookOpen },
   { href: "/automation", label: "自动", icon: Zap },
   { href: "/settings", label: "设置", icon: Settings },

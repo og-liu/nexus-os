@@ -39,7 +39,7 @@ src/
 │   ├── globals.css         # 全局样式：Tailwind 导入、CSS 变量（shadcn 主题）、自定义动画
 │   ├── icon.svg            # 网站 favicon 图标
 │   │
-│   ├── tools/page.tsx      # 工具中心页面：展示所有可用工具（图片压缩、OCR 等）
+│   ├── tools/page.tsx      # 工具中心页面：客户端交互，57 个工具，搜索 + 分类筛选 + 分组展示
 │   ├── files/page.tsx      # 文件管理页面（占位，待开发）
 │   ├── agent/page.tsx      # AI Agent 页面（占位，待开发）
 │   ├── knowledge/page.tsx  # 知识库页面（占位，待开发）
@@ -88,7 +88,7 @@ docs/
 | 页面 | 路由 | 状态 |
 |------|------|------|
 | 首页 Dashboard | `/` | ✅ 已完成（系统概览、快捷工具、最近活动） |
-| 工具中心 | `/tools` | ✅ 框架完成（6 个工具卡片展示，功能待接入） |
+| 工具中心 | `/tools` | ✅ 已完成（57 个工具、搜索 + 分类筛选、分组展示） |
 | 文件管理 | `/files` | 🔲 占位 |
 | AI Agent | `/agent` | 🔲 占位 |
 | 知识库 | `/knowledge` | 🔲 占位 |
