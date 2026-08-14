@@ -1,36 +1,80 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Nexus OS
 
-## Getting Started
+> 个人数字操作系统（Personal Digital Operating System）
 
-First, run the development server:
+Nexus OS 是一个面向个人用户打造的智能工作空间，将日常工具、自动化流程、知识管理以及 AI Agent 能力整合到统一的平台中。
+
+让工具成为能力，让 AI 成为助手，让个人数据真正服务于自己。
+
+---
+
+## 功能模块
+
+| 模块 | 路由 | 说明 |
+|------|------|------|
+| 工具中心 | `/tools` | 图片处理、文件批处理、OCR、格式转换等效率工具 |
+| 文件管理 | `/files` | 本地文件浏览、分类、搜索与管理 |
+| AI Agent | `/agent` | 智能对话、意图理解、任务规划与工具调用 |
+| 知识库 | `/knowledge` | 个人知识沉淀、笔记管理与智能检索 |
+| 自动化 | `/automation` | 工作流编排、定时任务与自动化流程 |
+| 设置 | `/settings` | 系统配置、模型接入与个性化设置 |
+
+---
+
+## 技术栈
+
+| 类别 | 技术 |
+|------|------|
+| 核心框架 | Next.js 16 · React 19 · TypeScript 5 |
+| UI 组件 | shadcn/ui 4.18 · Lucide React |
+| 样式 | Tailwind CSS 4 |
+| 包管理 | pnpm 10（workspace 支持） |
+
+---
+
+## 快速开始
 
 ```bash
-npm run dev
-# or
-yarn dev
-# or
+# 安装依赖
+pnpm install
+
+# 启动开发服务器
 pnpm dev
-# or
-bun dev
+
+# 构建生产版本
+pnpm build
+
+# 代码检查
+pnpm lint
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+---
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+## 项目文档
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+详尽的项目文档位于 `docs/` 目录下，主要面向 AI 与项目维护者：
 
-## Learn More
+| 文档 | 说明 |
+|------|------|
+| [架构设计](docs/architecture.md) | 系统分层架构、模块划分、技术选型理由、数据流 |
+| [AI Agent 设计](docs/agent-design.md) | Agent 核心能力、架构规划、子模块说明 |
+| [接口设计](docs/interfaces.md) | RESTful API、WebSocket 通信、插件 SDK 接口 |
+| [开发路线图](docs/roadmap.md) | 版本规划、各阶段里程碑与任务清单 |
+| [目录结构说明](docs/structure.md) | 项目中每个目录和关键文件的用途 |
+| [开发规范](docs/conventions.md) | 配色、组件样式、命名约定、技术约定 |
+| [开发日志](docs/changelog.md) | 按日期记录的变更流水账 |
 
-To learn more about Next.js, take a look at the following resources:
+---
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+## 路线图
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+- [x] 项目初始化与技术选型
+- [x] 基础 UI 框架搭建（侧边栏、页面路由、组件库）
+- [ ] 工具中心：图片压缩、OCR、格式转换等工具实现
+- [ ] 文件管理：本地文件浏览与操作
+- [ ] AI Agent：对话界面与工具调用能力
+- [ ] 知识库：笔记管理与知识检索
+- [ ] 自动化：工作流编排与定时任务
+- [ ] 插件系统：支持第三方工具扩展
 
-## Deploy on Vercel
-
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+详细任务清单见 [docs/roadmap.md](docs/roadmap.md)。
