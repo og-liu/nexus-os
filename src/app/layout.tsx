@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
+import localFont from "next/font/local";
 import "./globals.css";
 import { Sidebar } from "@/components/sidebar";
 import { Footer } from "@/components/footer";
@@ -7,6 +8,18 @@ import { Footer } from "@/components/footer";
 const geistSans = Geist({
   variable: "--font-geist-sans",
   subsets: ["latin"],
+});
+
+const notoSansSC = localFont({
+  src: "../fonts/NotoSansSC-Variable.ttf",
+  variable: "--font-noto-sans-sc",
+  display: "swap",
+});
+
+const sekuya = localFont({
+  src: "../fonts/Sekuya-Regular.ttf",
+  variable: "--font-sekuya",
+  display: "swap",
 });
 
 const geistMono = Geist_Mono({
@@ -24,7 +37,7 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
   return (
     <html
       lang="zh-CN"
-      className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
+      className={`${sekuya.variable} ${notoSansSC.variable} ${geistSans.variable} ${geistMono.variable} h-full antialiased`}
     >
       <body className="h-full bg-[#F5F7FA]">
         <div className="flex h-screen">

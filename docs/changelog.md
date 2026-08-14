@@ -62,6 +62,28 @@
 
 ---
 
+## 2026-08-14 — 字体升级与 Logo 排版优化
+
+### 新增
+
+- 新增本地字体目录 `src/fonts/`
+  - `NotoSansSC-Variable.ttf`（思源黑体可变字体，~17MB）：用于中文正文渲染
+  - `Sekuya-Regular.ttf`（装饰性英文字体，~300KB）：用于 Logo 品牌名
+
+### 修改
+
+- **layout.tsx**：引入 `next/font/local` 加载 NotoSansSC 和 Sekuya 字体，注册 CSS 变量 `--font-noto-sans-sc` 和 `--font-sekuya`，注入到 `<html>` 元素
+- **globals.css**：全局 sans 字体回退链改为 `NotoSansSC → Geist Sans → sans-serif`，解决中文回退到系统宋体的问题
+- **sidebar.tsx**：Logo 品牌名改用 Sekuya 字体，竖排双行（Nexus / OS），增加字间距，整体居中布局
+
+### 决策记录
+
+- 选用思源黑体作为中文字体：开源免费、可变字体体积小、显示效果清晰，与 Geist Sans 风格协调
+- Logo 使用本地字体而非 Google Fonts：Sekuya 字体不在 Google Fonts 中，且本地加载更可控
+- Logo 竖排双行设计：侧边栏宽度有限（w-56），竖排更紧凑美观
+
+---
+
 <!-- 格式参考：
 ## YYYY-MM-DD — 本次开发主题
 

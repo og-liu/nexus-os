@@ -189,3 +189,21 @@ import { cn } from "@/lib/utils";
 
 - Logo 采用**内联 SVG** 组件（`logo-icon.tsx`），不使用图片文件
 - Favicon 使用 SVG 文件（`icon.svg`），不使用 PNG/ICO
+
+### 字体
+
+| 字体 | 加载方式 | CSS 变量 | 用途 |
+|------|----------|----------|------|
+| Noto Sans SC | `next/font/local`（本地 TTF） | `--font-noto-sans-sc` | 中文正文（优先级最高） |
+| Geist Sans | `next/font/google` | `--font-geist-sans` | 英文正文（中文回退后的第二选择） |
+| Geist Mono | `next/font/google` | `--font-geist-mono` | 代码/等宽文本 |
+| Sekuya | `next/font/local`（本地 TTF） | `--font-sekuya` | Logo 品牌名（装饰性字体） |
+
+全局字体回退链（在 `globals.css` 中定义）：
+
+```css
+--font-sans: var(--font-noto-sans-sc), var(--font-geist-sans), sans-serif;
+```
+
+- 中文文本优先使用思源黑体，英文文本回退到 Geist Sans
+- Logo 品牌名使用 Sekuya 字体，通过内联 style 指定 `fontFamily: 'var(--font-sekuya)'`

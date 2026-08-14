@@ -97,10 +97,11 @@ export function Sidebar() {
     <aside className="flex h-screen w-56 flex-col border-r border-[#E5E5E5] bg-[#F5F5F5]">
       {/* Logo */}
       <div className="flex items-center gap-3 px-5 py-5">
-        <LogoIcon className="h-9 w-9 text-black" />
-        <span className="text-lg font-semibold text-black">
-          Nexus OS
-        </span>
+        <div style={{ display: 'flex', margin: '0 auto' }}><LogoIcon className="h-9 w-9 text-black" />
+          <span className="text-lg font-semibold text-black" style={{ fontFamily: 'var(--font-sekuya)', lineHeight: 1, letterSpacing: '0.1em', marginLeft: '10px' }}>
+            Nexus<br/>OS
+          </span>
+        </div>
       </div>
 
       {/* Navigation */}

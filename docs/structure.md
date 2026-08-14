@@ -62,6 +62,10 @@ src/
 │   ├── footer.tsx          # 页脚组件：版权信息 + ICP 备案链接
 │   └── logo-icon.tsx       # Logo SVG 图标组件（内联 SVG，Nexus 字母造型）
 │
+├── fonts/                  # 本地字体文件
+│   ├── NotoSansSC-Variable.ttf  # 思源黑体可变字体（中文正文）
+│   └── Sekuya-Regular.ttf       # 装饰性英文字体（Logo 品牌名）
+│
 └── lib/
     └── utils.ts            # 工具函数：cn() — 合并 clsx + tailwind-merge 的类名处理
 ```
