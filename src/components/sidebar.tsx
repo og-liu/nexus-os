@@ -19,9 +19,9 @@ import { LogoIcon } from "@/components/logo-icon";
 const navItems = [
   { href: "/", label: "总览", icon: Brain },
   { href: "/agent", label: "Agent", icon: Bot },
+  { href: "/knowledge", label: "知识", icon: BookOpen },
   { href: "/tools", label: "工具", icon: Rocket },
   { href: "/files", label: "文件", icon: FolderOpen },
-  { href: "/knowledge", label: "知识", icon: BookOpen },
   { href: "/automation", label: "自动", icon: Zap },
   { href: "/settings", label: "设置", icon: Settings },
 ];
