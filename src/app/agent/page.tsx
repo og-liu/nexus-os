@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   Plus,
   Send,
@@ -9,15 +9,53 @@ import {
   Zap,
   Loader2,
   Clock3,
+  ImageIcon,
+  Mic,
+  X,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { PageHeader } from "@/components/page-header";
+
+// ---------- Web Speech API 类型（lib.dom 未收录，局部声明） ----------
+
+interface SpeechRecognitionAlternativeLike {
+  transcript: string;
+}
+
+interface SpeechRecognitionResultLike {
+  isFinal: boolean;
+  length: number;
+  0: SpeechRecognitionAlternativeLike;
+}
+
+interface SpeechRecognitionResultListLike {
+  length: number;
+  [index: number]: SpeechRecognitionResultLike;
+}
+
+interface SpeechRecognitionEventLike extends Event {
+  resultIndex: number;
+  results: SpeechRecognitionResultListLike;
+}
+
+interface SpeechRecognitionLike {
+  lang: string;
+  continuous: boolean;
+  interimResults: boolean;
+  onresult: ((event: SpeechRecognitionEventLike) => void) | null;
+  onend: (() => void) | null;
+  onerror: ((event: Event) => void) | null;
+  start: () => void;
+  stop: () => void;
+  abort: () => void;
+}
 
 // ---------- Mock 数据 ----------
 
 interface Message {
   role: "user" | "assistant";
   content: string;
+  images?: string[];
 }
 
 interface Chat {
@@ -148,33 +186,136 @@ export default function AgentPage() {
   // 手机端视图切换：list=会话列表，chat=对话。md 及以上双栏常驻，不受此影响
   const [mobileView, setMobileView] = useState<"list" | "chat">("list");
   const [inputValue, setInputValue] = useState("");
+  // 待发送图片（objectURL 列表）
+  const [pendingImages, setPendingImages] = useState<string[]>([]);
+  const [isListening, setIsListening] = useState(false);
+  const [voiceHint, setVoiceHint] = useState("");
+
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const recognitionRef = useRef<SpeechRecognitionLike | null>(null);
+  // 开始录音时输入框已有的文字，识别结果在其后追加
+  const baseTextRef = useRef("");
 
   const activeChat = chats.find((c) => c.id === activeChatId);
 
+  // 组件卸载时停止录音
+  useEffect(() => {
+    return () => {
+      recognitionRef.current?.abort();
+    };
+  }, []);
+
+  const showVoiceHint = (text: string) => {
+    setVoiceHint(text);
+    window.setTimeout(() => setVoiceHint(""), 3000);
+  };
+
+  // ---------- 语音输入（Web Speech API） ----------
+
+  const toggleVoice = () => {
+    if (isListening) {
+      recognitionRef.current?.stop();
+      return;
+    }
+    const Ctor =
+      (window as unknown as Record<string, unknown>)
+        .SpeechRecognition ??
+      (window as unknown as Record<string, unknown>)
+        .webkitSpeechRecognition;
+    if (!Ctor) {
+      showVoiceHint("当前浏览器不支持语音输入，建议使用 Chrome 或 Edge");
+      return;
+    }
+    const recognition = new (Ctor as new () => SpeechRecognitionLike)();
+    recognition.lang = "zh-CN";
+    recognition.continuous = true;
+    recognition.interimResults = true;
+    baseTextRef.current = inputValue;
+
+    recognition.onresult = (event) => {
+      let finalText = "";
+      let interimText = "";
+      for (let i = event.resultIndex; i < event.results.length; i++) {
+        const result = event.results[i];
+        if (result.isFinal) {
+          finalText += result[0].transcript;
+        } else {
+          interimText += result[0].transcript;
+        }
+      }
+      const base = baseTextRef.current;
+      // 已定稿文字追加进基准，避免重复
+      if (finalText) baseTextRef.current = base + finalText;
+      setInputValue(baseTextRef.current + interimText);
+    };
+    recognition.onend = () => {
+      setIsListening(false);
+      recognitionRef.current = null;
+    };
+    recognition.onerror = () => {
+      showVoiceHint("语音识别失败，请检查麦克风权限后重试");
+      setIsListening(false);
+      recognitionRef.current = null;
+    };
+
+    try {
+      recognition.start();
+      recognitionRef.current = recognition;
+      setIsListening(true);
+    } catch {
+      showVoiceHint("语音识别启动失败，请重试");
+    }
+  };
+
+  // ---------- 图片选择 ----------
+
+  const handleImageSelect = (files: FileList | null) => {
+    if (!files) return;
+    const urls = Array.from(files)
+      .filter((f) => f.type.startsWith("image/"))
+      .map((f) => URL.createObjectURL(f));
+    setPendingImages((prev) => [...prev, ...urls]);
+    // 重置 file input，保证再次选择同一文件也能触发
+    if (fileInputRef.current) fileInputRef.current.value = "";
+  };
+
+  const removePendingImage = (url: string) => {
+    URL.revokeObjectURL(url);
+    setPendingImages((prev) => prev.filter((u) => u !== url));
+  };
+
+  // ---------- 发送 ----------
+
   const handleSend = () => {
     const text = inputValue.trim();
-    if (!text || !activeChat) return;
+    if ((!text && pendingImages.length === 0) || !activeChat) return;
+    const images = pendingImages.length > 0 ? pendingImages : undefined;
     setInputValue("");
+    setPendingImages([]);
+    const reply = images
+      ? `（演示模式）已收到${images.length > 1 ? ` ${images.length} 张图片` : "图片"}${
+          text ? "和你的消息" : ""
+        }，Agent 接入后将识别图片内容并返回真实响应。`
+      : "（演示模式）Agent 接入后，这里会返回真实响应。";
     setChats((prev) =>
       prev.map((c) =>
         c.id === activeChatId
           ? {
               ...c,
               updatedAt: "刚刚",
-              preview: text,
+              preview: text || "[图片]",
               messages: [
                 ...c.messages,
-                { role: "user", content: text },
-                {
-                  role: "assistant",
-                  content: "（演示模式）Agent 接入后，这里会返回真实响应。",
-                },
+                { role: "user", content: text, images },
+                { role: "assistant", content: reply },
               ],
             }
           : c,
       ),
     );
   };
+
+  const canSend = inputValue.trim().length > 0 || pendingImages.length > 0;
 
   return (
     <>
@@ -313,10 +454,25 @@ export default function AgentPage() {
                     </div>
                   </div>
                 ) : (
-                  <div key={i} className="flex justify-end">
-                    <div className="max-w-[85%] rounded-[2px] bg-[#000000] px-4 py-3 text-sm leading-relaxed text-white md:max-w-[70%]">
-                      {msg.content}
-                    </div>
+                  <div key={i} className="flex flex-col items-end gap-1.5">
+                    {msg.images && msg.images.length > 0 && (
+                      <div className="flex max-w-[85%] flex-wrap justify-end gap-1.5 md:max-w-[70%]">
+                        {msg.images.map((src, j) => (
+                          // eslint-disable-next-line @next/next/no-img-element
+                          <img
+                            key={j}
+                            src={src}
+                            alt="用户上传的图片"
+                            className="h-28 w-28 rounded-[2px] object-cover"
+                          />
+                        ))}
+                      </div>
+                    )}
+                    {msg.content && (
+                      <div className="max-w-[85%] rounded-[2px] bg-[#000000] px-4 py-3 text-sm leading-relaxed text-white md:max-w-[70%]">
+                        {msg.content}
+                      </div>
+                    )}
                   </div>
                 ),
               )}
@@ -325,32 +481,96 @@ export default function AgentPage() {
 
           {/* 输入区 */}
           <div className="shrink-0 border-t border-[#E5E5E5] bg-white p-3 md:p-4">
-            <div className="mx-auto flex max-w-3xl items-end gap-2">
-              <textarea
-                rows={1}
-                value={inputValue}
-                placeholder="给 Agent 发消息…"
-                onChange={(e) => setInputValue(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter" && !e.shiftKey) {
-                    e.preventDefault();
-                    handleSend();
+            <div className="mx-auto max-w-3xl">
+              {/* 语音提示 */}
+              {voiceHint && (
+                <p className="mb-2 text-xs text-[#8A8A8A]">{voiceHint}</p>
+              )}
+
+              {/* 待发送图片预览 */}
+              {pendingImages.length > 0 && (
+                <div className="mb-2 flex flex-wrap gap-2">
+                  {pendingImages.map((url) => (
+                    <div key={url} className="relative">
+                      {/* eslint-disable-next-line @next/next/no-img-element */}
+                      <img
+                        src={url}
+                        alt="待发送图片"
+                        className="h-20 w-20 rounded-[2px] object-cover"
+                      />
+                      <button
+                        aria-label="移除图片"
+                        onClick={() => removePendingImage(url)}
+                        className="absolute -right-1.5 -top-1.5 flex h-5 w-5 items-center justify-center rounded-full bg-[#000000] text-white shadow-sm transition-opacity hover:opacity-85"
+                      >
+                        <X className="h-3 w-3" />
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              <div className="flex items-end gap-1.5 md:gap-2">
+                {/* 图片上传 */}
+                <button
+                  aria-label="上传图片"
+                  onClick={() => fileInputRef.current?.click()}
+                  className="flex h-11 w-11 shrink-0 items-center justify-center rounded-[2px] text-[#666666] transition-colors hover:bg-[#ECECEC] hover:text-[#000000]"
+                >
+                  <ImageIcon className="h-5 w-5" />
+                </button>
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  accept="image/*"
+                  multiple
+                  className="hidden"
+                  onChange={(e) => handleImageSelect(e.target.files)}
+                />
+
+                {/* 语音输入 */}
+                <button
+                  aria-label={isListening ? "停止语音输入" : "语音输入"}
+                  onClick={toggleVoice}
+                  className={cn(
+                    "flex h-11 w-11 shrink-0 items-center justify-center rounded-[2px] transition-colors",
+                    isListening
+                      ? "animate-pulse bg-[#000000] text-white"
+                      : "text-[#666666] hover:bg-[#ECECEC] hover:text-[#000000]",
+                  )}
+                >
+                  <Mic className="h-5 w-5" />
+                </button>
+
+                <textarea
+                  rows={1}
+                  value={inputValue}
+                  placeholder={
+                    isListening ? "正在听你说…" : "给 Agent 发消息…"
                   }
-                }}
-                className="max-h-32 min-h-11 flex-1 resize-none rounded-[2px] border border-[#E5E5E5] bg-white px-3.5 py-2.5 text-sm text-[#000000] placeholder:text-[#999999] outline-none focus:border-[#000000]"
-              />
-              <button
-                aria-label="发送"
-                onClick={handleSend}
-                disabled={!inputValue.trim()}
-                className="flex h-11 w-11 shrink-0 items-center justify-center rounded-[2px] bg-[#000000] text-white transition-opacity hover:opacity-85 disabled:opacity-30"
-              >
-                <Send className="h-4 w-4" />
-              </button>
+                  onChange={(e) => setInputValue(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" && !e.shiftKey) {
+                      e.preventDefault();
+                      handleSend();
+                    }
+                  }}
+                  className="max-h-32 min-h-11 flex-1 resize-none rounded-[2px] border border-[#E5E5E5] bg-white px-3.5 py-2.5 text-sm text-[#000000] placeholder:text-[#999999] outline-none focus:border-[#000000]"
+                />
+
+                <button
+                  aria-label="发送"
+                  onClick={handleSend}
+                  disabled={!canSend}
+                  className="flex h-11 w-11 shrink-0 items-center justify-center rounded-[2px] bg-[#000000] text-white transition-opacity hover:opacity-85 disabled:opacity-30"
+                >
+                  <Send className="h-4 w-4" />
+                </button>
+              </div>
+              <p className="mt-2 hidden text-[11px] text-[#A0A8B4] md:block">
+                Enter 发送，Shift + Enter 换行
+              </p>
             </div>
-            <p className="mx-auto mt-2 hidden max-w-3xl text-[11px] text-[#A0A8B4] md:block">
-              Enter 发送，Shift + Enter 换行
-            </p>
           </div>
         </div>
       </div>
