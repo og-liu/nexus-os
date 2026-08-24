@@ -13,7 +13,7 @@ Nexus OS 是一个面向个人用户打造的智能工作空间，将日常工�
 | 模块 | 路由 | 说明 |
 |------|------|------|
 | 总览 | `/` | 系统 Dashboard：状态概览、快捷入口、最近活动 |
-| AI Agent | `/agent` | 已接入 DeepSeek 真实对话（流式），多会话管理（新建/切换/删除），语音图片输入；知识库优先问答（RAG）规划中 |
+| AI Agent | `/agent` | 多模型真实对话（DeepSeek 全家 + OpenRouter 可扩展）、流式输出、深度思考（按模型独立）、图片看图、多会话管理、语音输入；知识库优先问答（RAG）规划中 |
 | 知识库 | `/knowledge` | 知识流/我的文章/收件箱/回收站/订阅源/自测/回顾，采集→审查→整理→阅读流水线（当前为 UI mock） |
 | 工具中心 | `/tools` | 59 个工具卡片、搜索筛选、三档响应式（工具均为 mock） |
 | 文件管理 | `/files` | 本地文件浏览、分类、搜索与管理（待开发） |
@@ -53,11 +53,12 @@ npm install -g pnpm
 # 3. 安装依赖
 pnpm install
 
-# 4. 配置 DeepSeek API Key（Agent 对话必需）
+# 4. 配置 API Key（Agent 对话必需）
 #    打开项目根目录的 .env.local，填入：
 #    DEEPSEEK_API_KEY=你的密钥
 #    密钥从 https://platform.deepseek.com 获取
-#    默认模型 deepseek-v4-flash，如需更换可在 .env.local 里改 DEEPSEEK_MODEL
+#    可选：要接 OpenRouter（如 Ox Alpha）再填 OPENROUTER_API_KEY=你的密钥
+#    模型切换在 Agent 页顶部的模型选择器里完成，默认 deepseek-v4-flash
 
 # 5. 启动开发服务器
 pnpm dev

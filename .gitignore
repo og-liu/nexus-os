@@ -48,3 +48,6 @@ next-env.d.ts
 .qoder/
 # local database（SQLite 数据，含用户聊天记录，不进 Git）
 /data
+
+# 用户上传的图片（运行时落盘，不进 Git）
+/public/uploads

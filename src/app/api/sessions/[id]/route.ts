@@ -34,3 +34,22 @@ export async function DELETE(
   }
   return NextResponse.json({ ok: true });
 }
+export async function PATCH(
+  req: NextRequest,
+  ctx: RouteContext<"/api/sessions/[id]">,
+) {
+  const { id } = await ctx.params;
+  const body = (await req.json().catch(() => null)) as { title?: string } | null;
+  const title = body?.title?.trim();
+  if (!title) {
+    return NextResponse.json({ error: "标题不能为空" }, { status: 400 });
+  }
+  const db = getDb();
+  const result = db
+    .prepare(`UPDATE sessions SET title = ?, updated_at = ? WHERE id = ?`)
+    .run(title, Date.now(), id);
+  if (result.changes === 0) {
+    return NextResponse.json({ error: "会话不存在" }, { status: 404 });
+  }
+  return NextResponse.json({ ok: true, title });
+}

@@ -13,9 +13,15 @@ import {
   Mic,
   Trash2,
   X,
+  Pencil,
+  Brain,
+  ChevronDown,
+  Check,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { MODELS, DEFAULT_MODEL_ID, getModelMeta } from "@/lib/models";
 import { PageHeader } from "@/components/page-header";
+import { Toast, type ToastData, type ToastType } from "@/components/toast";
 
 // ---------- Web Speech API 类型（lib.dom 未收录，局部声明） ----------
 
@@ -58,6 +64,7 @@ interface Message {
   role: "user" | "assistant";
   content: string;
   images?: string[];
+  reasoning?: string;
 }
 
 interface SessionMeta {
@@ -98,6 +105,71 @@ const tasks: AgentTask[] = [
   },
 ];
 
+const LAST_SESSION_KEY = "nexus-os:agent:last-session";
+const THINKING_PREFIX = "nexus-os:agent:thinking:";
+const MODEL_PREFIX = "nexus-os:agent:model:";
+const MAX_IMAGES = 4;
+const MAX_IMAGE_BYTES = 5 * 1024 * 1024; // 单张 5MB
+
+function loadModel(id: string): string {
+  try {
+    const raw = window.localStorage.getItem(MODEL_PREFIX + id);
+    if (raw && MODELS.some((m) => m.id === raw)) {
+      return raw;
+    }
+  } catch {
+    // 忽略，回落默认
+  }
+  return DEFAULT_MODEL_ID;
+}
+
+function saveModel(id: string, model: string) {
+  try {
+    window.localStorage.setItem(MODEL_PREFIX + id, model);
+  } catch {
+    // 忽略存储失败
+  }
+}
+
+type ThinkingEffort = "low" | "high" | "max";
+
+function loadThinking(modelId: string): {
+  enabled: boolean;
+  effort: ThinkingEffort;
+} {
+  try {
+    const raw = window.localStorage.getItem(THINKING_PREFIX + modelId);
+    if (raw) {
+      const parsed = JSON.parse(raw) as { enabled?: boolean; effort?: string };
+      return {
+        enabled: parsed.enabled === true,
+        effort:
+          parsed.effort === "high" || parsed.effort === "max"
+            ? parsed.effort
+            : "low",
+      };
+    }
+  } catch {
+    // 忽略解析失败，回落默认
+  }
+  return { enabled: false, effort: "low" };
+}
+
+function saveThinking(
+  modelId: string,
+  enabled: boolean,
+  effort: ThinkingEffort,
+) {
+  try {
+    window.localStorage.setItem(
+      THINKING_PREFIX + modelId,
+      JSON.stringify({ enabled, effort }),
+    );
+  } catch {
+    // 忽略存储失败
+  }
+}
+
 function formatRelativeTime(ts: number): string {
   const diff = Date.now() - ts;
   const min = 60 * 1000;
@@ -121,10 +193,22 @@ export default function AgentPage() {
   // 手机端视图切换：list=会话列表，chat=对话。md 及以上双栏常驻，不受此影响
   const [mobileView, setMobileView] = useState<"list" | "chat">("list");
   const [inputValue, setInputValue] = useState("");
-  // 待发送图片（objectURL 列表）
+  // 待发送图片（base64 data URL 列表：既做预览，发送时原样带上）
   const [pendingImages, setPendingImages] = useState<string[]>([]);
   const [isListening, setIsListening] = useState(false);
-  const [hint, setHint] = useState("");
+  const [toast, setToast] = useState<ToastData | null>(null);
+  const [thinkingEnabled, setThinkingEnabled] = useState(false);
+  const [thinkingEffort, setThinkingEffort] = useState<ThinkingEffort>("low");
+  const [openReasoning, setOpenReasoning] = useState<Set<string>>(new Set());
+  const [modelId, setModelId] = useState<string>(DEFAULT_MODEL_ID);
+  const [modelMenuOpen, setModelMenuOpen] = useState(false);
+  const supportsThinking = getModelMeta(modelId)?.supportsThinking ?? false;
+  const supportsVision = getModelMeta(modelId)?.supportsVision ?? false;
+  const [deleteTarget, setDeleteTarget] = useState<SessionMeta | null>(null);
+  const [renameTarget, setRenameTarget] = useState<SessionMeta | null>(null);
+  const [renameValue, setRenameValue] = useState("");
+  const [isDeleting, setIsDeleting] = useState(false);
+  const [isRenaming, setIsRenaming] = useState(false);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const recognitionRef = useRef<SpeechRecognitionLike | null>(null);
@@ -133,9 +217,46 @@ export default function AgentPage() {
 
   const activeChat = chats.find((c) => c.id === activeChatId);
 
-  const showHint = (text: string) => {
-    setHint(text);
-    window.setTimeout(() => setHint(""), 3000);
+  const showToast = (text: string, type: ToastType = "info") => {
+    setToast({ id: Date.now(), text, type });
+  };
+
+  // 兼容旧调用：默认信息提示
+  const showHint = (text: string) => showToast(text);
+
+  const toggleThinking = () => {
+    const next = !thinkingEnabled;
+    setThinkingEnabled(next);
+    saveThinking(modelId, next, thinkingEffort);
+  };
+
+  const setEffort = (effort: ThinkingEffort) => {
+    setThinkingEffort(effort);
+    saveThinking(modelId, thinkingEnabled, effort);
+  };
+
+  const selectModel = (m: string) => {
+    setModelId(m);
+    setModelMenuOpen(false);
+    if (activeChatId) saveModel(activeChatId, m);
+    // 恢复该模型自己的深度思考偏好（各模型互不影响，新旧对话一致）
+    const saved = loadThinking(m);
+    setThinkingEnabled(saved.enabled);
+    setThinkingEffort(saved.effort);
+    // 切到不支持看图的模型时，清空待发送图片
+    if (getModelMeta(m)?.supportsVision === false && pendingImages.length > 0) {
+      setPendingImages([]);
+      showToast("当前模型不支持看图，已移除待发送图片", "warn");
+    }
+  };
+
+  const toggleReasoning = (id: string) => {
+    setOpenReasoning((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
   };
 
   // ---------- 会话加载 ----------
@@ -143,48 +264,105 @@ export default function AgentPage() {
   const loadSessions = useCallback(async () => {
     const res = await fetch("/api/sessions");
     const data = (await res.json()) as { sessions?: SessionMeta[] };
-    setChats(data.sessions ?? []);
+    const list = data.sessions ?? [];
+    setChats(list);
+    return list;
   }, []);
 
-  const selectChat = async (id: string) => {
+  const selectChat = useCallback(async (id: string) => {
     setActiveChatId(id);
+    window.localStorage.setItem(LAST_SESSION_KEY, id);
     setMobileView("chat");
+    const mid = loadModel(id);
+    const saved = loadThinking(mid);
+    setThinkingEnabled(saved.enabled);
+    setThinkingEffort(saved.effort);
+    setModelId(mid);
     const res = await fetch(`/api/sessions/${id}`);
     const data = (await res.json()) as {
       messages?: Array<{
         id: string;
         role: "user" | "assistant";
         content: string;
+        images?: string | null;
       }>;
     };
     setMessages(
-      (data.messages ?? []).map((m) => ({
-        id: m.id,
-        role: m.role,
-        content: m.content,
-      })),
+      (data.messages ?? []).map((m) => {
+        let images: string[] | undefined;
+        if (m.images) {
+          try {
+            images = JSON.parse(m.images) as string[];
+          } catch {
+            images = undefined;
+          }
+        }
+        return { id: m.id, role: m.role, content: m.content, images };
+      }),
     );
-  };
+  }, []);
 
   const newChat = () => {
     setActiveChatId(null);
     setMessages([]);
+    window.localStorage.removeItem(LAST_SESSION_KEY);
+    setOpenReasoning(new Set());
+    // 切回默认模型，并恢复它自己的深度思考偏好
+    const mid = DEFAULT_MODEL_ID;
+    const saved = loadThinking(mid);
+    setThinkingEnabled(saved.enabled);
+    setThinkingEffort(saved.effort);
+    setModelId(mid);
     setMobileView("chat");
   };
 
-  const deleteChat = async (id: string) => {
-    if (!window.confirm("确定删除这个会话吗？删除后无法恢复。")) return;
-    await fetch(`/api/sessions/${id}`, { method: "DELETE" });
-    if (activeChatId === id) {
-      setActiveChatId(null);
-      setMessages([]);
+  const deleteChat = async () => {
+    if (!deleteTarget) return;
+    const id = deleteTarget.id;
+    setIsDeleting(true);
+    try {
+      await fetch(`/api/sessions/${id}`, { method: "DELETE" });
+      if (activeChatId === id) {
+        setActiveChatId(null);
+        setMessages([]);
+        window.localStorage.removeItem(LAST_SESSION_KEY);
+      }
+      setDeleteTarget(null);
+      await loadSessions();
+    } finally {
+      setIsDeleting(false);
     }
-    await loadSessions();
+  };
+
+  const submitRename = async () => {
+    if (!renameTarget) return;
+    const title = renameValue.trim();
+    if (!title) {
+      showHint("标题不能为空");
+      return;
+    }
+    setIsRenaming(true);
+    try {
+      await fetch(`/api/sessions/${renameTarget.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ title }),
+      });
+      setRenameTarget(null);
+      await loadSessions();
+    } finally {
+      setIsRenaming(false);
+    }
   };
 
   useEffect(() => {
-    loadSessions();
-  }, [loadSessions]);
+    loadSessions().then((list) => {
+      const last = window.localStorage.getItem(LAST_SESSION_KEY);
+      if (last && list.some((c) => c.id === last)) {
+        selectChat(last);
+      }
+    });
+  }, [loadSessions, selectChat]);
 
   // 消息变化时滚到底部
   useEffect(() => {
@@ -258,15 +436,36 @@ export default function AgentPage() {
 
   const handleImageSelect = (files: FileList | null) => {
     if (!files) return;
-    const urls = Array.from(files)
-      .filter((f) => f.type.startsWith("image/"))
-      .map((f) => URL.createObjectURL(f));
-    setPendingImages((prev) => [...prev, ...urls]);
+    const list = Array.from(files).filter((f) => f.type.startsWith("image/"));
+    if (list.length === 0) return;
+
+    const room = MAX_IMAGES - pendingImages.length;
+    if (room <= 0) {
+      showHint(`最多上传 ${MAX_IMAGES} 张图片`);
+      if (fileInputRef.current) fileInputRef.current.value = "";
+      return;
+    }
+    const picked = list.slice(0, room);
+    if (picked.length < list.length) {
+      showHint(`超出限制，本次仅保留前 ${picked.length} 张`);
+    }
+
+    for (const file of picked) {
+      if (file.size > MAX_IMAGE_BYTES) {
+        showHint("单张图片不能超过 5MB");
+        continue;
+      }
+      const reader = new FileReader();
+      reader.onload = () => {
+        const dataUrl = typeof reader.result === "string" ? reader.result : "";
+        if (dataUrl) setPendingImages((prev) => [...prev, dataUrl]);
+      };
+      reader.readAsDataURL(file);
+    }
     if (fileInputRef.current) fileInputRef.current.value = "";
   };
 
   const removePendingImage = (url: string) => {
-    URL.revokeObjectURL(url);
     setPendingImages((prev) => prev.filter((u) => u !== url));
   };
 
@@ -274,14 +473,9 @@ export default function AgentPage() {
 
   const handleSend = async () => {
     const text = inputValue.trim();
-    if (!text) {
-      if (pendingImages.length > 0) {
-        showHint("目前仅支持文字消息，图片识别能力后续开放");
-      }
-      return;
-    }
+    if (!text && pendingImages.length === 0) return;
 
-    const images = pendingImages.length > 0 ? pendingImages : undefined;
+    const images = pendingImages.length > 0 ? [...pendingImages] : undefined;
     setInputValue("");
     setPendingImages([]);
 
@@ -307,7 +501,13 @@ export default function AgentPage() {
       const res = await fetch("/api/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ content: text, sessionId: activeChatId }),
+        body: JSON.stringify({
+          content: text,
+          sessionId: activeChatId,
+          model: modelId,
+          thinking: { enabled: thinkingEnabled, effort: thinkingEffort },
+          images,
+        }),
       });
 
       if (!res.ok || !res.body) {
@@ -331,13 +531,21 @@ export default function AgentPage() {
           const payload = trimmed.slice(5).trim();
           try {
             const obj = JSON.parse(payload) as {
-              type: "delta" | "error" | "done";
+              type: "delta" | "reasoning" | "error" | "done";
               content?: string;
               message?: string;
               sessionId?: string;
               title?: string;
             };
-            if (obj.type === "delta" && obj.content) {
+            if (obj.type === "reasoning" && obj.content) {
+              setMessages((prev) =>
+                prev.map((m) =>
+                  m.id === assistantMsgId
+                    ? { ...m, reasoning: (m.reasoning ?? "") + obj.content }
+                    : m,
+                ),
+              );
+            } else if (obj.type === "delta" && obj.content) {
               setMessages((prev) =>
                 prev.map((m) =>
                   m.id === assistantMsgId
@@ -363,7 +571,12 @@ export default function AgentPage() {
         }
       }
 
-      if (finalSessionId) setActiveChatId(finalSessionId);
+      if (finalSessionId) {
+        setActiveChatId(finalSessionId);
+        window.localStorage.setItem(LAST_SESSION_KEY, finalSessionId);
+        saveThinking(modelId, thinkingEnabled, thinkingEffort);
+        saveModel(finalSessionId, modelId);
+      }
       await loadSessions();
     } catch {
       setMessages((prev) =>
@@ -373,13 +586,13 @@ export default function AgentPage() {
             : m,
         ),
       );
-      showHint(`发送失败，请检查服务是否启动并已填写 DEEPSEEK_API_KEY`);
+      showToast("发送失败，请检查服务是否启动并已填写 DEEPSEEK_API_KEY", "error");
     } finally {
       setIsLoading(false);
     }
   };
 
-  const canSend = inputValue.trim().length > 0;
+  const canSend = inputValue.trim().length > 0 || pendingImages.length > 0;
 
   return (
     <>
@@ -430,16 +643,29 @@ export default function AgentPage() {
                   <span className="truncate text-sm font-medium text-black">
                     {chat.title}
                   </span>
-                  <button
-                    aria-label="删除会话"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      deleteChat(chat.id);
-                    }}
-                    className="hidden h-5 w-5 shrink-0 items-center justify-center rounded-[2px] text-[#A0A8B4] transition-colors hover:text-[#000000] group-hover:flex"
-                  >
-                    <Trash2 className="h-3.5 w-3.5" />
-                  </button>
+                  <div className="flex shrink-0 items-center gap-0.5">
+                    <button
+                      aria-label="重命名会话"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setRenameTarget(chat);
+                        setRenameValue(chat.title);
+                      }}
+                      className="hidden h-5 w-5 items-center justify-center rounded-[2px] text-[#A0A8B4] transition-colors hover:text-[#000000] group-hover:flex"
+                    >
+                      <Pencil className="h-3.5 w-3.5" />
+                    </button>
+                    <button
+                      aria-label="删除会话"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setDeleteTarget(chat);
+                      }}
+                      className="hidden h-5 w-5 shrink-0 items-center justify-center rounded-[2px] text-[#A0A8B4] transition-colors hover:text-[#000000] group-hover:flex"
+                    >
+                      <Trash2 className="h-3.5 w-3.5" />
+                    </button>
+                  </div>
                 </div>
                 <span className="text-xs text-[#8A8A8A]">
                   {formatRelativeTime(chat.updated_at)}
@@ -542,6 +768,27 @@ export default function AgentPage() {
                         <Bot className="h-4.5 w-4.5 text-white" />
                       </div>
                       <div className="min-w-0 whitespace-pre-wrap break-words rounded-[2px] bg-white px-4 py-3 text-sm leading-relaxed text-[#1F1F1F]">
+                        {msg.reasoning ? (
+                          <div className="mb-2">
+                            <button
+                              onClick={() => toggleReasoning(msg.id)}
+                              className="flex items-center gap-1 rounded-[2px] text-xs text-[#8A8A8A] transition-colors hover:text-[#000000]"
+                            >
+                              <ChevronDown
+                                className={cn(
+                                  "h-3.5 w-3.5 transition-transform",
+                                  !openReasoning.has(msg.id) && "-rotate-90",
+                                )}
+                              />
+                              思考过程
+                            </button>
+                            {openReasoning.has(msg.id) && (
+                              <div className="mt-1.5 whitespace-pre-wrap break-words rounded-[2px] bg-[#F5F5F5] px-3 py-2 text-xs leading-relaxed text-[#8A8A8A]">
+                                {msg.reasoning}
+                              </div>
+                            )}
+                          </div>
+                        ) : null}
                         {msg.content ? (
                           msg.content
                         ) : (
@@ -580,8 +827,120 @@ export default function AgentPage() {
           {/* 输入区 */}
           <div className="shrink-0 border-t border-[#E5E5E5] bg-white p-3 md:p-4">
             <div>
-              {/* 提示 */}
-              {hint && <p className="mb-2 text-xs text-[#8A8A8A]">{hint}</p>}
+              {/* 全局提示（右下角浮层） */}
+              <Toast toast={toast} onDismiss={() => setToast(null)} />
+
+              {/* 模型选择 + 深度思考控制 */}
+              <div className="mb-2 flex flex-wrap items-center gap-2">
+                <div className="relative">
+                  <button
+                    onClick={() => setModelMenuOpen((v) => !v)}
+                    aria-label="选择模型"
+                    className={cn(
+                      "flex items-center gap-1.5 rounded-[2px] border px-2.5 py-1 text-xs font-medium transition-colors",
+                      modelMenuOpen
+                        ? "border-[#000000] bg-white text-[#000000]"
+                        : "border-[#E5E5E5] bg-white text-[#555555] hover:border-[#000000] hover:text-[#000000]",
+                    )}
+                  >
+                    {getModelMeta(modelId)?.name ?? "选择模型"}
+                    <ChevronDown className="h-3.5 w-3.5" />
+                  </button>
+
+                  {modelMenuOpen && (
+                    <>
+                      <div
+                        className="fixed inset-0 z-40"
+                        onClick={() => setModelMenuOpen(false)}
+                        aria-hidden
+                      />
+                      <div className="absolute bottom-full left-0 z-50 mb-1 w-64 rounded-[3px] border border-[#E5E5E5] bg-white p-1 shadow-lg">
+                        <p className="px-2 py-1.5 text-[11px] font-medium text-[#8A8A8A]">
+                          选择模型
+                        </p>
+                        {MODELS.map((m) => {
+                          const active = m.id === modelId;
+                          return (
+                            <button
+                              key={m.id}
+                              onClick={() => selectModel(m.id)}
+                              className={cn(
+                                "flex w-full items-start justify-between gap-2 rounded-[3px] px-2 py-2 text-left transition-colors",
+                                active ? "bg-[#F2F2F2]" : "hover:bg-[#F7F7F7]",
+                              )}
+                            >
+                              <span className="flex min-w-0 flex-col gap-0.5">
+                                <span className="flex items-center gap-1.5">
+                                  <span
+                                    className={cn(
+                                      "text-xs font-medium",
+                                      active ? "text-[#000000]" : "text-[#333333]",
+                                    )}
+                                  >
+                                    {m.name}
+                                  </span>
+                                  {m.tag && (
+                                    <span className="rounded-[2px] bg-[#EFEFEF] px-1 text-[10px] leading-4 text-[#888888]">
+                                      {m.tag}
+                                    </span>
+                                  )}
+                                </span>
+                                <span className="text-[11px] text-[#999999]">
+                                  {m.desc}
+                                </span>
+                              </span>
+                              {active && (
+                                <Check className="mt-0.5 h-3.5 w-3.5 shrink-0 text-[#000000]" />
+                              )}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </>
+                  )}
+                </div>
+                {supportsThinking && (
+                  <>
+                    <button
+                      onClick={toggleThinking}
+                      aria-label="深度思考"
+                      className={cn(
+                        "flex items-center gap-1.5 rounded-[2px] border px-2.5 py-1 text-xs font-medium transition-colors",
+                        thinkingEnabled
+                          ? "border-[#000000] bg-[#000000] text-white"
+                          : "border-[#E5E5E5] bg-white text-[#666666] hover:border-[#000000] hover:text-[#000000]",
+                      )}
+                    >
+                      <Brain className="h-3.5 w-3.5" />
+                      深度思考
+                    </button>
+                    {thinkingEnabled && (
+                      <div className="flex items-center gap-0.5 rounded-[2px] border border-[#E5E5E5] bg-white p-0.5">
+                        {(
+                          [
+                            ["low", "低"],
+                            ["high", "高"],
+                            ["max", "最高"],
+                          ] as [ThinkingEffort, string][]
+                        ).map(([value, label]) => (
+                          <button
+                            key={value}
+                            onClick={() => setEffort(value)}
+                            className={cn(
+                              "rounded-[2px] px-2 py-0.5 text-xs transition-colors",
+                              thinkingEffort === value
+                                ? "bg-[#000000] text-white"
+                                : "text-[#666666] hover:text-[#000000]",
+                            )}
+                          >
+                            {label}
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </>
+                )}
+              </div>
 
               {/* 待发送图片预览 */}
               {pendingImages.length > 0 && (
@@ -610,7 +969,13 @@ export default function AgentPage() {
                 {/* 图片上传 */}
                 <button
                   aria-label="上传图片"
-                  onClick={() => fileInputRef.current?.click()}
+                  onClick={() => {
+                    if (!supportsVision) {
+                      showToast("当前模型不支持看图，请切换到视觉版", "warn");
+                      return;
+                    }
+                    fileInputRef.current?.click();
+                  }}
                   className="flex h-11 w-11 shrink-0 items-center justify-center rounded-[2px] text-[#666666] transition-colors hover:bg-[#ECECEC] hover:text-[#000000]"
                 >
                   <ImageIcon className="h-5 w-5" />
@@ -670,6 +1035,86 @@ export default function AgentPage() {
           </div>
         </div>
       </div>
+
+      {/* 删除确认弹窗 */}
+      {deleteTarget && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/20 p-4"
+          onClick={() => !isDeleting && setDeleteTarget(null)}
+        >
+          <div
+            className="w-full max-w-sm rounded-[2px] bg-white p-5 shadow-[0_16px_48px_rgba(0,0,0,0.12)]"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h3 className="text-sm font-medium text-black">删除会话</h3>
+            <p className="mt-2 text-sm leading-relaxed text-[#666666]">
+              确定删除「{deleteTarget.title}」吗？删除后聊天记录无法恢复。
+            </p>
+            <div className="mt-5 flex justify-end gap-2">
+              <button
+                onClick={() => setDeleteTarget(null)}
+                disabled={isDeleting}
+                className="rounded-[2px] border border-[#E5E5E5] bg-white px-4 py-2 text-sm text-[#1F1F1F] transition-colors hover:bg-[#F5F5F5] disabled:opacity-50"
+              >
+                取消
+              </button>
+              <button
+                onClick={deleteChat}
+                disabled={isDeleting}
+                className="flex items-center gap-1.5 rounded-[2px] bg-[#000000] px-4 py-2 text-sm font-medium text-white transition-opacity hover:opacity-85 disabled:opacity-50"
+              >
+                {isDeleting && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
+                删除
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 重命名弹窗 */}
+      {renameTarget && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/20 p-4"
+          onClick={() => !isRenaming && setRenameTarget(null)}
+        >
+          <div
+            className="w-full max-w-sm rounded-[2px] bg-white p-5 shadow-[0_16px_48px_rgba(0,0,0,0.12)]"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h3 className="text-sm font-medium text-black">重命名会话</h3>
+            <input
+              autoFocus
+              value={renameValue}
+              onChange={(e) => setRenameValue(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") {
+                  e.preventDefault();
+                  submitRename();
+                }
+              }}
+              placeholder="输入新标题"
+              className="mt-3 w-full rounded-[2px] border border-[#E5E5E5] bg-white px-3 py-2.5 text-sm text-black placeholder:text-[#999999] outline-none focus:border-[#000000]"
+            />
+            <div className="mt-5 flex justify-end gap-2">
+              <button
+                onClick={() => setRenameTarget(null)}
+                disabled={isRenaming}
+                className="rounded-[2px] border border-[#E5E5E5] bg-white px-4 py-2 text-sm text-[#1F1F1F] transition-colors hover:bg-[#F5F5F5] disabled:opacity-50"
+              >
+                取消
+              </button>
+              <button
+                onClick={submitRename}
+                disabled={isRenaming || !renameValue.trim()}
+                className="flex items-center gap-1.5 rounded-[2px] bg-[#000000] px-4 py-2 text-sm font-medium text-white transition-opacity hover:opacity-85 disabled:opacity-50"
+              >
+                {isRenaming && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
+                保存
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </>
   );
 }

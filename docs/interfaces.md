@@ -2,7 +2,7 @@
 
 本文档定义 Nexus OS 的对外接口规范，涵盖系统 API、实时通信接口以及插件扩展 SDK 接口。
 
-> **当前状态**：项目处于 v0.1.0 阶段，以下接口为规划性设计，将随功能开发逐步实现。
+> **当前状态**：AI Agent 接口已落地（`/api/chat` 流式对话 + `/api/sessions` 会话 CRUD，见「已实现接口」）；其余模块接口仍为规划性设计，将随功能开发逐步实现。
 
 ---
 
@@ -43,10 +43,46 @@
 |------|----------|------|
 | 工具中心 | `/api/tools/` | 工具列表查询、工具执行、执行结果获取 |
 | 文件管理 | `/api/files/` | 文件浏览、上传、下载、删除、搜索 |
-| AI Agent | `/api/agent/` | 对话管理、消息发送、历史记录 |
+| AI Agent | `/api/chat` + `/api/sessions` | ✅ 已实现：流式对话（SSE）、会话 CRUD、消息历史 |
 | 知识库 | `/api/knowledge/` | 知识条目 CRUD、智能检索、标签管理 |
 | 自动化 | `/api/automation/` | 工作流 CRUD、任务触发、执行日志 |
 | 系统设置 | `/api/settings/` | 配置读写、模型管理 |
+
+### 已实现接口（AI Agent）
+
+以下接口为当前真实实现，与上文规划的「统一 JSON 格式」不同，对话接口采用 SSE 流式返回。
+
+#### 发送对话消息（流式）
+
+```
+POST /api/chat
+Content-Type: application/json
+
+{
+  "content": "用户消息文本",
+  "sessionId": "会话 id（可选，不传则新建会话）",
+  "model": "模型 id（可选，默认 deepseek-v4-flash）",
+  "thinking": { "enabled": true, "effort": "low|high|max" },
+  "images": ["data:image/png;base64,..."]   // 可选，仅视觉模型
+}
+```
+
+返回 `text/event-stream`，事件类型：
+
+- `delta`：正文片段（content）
+- `reasoning`：思考过程片段（不落库）
+- `error`：错误信息（message）
+- `done`：完成（sessionId、title）
+
+#### 会话管理
+
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| GET | `/api/sessions` | 会话列表（按更新时间排序） |
+| POST | `/api/sessions` | 新建会话 |
+| GET | `/api/sessions/[id]` | 会话消息历史 |
+| PATCH | `/api/sessions/[id]` | 重命名（body：`{ title }`） |
+| DELETE | `/api/sessions/[id]` | 删除会话 |
 
 ### 示例接口
 
@@ -101,7 +137,7 @@ Response:
 
 ## 2. WebSocket 实时通信
 
-用于需要实时推送的场景，如 AI 对话流式输出、长时间任务的进度通知等。
+用于需要实时推送的场景，如长时间任务的进度通知等。（注：AI 对话流式输出当前实际采用 SSE，详见「已实现接口」。）
 
 ### 连接地址
 

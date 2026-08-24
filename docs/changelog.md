@@ -4,6 +4,62 @@
 
 ---
 
+## 2026-08-24 — 模型接入开放化：多供应商架构 + 接入 Ox Alpha
+
+### 新增
+- **供应商适配层** `src/lib/providers/`
+  - `types.ts`：共享类型（ChatMessage / ChatContentPart / ThinkingOptions / ProviderConfig / ThinkingStyle）
+  - `openai.ts`：通用 OpenAI 兼容流式调用（baseURL / key / 模型名参数化，SSE 解析兼容 reasoning_content 与 reasoning），`ProviderError`
+  - `index.ts`：供应商登记表（deepseek / openrouter）+ 统一 `streamChat(modelId, ...)` 入口
+- **供应商 OpenRouter**：接入 `stealth/ox-alpha`（Ox Alpha，OpenAI 兼容、支持看图、当前免费窗口期）
+
+### 修改
+- **models.ts 模型与供应商解耦**：`ModelMeta` 新增 `provider` / `providerModel`，模型 id 不再兼任 API 模型名；新增 ox-alpha 条目（supportsVision=true、supportsThinking=false）
+- **route.ts**：改用统一 `streamChat(modelId, history, thinking, onDelta)` 入口，报错类改为 `ProviderError`
+- **深度思考彻底解耦**：thinking 状态纯按模型存储（`THINKING_PREFIX + modelId`），与会话无关，新对话/切模型各保持自己偏好
+
+### 删除
+- **src/lib/deepseek.ts**：DeepSeek 直连实现已迁入 providers/，旧文件移除
+
+### 决策记录
+- 采用「轻方案」：手写通用 OpenAI 兼容适配层，不引入 Vercel AI SDK；供应商差异仅是 baseURL / key / 思考参数「方言」
+- 思考参数抽象为「方言」：deepseek 用 `thinking:{type}` + `reasoning_effort`，OpenAI 系用 `reasoning_effort`；各适配器自翻译
+- Ox Alpha 暂不开深度思考（官方思考参数未确认，先当普通模型接），待确认后再补
+
+---
+
+## 2026-08-24 — Agent 对话体验增强：深度思考、图片看图、全局 Toast
+
+### 新增
+- **深度思考开关 + 三档 effort**（low / high / max），由模型 `supportsThinking` 能力驱动显隐
+- **图片看图**：模型 `supportsVision` 能力驱动；上传（≤4 张、单张 5MB）→ 预览 → 发送；后端落盘 `public/uploads/`（库只存路径），历史图片多轮对话读回再喂
+- **全局 Toast** `src/components/toast.tsx`：统一屏幕居中、放大，info / warn / error 三级，3 秒自动消失
+
+### 修改
+- **深度思考与模型解耦**：thinking 改按模型存储（`THINKING_PREFIX + modelId`），不再按会话——flash 开 3 档不影响 pro，新对话也保持各模型偏好
+- **可扩展模型选择器**：基于 models.ts 注册表渲染，切模型自动恢复该模型自己的思考偏好
+- `.gitignore` 追加 `/public/uploads`
+
+---
+
+## 2026-08-24 — AI Agent 落地真实对话：DeepSeek + SQLite + 会话管理
+
+### 新增
+- **DeepSeek 对话接入**：`/agent` 从 UI mock 落地为真实对话，SSE 流式输出（`delta` / `reasoning` / `error` / `done`）
+- **SQLite 持久化** `src/lib/db.ts`：sessions / messages 表，消息含 content / images / reasoning
+- **会话管理 API**：`GET|POST /api/sessions`、`GET /api/sessions/[id]`、`PATCH`（重命名）、`DELETE`
+- **对话 API** `POST /api/chat`：接消息 → 落库 → 组装上下文（滑动窗口 20 轮）→ 流式调模型 → 落库回复 → 首条消息自动生成标题
+
+### 修改
+- **前端交互**：会话列表/新建/删除/重命名（自绘弹窗替代原生 alert）、恢复上次会话、消息气泡、思考过程折叠
+- **上下文滑动窗口**：按轮裁最近 20 轮（40 条），控制 token
+
+### 决策记录
+- 图片「base64 直传 + 文件落 public/uploads + 库只存路径」，图片本体不入 SQLite
+- 标题生成 v1 取首条用户消息截断（后续可升级智能摘要）
+
+---
+
 ## 2026-08-24 — 删除 roadmap.md，文档瘦身
 
 ### 删除

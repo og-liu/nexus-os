@@ -41,10 +41,13 @@ src/
 │   │
 │   ├── tools/page.tsx      # 工具中心页面：客户端交互，59 个工具，搜索 + 分类筛选 + 三档响应式（宽屏内联/窄屏下拉/手机折叠）
 │   ├── files/page.tsx      # 文件管理页面（占位，待开发）
-│   ├── agent/page.tsx      # AI Agent 页面：对话 UI mock（消息流+任务卡片+语音/图片输入），左侧会话栏对齐知识页
+│   ├── agent/page.tsx      # AI Agent 页面：真实对话（多模型+流式输出+深度思考+图片看图+语音输入），左侧会话栏对齐知识页
 │   ├── knowledge/page.tsx  # 知识库页面：7 个 section（知识流/我的文章/收件箱/回收站/订阅源/自测/回顾），纯前端 mock 全交互
 │   ├── automation/page.tsx # 自动化页面（占位，待开发）
-│   └── settings/page.tsx   # 设置页面：AI 模型配置、工具目录等（框架已搭建，功能待开发）
+│   ├── settings/page.tsx   # 设置页面：AI 模型配置、工具目录等（框架已搭建，功能待开发）
+│   └── api/                # API 路由（Next.js Route Handlers）
+│       ├── chat/route.ts   # AI 对话：POST 接消息→落库→组装上下文→流式调模型→落库回复
+│       └── sessions/       # 会话管理：列表/新建、历史/重命名/删除
 │
 ├── components/             # React 组件
 │   ├── ui/                 # shadcn/ui 基础组件（代码直接复制到项目中，完全可控）
@@ -61,7 +64,8 @@ src/
 │   ├── sidebar.tsx         # 侧边导航栏：路由导航 + 涟漪点击效果，桌面 hidden lg:flex / 移动抽屉，导航顺序总览/Agent/知识/工具/文件/自动/设置
 │   ├── page-header.tsx     # 页面头部组件：吸顶 h-16，手机汉堡+短标题 / 桌面完整标题，右侧操作区插槽
 │   ├── footer.tsx          # 页脚组件：版权信息 + ICP/公安备案链接，移动端竖排/桌面横排
-│   └── logo-icon.tsx       # Logo SVG 图标组件（内联 SVG，Nexus 字母造型）
+│   ├── logo-icon.tsx       # Logo SVG 图标组件（内联 SVG，Nexus 字母造型）
+│   └── toast.tsx           # 全局提示组件：统一屏幕居中、放大，info/warn/error 三级，3 秒自动消失
 │
 ├── fonts/                  # 本地字体文件
 │   ├── NotoSansSC-Variable.ttf  # 思源黑体可变字体（中文正文）
@@ -71,7 +75,13 @@ src/
 │   └── lunar-javascript.d.ts  # lunar-javascript 库的类型补充声明
 │
 └── lib/
-    └── utils.ts            # 工具函数：cn() — 合并 clsx + tailwind-merge 的类名处理
+    ├── utils.ts            # 工具函数：cn() — 合并 clsx + tailwind-merge 的类名处理
+    ├── models.ts           # 模型注册表：模型元信息（id/供应商/能力），前端选择器与后端白名单共用
+    ├── db.ts               # SQLite 访问：getDb() 连接，sessions/messages 表操作
+    └── providers/          # 供应商适配层（模型接入开放化核心）
+        ├── types.ts        # 共享类型：ChatMessage/ChatContentPart/ThinkingOptions/ProviderConfig
+        ├── openai.ts       # 通用 OpenAI 兼容流式调用（baseURL/key/模型名可配置、SSE 解析）
+        └── index.ts        # 供应商登记表（deepseek/openrouter）+ 统一 streamChat 入口
 ```
 
 ## docs/ — 项目文档
@@ -92,7 +102,7 @@ docs/
 | 页面 | 路由 | 状态 |
 |------|------|------|
 | 首页 Dashboard | `/` | ✅ 已完成（问候/时钟/农历/年度进度、每日一句、KPI、快捷工具、最近活动、自动化任务、最新文章、AI Agent、音乐播放器、便签、待办） |
-| AI Agent | `/agent` | 🟡 UI mock 已完成（对话消息流、任务卡片、语音/图片输入、左侧会话栏；无真实模型/工具调用） |
+| AI Agent | `/agent` | ✅ 真实对话已实现（多模型切换、流式输出、深度思考、图片看图、SQLite 会话持久化；意图理解/工具调用待开发） |
 | 知识库 | `/knowledge` | 🟡 UI mock 已完成（知识流/我的文章/收件箱/回收站/订阅源/自测闪卡选择题/回顾统计，全前端交互；无真实存储/AI 加工/检索） |
 | 工具中心 | `/tools` | ✅ 页面已完成（59 个工具卡片、搜索 + 分类筛选、三档响应式；工具均为 mock 无实际执行） |
 | 文件管理 | `/files` | 🔲 占位 |
