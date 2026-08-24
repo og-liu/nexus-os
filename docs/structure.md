@@ -77,6 +77,7 @@ src/
 
 ```
 docs/
+├── product-vision.md       # 产品总纲：定位、理念、模块能力地图、产品阶段路线（唯一产品真相源）
 ├── architecture.md         # 系统架构设计：分层架构、模块划分、数据流
 ├── agent-design.md         # AI Agent 设计：意图理解、任务规划、工具调用
 ├── interfaces.md           # 接口设计：RESTful API、WebSocket、插件 SDK 接口
