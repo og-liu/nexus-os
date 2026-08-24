@@ -1,6 +1,6 @@
 "use client";
 
-import { createContext, useCallback, useContext, useState } from "react";
+import { createContext, useCallback, useContext, useEffect, useState } from "react";
 import type { ReactNode } from "react";
 import { Sidebar } from "@/components/sidebar";
 import { Footer } from "@/components/footer";
@@ -19,6 +19,16 @@ export function AppShell({ children }: { children: ReactNode }) {
   const [navOpen, setNavOpen] = useState(false);
   const openNav = useCallback(() => setNavOpen(true), []);
   const closeNav = useCallback(() => setNavOpen(false), []);
+
+  // 抽屉打开时锁定背景滚动，关闭后恢复
+  useEffect(() => {
+    if (!navOpen) return;
+    const original = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => {
+      document.body.style.overflow = original;
+    };
+  }, [navOpen]);
 
   return (
     <AppShellContext.Provider value={{ openNav }}>

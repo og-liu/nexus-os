@@ -30,7 +30,7 @@ export function PageHeader({
         <button
           aria-label="打开菜单"
           onClick={openNav}
-          className="flex h-9 w-9 shrink-0 items-center justify-center rounded-[2px] text-[#1F1F1F] transition-colors hover:bg-[#ECECEC] md:hidden"
+          className="flex h-10 w-10 shrink-0 items-center justify-center rounded-[2px] text-[#1F1F1F] transition-colors hover:bg-[#ECECEC] md:hidden"
         >
           <Menu className="h-5 w-5" />
         </button>
