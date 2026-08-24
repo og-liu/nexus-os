@@ -45,3 +45,5 @@ next-env.d.ts
 
 # Qoder
 .qoder/
+# local database（SQLite 数据，含用户聊天记录，不进 Git）
+/data

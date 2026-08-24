@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   Plus,
   Send,
@@ -11,6 +11,7 @@ import {
   Clock3,
   ImageIcon,
   Mic,
+  Trash2,
   X,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -50,101 +51,20 @@ interface SpeechRecognitionLike {
   abort: () => void;
 }
 
-// ---------- Mock 数据 ----------
+// ---------- 类型 ----------
 
 interface Message {
+  id: string;
   role: "user" | "assistant";
   content: string;
   images?: string[];
 }
 
-interface Chat {
+interface SessionMeta {
   id: string;
   title: string;
-  updatedAt: string;
-  preview: string;
-  messages: Message[];
+  updated_at: number;
 }
-
-const initialChats: Chat[] = [
-  {
-    id: "chat-1",
-    title: "整理本周技术文章",
-    updatedAt: "刚刚",
-    preview: "已存入知识库「AI Agent」分类",
-    messages: [
-      {
-        role: "user",
-        content: "帮我把这周收藏的技术文章整理一下，筛选出值得精读的。",
-      },
-      {
-        role: "assistant",
-        content:
-          "好，我扫描了你本周收藏的 23 篇文章，按主题相关度和信息密度筛出 6 篇：\n\n1. Agent 记忆系统的三种设计模式\n2. RAG 检索优化的实战清单\n3. 工具调用（Tool Use）的失败兜底策略\n4. 多 Agent 协作的通信成本分析\n5. 本地知识库的增量索引方案\n6. 从 Chatbot 到 Agent：交互范式迁移\n\n建议优先读 1 和 4，和你当前的学习路线最贴。",
-      },
-      {
-        role: "user",
-        content: "第 1 篇和第 4 篇最相关，帮我存进知识库。",
-      },
-      {
-        role: "assistant",
-        content:
-          "已存入知识库「AI Agent」分类，并生成摘要卡片。稍后可以在知识页查看和复习。",
-      },
-    ],
-  },
-  {
-    id: "chat-2",
-    title: "生成项目周报草稿",
-    updatedAt: "2 小时前",
-    preview: "周报草稿已生成，共 3 个板块",
-    messages: [
-      {
-        role: "user",
-        content: "根据我本周的提交记录和任务看板，生成周报草稿。",
-      },
-      {
-        role: "assistant",
-        content:
-          "周报草稿已生成，共 3 个板块：本周进展（5 项）、风险与阻塞（1 项）、下周计划（4 项）。已同步到你的草稿箱，确认后可直接发送。",
-      },
-    ],
-  },
-  {
-    id: "chat-3",
-    title: "翻译 API 文档片段",
-    updatedAt: "昨天",
-    preview: "术语表已同步更新",
-    messages: [
-      {
-        role: "user",
-        content: "把这段 API 文档翻译成中文，注意保留代码示例。",
-      },
-      {
-        role: "assistant",
-        content:
-          "翻译完成。代码示例原样保留，接口术语按你的术语表统一（如 stream → 流式响应）。术语表已同步更新 2 个新词条。",
-      },
-    ],
-  },
-  {
-    id: "chat-4",
-    title: "分析下载文件夹占用",
-    updatedAt: "3 天前",
-    preview: "已生成清理建议清单",
-    messages: [
-      {
-        role: "user",
-        content: "分析一下我的下载文件夹，哪些文件可以清理？",
-      },
-      {
-        role: "assistant",
-        content:
-          "扫描完成：共 4.2 GB，其中 2.8 GB（67%）可安全清理——重复安装包 21 个、超过 90 天未访问的压缩包 14 个、临时截图 36 张。已生成清理建议清单，确认后可自动执行。",
-      },
-    ],
-  },
-];
 
 interface AgentTask {
   id: number;
@@ -178,25 +98,98 @@ const tasks: AgentTask[] = [
   },
 ];
 
+function formatRelativeTime(ts: number): string {
+  const diff = Date.now() - ts;
+  const min = 60 * 1000;
+  const hour = 60 * min;
+  const day = 24 * hour;
+  if (diff < min) return "刚刚";
+  if (diff < hour) return `${Math.floor(diff / min)} 分钟前`;
+  if (diff < day) return `${Math.floor(diff / hour)} 小时前`;
+  if (diff < 2 * day) return "昨天";
+  const d = new Date(ts);
+  return `${d.getMonth() + 1}/${d.getDate()}`;
+}
+
 // ---------- 页面 ----------
 
 export default function AgentPage() {
-  const [chats, setChats] = useState<Chat[]>(initialChats);
-  const [activeChatId, setActiveChatId] = useState("chat-1");
+  const [chats, setChats] = useState<SessionMeta[]>([]);
+  const [activeChatId, setActiveChatId] = useState<string | null>(null);
+  const [messages, setMessages] = useState<Message[]>([]);
+  const [isLoading, setIsLoading] = useState(false);
   // 手机端视图切换：list=会话列表，chat=对话。md 及以上双栏常驻，不受此影响
   const [mobileView, setMobileView] = useState<"list" | "chat">("list");
   const [inputValue, setInputValue] = useState("");
   // 待发送图片（objectURL 列表）
   const [pendingImages, setPendingImages] = useState<string[]>([]);
   const [isListening, setIsListening] = useState(false);
-  const [voiceHint, setVoiceHint] = useState("");
+  const [hint, setHint] = useState("");
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const recognitionRef = useRef<SpeechRecognitionLike | null>(null);
-  // 开始录音时输入框已有的文字，识别结果在其后追加
   const baseTextRef = useRef("");
+  const messagesEndRef = useRef<HTMLDivElement>(null);
 
   const activeChat = chats.find((c) => c.id === activeChatId);
+
+  const showHint = (text: string) => {
+    setHint(text);
+    window.setTimeout(() => setHint(""), 3000);
+  };
+
+  // ---------- 会话加载 ----------
+
+  const loadSessions = useCallback(async () => {
+    const res = await fetch("/api/sessions");
+    const data = (await res.json()) as { sessions?: SessionMeta[] };
+    setChats(data.sessions ?? []);
+  }, []);
+
+  const selectChat = async (id: string) => {
+    setActiveChatId(id);
+    setMobileView("chat");
+    const res = await fetch(`/api/sessions/${id}`);
+    const data = (await res.json()) as {
+      messages?: Array<{
+        id: string;
+        role: "user" | "assistant";
+        content: string;
+      }>;
+    };
+    setMessages(
+      (data.messages ?? []).map((m) => ({
+        id: m.id,
+        role: m.role,
+        content: m.content,
+      })),
+    );
+  };
+
+  const newChat = () => {
+    setActiveChatId(null);
+    setMessages([]);
+    setMobileView("chat");
+  };
+
+  const deleteChat = async (id: string) => {
+    if (!window.confirm("确定删除这个会话吗？删除后无法恢复。")) return;
+    await fetch(`/api/sessions/${id}`, { method: "DELETE" });
+    if (activeChatId === id) {
+      setActiveChatId(null);
+      setMessages([]);
+    }
+    await loadSessions();
+  };
+
+  useEffect(() => {
+    loadSessions();
+  }, [loadSessions]);
+
+  // 消息变化时滚到底部
+  useEffect(() => {
+    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [messages]);
 
   // 组件卸载时停止录音
   useEffect(() => {
@@ -204,11 +197,6 @@ export default function AgentPage() {
       recognitionRef.current?.abort();
     };
   }, []);
-
-  const showVoiceHint = (text: string) => {
-    setVoiceHint(text);
-    window.setTimeout(() => setVoiceHint(""), 3000);
-  };
 
   // ---------- 语音输入（Web Speech API） ----------
 
@@ -223,7 +211,7 @@ export default function AgentPage() {
       (window as unknown as Record<string, unknown>)
         .webkitSpeechRecognition;
     if (!Ctor) {
-      showVoiceHint("当前浏览器不支持语音输入，建议使用 Chrome 或 Edge");
+      showHint("当前浏览器不支持语音输入，建议使用 Chrome 或 Edge");
       return;
     }
     const recognition = new (Ctor as new () => SpeechRecognitionLike)();
@@ -244,7 +232,6 @@ export default function AgentPage() {
         }
       }
       const base = baseTextRef.current;
-      // 已定稿文字追加进基准，避免重复
       if (finalText) baseTextRef.current = base + finalText;
       setInputValue(baseTextRef.current + interimText);
     };
@@ -253,7 +240,7 @@ export default function AgentPage() {
       recognitionRef.current = null;
     };
     recognition.onerror = () => {
-      showVoiceHint("语音识别失败，请检查麦克风权限后重试");
+      showHint("语音识别失败，请检查麦克风权限后重试");
       setIsListening(false);
       recognitionRef.current = null;
     };
@@ -263,7 +250,7 @@ export default function AgentPage() {
       recognitionRef.current = recognition;
       setIsListening(true);
     } catch {
-      showVoiceHint("语音识别启动失败，请重试");
+      showHint("语音识别启动失败，请重试");
     }
   };
 
@@ -275,7 +262,6 @@ export default function AgentPage() {
       .filter((f) => f.type.startsWith("image/"))
       .map((f) => URL.createObjectURL(f));
     setPendingImages((prev) => [...prev, ...urls]);
-    // 重置 file input，保证再次选择同一文件也能触发
     if (fileInputRef.current) fileInputRef.current.value = "";
   };
 
@@ -286,36 +272,114 @@ export default function AgentPage() {
 
   // ---------- 发送 ----------
 
-  const handleSend = () => {
+  const handleSend = async () => {
     const text = inputValue.trim();
-    if ((!text && pendingImages.length === 0) || !activeChat) return;
+    if (!text) {
+      if (pendingImages.length > 0) {
+        showHint("目前仅支持文字消息，图片识别能力后续开放");
+      }
+      return;
+    }
+
     const images = pendingImages.length > 0 ? pendingImages : undefined;
     setInputValue("");
     setPendingImages([]);
-    const reply = images
-      ? `（演示模式）已收到${images.length > 1 ? ` ${images.length} 张图片` : "图片"}${
-          text ? "和你的消息" : ""
-        }，Agent 接入后将识别图片内容并返回真实响应。`
-      : "（演示模式）Agent 接入后，这里会返回真实响应。";
-    setChats((prev) =>
-      prev.map((c) =>
-        c.id === activeChatId
-          ? {
-              ...c,
-              updatedAt: "刚刚",
-              preview: text || "[图片]",
-              messages: [
-                ...c.messages,
-                { role: "user", content: text, images },
-                { role: "assistant", content: reply },
-              ],
+
+    // 本地先 push 用户消息 + 空白的助手占位消息
+    const userMsg: Message = {
+      id: `tmp-u-${Date.now()}`,
+      role: "user",
+      content: text,
+      images,
+    };
+    const assistantMsgId = `tmp-a-${Date.now()}`;
+    setMessages((prev) => [
+      ...prev,
+      userMsg,
+      { id: assistantMsgId, role: "assistant", content: "" },
+    ]);
+    setIsLoading(true);
+
+    let finalSessionId = activeChatId;
+    let finalTitle = activeChat?.title ?? "新会话";
+
+    try {
+      const res = await fetch("/api/chat", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ content: text, sessionId: activeChatId }),
+      });
+
+      if (!res.ok || !res.body) {
+        throw new Error(`请求失败：${res.status}`);
+      }
+
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split("\n");
+        buffer = lines.pop() ?? "";
+
+        for (const line of lines) {
+          const trimmed = line.trim();
+          if (!trimmed.startsWith("data:")) continue;
+          const payload = trimmed.slice(5).trim();
+          try {
+            const obj = JSON.parse(payload) as {
+              type: "delta" | "error" | "done";
+              content?: string;
+              message?: string;
+              sessionId?: string;
+              title?: string;
+            };
+            if (obj.type === "delta" && obj.content) {
+              setMessages((prev) =>
+                prev.map((m) =>
+                  m.id === assistantMsgId
+                    ? { ...m, content: m.content + obj.content }
+                    : m,
+                ),
+              );
+            } else if (obj.type === "error") {
+              setMessages((prev) =>
+                prev.map((m) =>
+                  m.id === assistantMsgId
+                    ? { ...m, content: obj.message ?? "出错了，请重试" }
+                    : m,
+                ),
+              );
+            } else if (obj.type === "done") {
+              if (obj.sessionId) finalSessionId = obj.sessionId;
+              if (obj.title) finalTitle = obj.title;
             }
-          : c,
-      ),
-    );
+          } catch {
+            // 忽略无法解析的行
+          }
+        }
+      }
+
+      if (finalSessionId) setActiveChatId(finalSessionId);
+      await loadSessions();
+    } catch {
+      setMessages((prev) =>
+        prev.map((m) =>
+          m.id === assistantMsgId
+            ? { ...m, content: "网络错误，请稍后重试" }
+            : m,
+        ),
+      );
+      showHint(`发送失败，请检查服务是否启动并已填写 DEEPSEEK_API_KEY`);
+    } finally {
+      setIsLoading(false);
+    }
   };
 
-  const canSend = inputValue.trim().length > 0 || pendingImages.length > 0;
+  const canSend = inputValue.trim().length > 0;
 
   return (
     <>
@@ -335,7 +399,10 @@ export default function AgentPage() {
         >
           {/* 新对话 */}
           <div className="p-3">
-            <button className="flex w-full items-center justify-center gap-2 rounded-[2px] bg-[#000000] px-3 py-2.5 text-sm font-medium text-white transition-opacity hover:opacity-85">
+            <button
+              onClick={newChat}
+              className="flex w-full items-center justify-center gap-2 rounded-[2px] bg-[#000000] px-3 py-2.5 text-sm font-medium text-white transition-opacity hover:opacity-85"
+            >
               <Plus className="h-4 w-4" />
               新对话
             </button>
@@ -343,30 +410,41 @@ export default function AgentPage() {
 
           {/* 会话列表 */}
           <nav className="flex-1 space-y-0.5 px-3">
+            {chats.length === 0 && (
+              <p className="px-3 py-4 text-center text-xs text-[#A0A8B4]">
+                还没有会话，点击上方「新对话」开始
+              </p>
+            )}
             {chats.map((chat) => (
-              <button
+              <div
                 key={chat.id}
-                onClick={() => {
-                  setActiveChatId(chat.id);
-                  setMobileView("chat");
-                }}
+                onClick={() => selectChat(chat.id)}
                 className={cn(
-                  "flex w-full flex-col gap-0.5 rounded-[2px] px-3 py-2.5 text-left transition-colors",
+                  "group flex w-full cursor-pointer flex-col gap-0.5 rounded-[2px] px-3 py-2.5 text-left transition-colors",
                   activeChatId === chat.id
                     ? "bg-[#d5e3f6]"
                     : "hover:bg-[#ededed]",
                 )}
               >
-                <span className="truncate text-sm font-medium text-black">
-                  {chat.title}
-                </span>
-                <span className="flex items-center gap-1.5 text-xs text-[#8A8A8A]">
-                  <span className="truncate">{chat.preview}</span>
-                  <span className="shrink-0 text-[#A0A8B4]">
-                    {chat.updatedAt}
+                <div className="flex w-full items-center justify-between gap-2">
+                  <span className="truncate text-sm font-medium text-black">
+                    {chat.title}
                   </span>
+                  <button
+                    aria-label="删除会话"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      deleteChat(chat.id);
+                    }}
+                    className="hidden h-5 w-5 shrink-0 items-center justify-center rounded-[2px] text-[#A0A8B4] transition-colors hover:text-[#000000] group-hover:flex"
+                  >
+                    <Trash2 className="h-3.5 w-3.5" />
+                  </button>
+                </div>
+                <span className="text-xs text-[#8A8A8A]">
+                  {formatRelativeTime(chat.updated_at)}
                 </span>
-              </button>
+              </div>
             ))}
           </nav>
 
@@ -436,56 +514,74 @@ export default function AgentPage() {
               <ArrowLeft className="h-5 w-5" />
             </button>
             <span className="truncate text-sm font-medium text-black">
-              {activeChat?.title}
+              {activeChat?.title ?? "新会话"}
             </span>
           </div>
 
           {/* 消息流 */}
           <div className="flex-1 overflow-y-auto px-4 py-4 md:px-6 md:py-6">
-            <div className="flex flex-col gap-5">
-              {activeChat?.messages.map((msg, i) =>
-                msg.role === "assistant" ? (
-                  <div key={i} className="flex items-start gap-2.5">
-                    <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-[2px] bg-[#000000]">
-                      <Bot className="h-4.5 w-4.5 text-white" />
-                    </div>
-                    <div className="rounded-[2px] bg-white px-4 py-3 text-sm leading-relaxed text-[#1F1F1F]">
-                      {msg.content}
-                    </div>
-                  </div>
-                ) : (
-                  <div key={i} className="flex flex-col items-end gap-1.5">
-                    {msg.images && msg.images.length > 0 && (
-                      <div className="flex max-w-[85%] flex-wrap justify-end gap-1.5 md:max-w-[70%]">
-                        {msg.images.map((src, j) => (
-                          // eslint-disable-next-line @next/next/no-img-element
-                          <img
-                            key={j}
-                            src={src}
-                            alt="用户上传的图片"
-                            className="h-28 w-28 rounded-[2px] object-cover"
-                          />
-                        ))}
+            {messages.length === 0 ? (
+              // 默认新会话空界面
+              <div className="flex h-full flex-col items-center justify-center gap-3 text-center">
+                <div className="flex h-12 w-12 items-center justify-center rounded-[2px] bg-[#000000]">
+                  <Bot className="h-6 w-6 text-white" />
+                </div>
+                <p className="text-sm font-medium text-[#1F1F1F]">
+                  开始和 Agent 对话吧
+                </p>
+                <p className="max-w-xs text-xs leading-relaxed text-[#A0A8B4]">
+                  问它任何问题，它会记住当前对话的上下文，并随着对话推进持续回答。
+                </p>
+              </div>
+            ) : (
+              <div className="flex flex-col gap-5">
+                {messages.map((msg, i) =>
+                  msg.role === "assistant" ? (
+                    <div key={i} className="flex items-start gap-2.5">
+                      <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-[2px] bg-[#000000]">
+                        <Bot className="h-4.5 w-4.5 text-white" />
                       </div>
-                    )}
-                    {msg.content && (
-                      <div className="max-w-[85%] rounded-[2px] bg-[#000000] px-4 py-3 text-sm leading-relaxed text-white md:max-w-[70%]">
-                        {msg.content}
+                      <div className="min-w-0 whitespace-pre-wrap break-words rounded-[2px] bg-white px-4 py-3 text-sm leading-relaxed text-[#1F1F1F]">
+                        {msg.content ? (
+                          msg.content
+                        ) : (
+                          <Loader2 className="h-4 w-4 animate-spin text-[#A0A8B4]" />
+                        )}
                       </div>
-                    )}
-                  </div>
-                ),
-              )}
-            </div>
+                    </div>
+                  ) : (
+                    <div key={i} className="flex flex-col items-end gap-1.5">
+                      {msg.images && msg.images.length > 0 && (
+                        <div className="flex max-w-[85%] flex-wrap justify-end gap-1.5 md:max-w-[70%]">
+                          {msg.images.map((src, j) => (
+                            // eslint-disable-next-line @next/next/no-img-element
+                            <img
+                              key={j}
+                              src={src}
+                              alt="用户上传的图片"
+                              className="h-28 w-28 rounded-[2px] object-cover"
+                            />
+                          ))}
+                        </div>
+                      )}
+                      {msg.content && (
+                        <div className="max-w-[85%] whitespace-pre-wrap break-words rounded-[2px] bg-[#000000] px-4 py-3 text-sm leading-relaxed text-white md:max-w-[70%]">
+                          {msg.content}
+                        </div>
+                      )}
+                    </div>
+                  ),
+                )}
+                <div ref={messagesEndRef} />
+              </div>
+            )}
           </div>
 
           {/* 输入区 */}
           <div className="shrink-0 border-t border-[#E5E5E5] bg-white p-3 md:p-4">
             <div>
-              {/* 语音提示 */}
-              {voiceHint && (
-                <p className="mb-2 text-xs text-[#8A8A8A]">{voiceHint}</p>
-              )}
+              {/* 提示 */}
+              {hint && <p className="mb-2 text-xs text-[#8A8A8A]">{hint}</p>}
 
               {/* 待发送图片预览 */}
               {pendingImages.length > 0 && (
