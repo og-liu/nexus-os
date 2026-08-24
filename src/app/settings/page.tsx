@@ -10,7 +10,7 @@ import { PageHeader } from "@/components/page-header";
 export default function SettingsPage() {
   return (
     <>
-      <PageHeader description="配置 AI 模型、工具目录、系统偏好等" />
+      <PageHeader title="设置" description="配置 AI 模型、工具目录、系统偏好等" />
       <div className="space-y-6 px-6 py-4">
         {/* Placeholder sections */}
         <div className="space-y-4">

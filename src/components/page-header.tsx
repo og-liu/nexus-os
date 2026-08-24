@@ -6,12 +6,16 @@ import { cn } from "@/lib/utils";
 import { useAppShell } from "@/components/app-shell";
 
 interface PageHeaderProps {
-  description: string;
+  /** 手机端短标题（与侧边栏导航名一致） */
+  title: string;
+  /** PC 端完整标题，不传则两端都显示 title */
+  description?: string;
   children?: ReactNode;
   className?: string;
 }
 
 export function PageHeader({
+  title,
   description,
   children,
   className,
@@ -35,7 +39,9 @@ export function PageHeader({
           <Menu className="h-5 w-5" />
         </button>
         <h1 className="text-base font-semibold leading-tight text-[#000000] md:truncate md:text-xl">
-          {description}
+          {/* 手机端显示短标题，md 及以上显示完整标题 */}
+          <span className="md:hidden">{title}</span>
+          <span className="hidden md:inline">{description ?? title}</span>
         </h1>
       </div>
       {children ? (

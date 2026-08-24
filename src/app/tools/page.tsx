@@ -643,7 +643,7 @@ export default function ToolsPage() {
 
   return (
     <>
-      <PageHeader description="高频使用的小工具集合，将重复性工作变成一键操作">
+      <PageHeader title="工具" description="高频使用的小工具集合，将重复性工作变成一键操作">
         {/* 宽屏：完整胶囊 */}
         <div className="hidden items-center gap-1 rounded-[2px] bg-[#ECECEC] px-2 py-1.5 xl:flex">
           <div className="relative">
@@ -676,8 +676,8 @@ export default function ToolsPage() {
           </div>
         </div>
 
-        {/* 窄屏：搜索收成图标，分类收成下拉 */}
-        <div className="flex items-center gap-1 rounded-[2px] bg-[#ECECEC] px-2 py-1.5 xl:hidden">
+        {/* 窄屏 PC（md~xl）：搜索收成图标，分类收成下拉 */}
+        <div className="hidden items-center gap-1 rounded-[2px] bg-[#ECECEC] px-2 py-1.5 md:flex xl:hidden">
           {searchOpen && (
             <div className="relative">
               <Search className="absolute left-3.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-[#999999]" />
@@ -733,7 +733,60 @@ export default function ToolsPage() {
             </DropdownMenuContent>
           </DropdownMenu>
         </div>
+
+        {/* 手机端（<md）：仅搜索图标；分类用内容区 chips 横滑条 */}
+        <div className="flex items-center gap-1 md:hidden">
+          <button
+            aria-label={searchOpen ? "关闭搜索" : "打开搜索"}
+            onClick={() => {
+              if (searchOpen) setSearchQuery("");
+              setSearchOpen(!searchOpen);
+            }}
+            className="flex h-9 w-9 items-center justify-center rounded-[2px] text-[#666666] transition-colors hover:bg-[#ECECEC] hover:text-[#000000]"
+          >
+            {searchOpen ? (
+              <X className="h-4 w-4" />
+            ) : (
+              <Search className="h-4 w-4" />
+            )}
+          </button>
+        </div>
       </PageHeader>
+
+      {/* 手机端（<md）：搜索条（点开时出现）+ 分类 chips 横滑条 */}
+      <div className="space-y-3 px-4 pt-4 md:hidden">
+        {searchOpen && (
+          <div className="relative">
+            <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-[#999999]" />
+            <input
+              autoFocus
+              type="text"
+              placeholder="搜索工具"
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              className="h-10 w-full rounded-[2px] border border-[#E5E5E5] bg-white pl-9 pr-3 text-sm text-[#000000] placeholder:text-[#999999] outline-none"
+            />
+          </div>
+        )}
+        <div className="-mx-4 overflow-x-auto px-4 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+          <div className="flex w-max items-center gap-1.5">
+            {categories.map((category) => (
+              <button
+                key={category}
+                onClick={() => setSelectedCategory(category)}
+                className={`whitespace-nowrap rounded-full px-3.5 py-1.5 text-xs font-medium transition-all ${
+                  selectedCategory === category
+                    ? "bg-[#000000] text-white"
+                    : "bg-white text-[#8A8A8A] hover:text-[#000000]"
+                }`}
+              >
+                {category}
+              </button>
+            ))}
+          </div>
+        </div>
+      </div>
+
       <div className="space-y-8 px-4 py-4 md:px-6">
 
         {/* Tools grid by category */}
