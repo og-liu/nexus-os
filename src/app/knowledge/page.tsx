@@ -16,6 +16,7 @@ import {
   ArrowLeft,
   Pencil,
   RotateCcw,
+  Database,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { PageHeader } from "@/components/page-header";
@@ -547,13 +548,19 @@ export default function KnowledgePage() {
     key: Section;
     label: string;
     icon: typeof BookOpen;
+    desc: string;
     count?: number;
   }[] = [
-    { key: "feed", label: "知识流", icon: BookOpen },
-    { key: "notes", label: "我的文章", icon: PenLine },
-    { key: "inbox", label: "收件箱", icon: Inbox, count: inbox.length },
-    { key: "trash", label: "回收站", icon: Trash2, count: trash.length },
-    { key: "sources", label: "订阅源", icon: Rss },
+    { key: "feed", label: "知识流", icon: BookOpen, desc: `${feed.length} 条已沉淀` },
+    { key: "notes", label: "我的文章", icon: PenLine, desc: `${notes.length} 篇内容` },
+    { key: "inbox", label: "收件箱", icon: Inbox, desc: "AI 初筛等你拍板", count: inbox.length },
+    { key: "trash", label: "回收站", icon: Trash2, desc: "7 天内可捞回", count: trash.length },
+    {
+      key: "sources",
+      label: "订阅源",
+      icon: Rss,
+      desc: `${sources.filter((s) => s.on).length} 个在运行`,
+    },
   ];
 
   const currentFeed = detail?.type === "feed" ? feed.find((f) => f.id === detail.id) : null;
@@ -1040,12 +1047,13 @@ export default function KnowledgePage() {
         title="知识"
         description="个人知识管理中心，让知识可被 AI 理解和调用"
       >
+        {/* 手机端采集入口（PC 用左栏黑按钮） */}
         <button
           onClick={() => {
             goList();
             setSection("inbox");
           }}
-          className="relative flex h-9 items-center gap-1.5 rounded-[2px] bg-[#000000] px-3 text-xs font-medium text-white transition-opacity hover:opacity-85"
+          className="relative flex h-9 items-center gap-1.5 rounded-[2px] bg-[#000000] px-3 text-xs font-medium text-white transition-opacity hover:opacity-85 md:hidden"
         >
           <Plus className="h-3.5 w-3.5" />
           采集
@@ -1091,9 +1099,27 @@ export default function KnowledgePage() {
           ))}
         </div>
 
-        {/* PC 左栏（md+） */}
-        <aside className="hidden w-[240px] shrink-0 flex-col overflow-y-auto border-r border-[#E5E5E5] bg-[#F5F5F5] md:flex">
-          <nav className="space-y-0.5 p-3">
+        {/* PC 左栏（md+）：与 Agent 页同款结构 */}
+        <aside className="hidden w-[260px] shrink-0 flex-col overflow-y-auto border-r border-[#E5E5E5] bg-[#F5F5F5] md:flex">
+          {/* 采集 */}
+          <div className="p-3">
+            <button
+              onClick={() => {
+                goList();
+                setSection("inbox");
+              }}
+              className="relative flex w-full items-center justify-center gap-2 rounded-[2px] bg-[#000000] px-3 py-2.5 text-sm font-medium text-white transition-opacity hover:opacity-85"
+            >
+              <Plus className="h-4 w-4" />
+              采集内容
+              {inbox.length > 0 && (
+                <span className="absolute right-2.5 top-1/2 h-2 w-2 -translate-y-1/2 rounded-full bg-red-500" />
+              )}
+            </button>
+          </div>
+
+          {/* 区块导航（双行结构，对齐 Agent 会话项） */}
+          <nav className="flex-1 space-y-0.5 px-3">
             {navItems.map((item) => (
               <button
                 key={item.key}
@@ -1102,39 +1128,49 @@ export default function KnowledgePage() {
                   setSection(item.key);
                 }}
                 className={cn(
-                  "flex w-full items-center gap-2.5 rounded-[2px] px-3 py-2.5 text-sm transition-colors",
+                  "flex w-full flex-col gap-0.5 rounded-[2px] px-3 py-2.5 text-left transition-colors",
                   section === item.key
-                    ? "bg-[#d5e3f6] font-medium text-black"
-                    : "text-[#4A4A4A] hover:bg-[#ededed]",
+                    ? "bg-[#d5e3f6]"
+                    : "hover:bg-[#ededed]",
                 )}
               >
-                <item.icon className="h-4 w-4" />
-                {item.label}
-                {item.count !== undefined && item.count > 0 && (
-                  <span className="ml-auto rounded-full bg-[#000000] px-1.5 py-0.5 text-[10px] font-semibold text-white">
-                    {item.count}
-                  </span>
-                )}
+                <span className="flex items-center gap-2 text-sm font-medium text-black">
+                  <item.icon className="h-4 w-4 shrink-0" />
+                  <span className="truncate">{item.label}</span>
+                  {item.count !== undefined && item.count > 0 && (
+                    <span className="ml-auto rounded-full bg-[#000000] px-1.5 py-0.5 text-[10px] font-semibold text-white">
+                      {item.count}
+                    </span>
+                  )}
+                </span>
+                <span className="truncate pl-6 text-xs text-[#8A8A8A]">
+                  {item.desc}
+                </span>
               </button>
             ))}
           </nav>
 
-          <div className="mt-auto p-3">
-            <div className="rounded-[2px] bg-white px-3.5 py-3">
-              <p className="text-xs font-medium text-[#A0A8B4]">知识库</p>
-              <div className="mt-2 space-y-1.5 text-[13px] text-[#4A4A4A]">
-                <p className="flex justify-between">
-                  <span>知识条目</span>
-                  <span className="font-medium text-black">{feed.length}</span>
-                </p>
-                <p className="flex justify-between">
-                  <span>待拍板</span>
-                  <span className="font-medium text-black">{inbox.length}</span>
-                </p>
-                <p className="flex justify-between">
-                  <span>回收站</span>
-                  <span className="font-medium text-black">{trash.length}</span>
-                </p>
+          {/* 知识库统计（对齐 Agent 任务区） */}
+          <div className="border-t border-[#E5E5E5] p-3">
+            <div className="mb-2 flex items-center gap-1.5 px-1 text-xs font-medium text-[#A0A8B4]">
+              <Database className="h-3 w-3" />
+              知识库
+            </div>
+            <div className="space-y-2">
+              <div className="rounded-[2px] bg-white px-3 py-2.5">
+                <div className="flex items-center justify-between gap-2">
+                  <span className="text-[13px] font-medium text-black">
+                    累计条目
+                  </span>
+                  <span className="text-[13px] font-semibold text-black">
+                    {feed.length}
+                  </span>
+                </div>
+                <div className="mt-1.5 flex items-center gap-2 text-[11px] text-[#A0A8B4]">
+                  <span>本周 +12</span>
+                  <span>待拍板 {inbox.length}</span>
+                  <span>回收站 {trash.length}</span>
+                </div>
               </div>
             </div>
           </div>
