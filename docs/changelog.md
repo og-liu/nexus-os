@@ -4,6 +4,16 @@
 
 ---
 
+## 2026-08-24 — 删除 roadmap.md，文档瘦身
+
+### 删除
+- **docs/roadmap.md**：版本路线图文档。产品阶段路线已在 product-vision.md 第七章承载，各模块"待开发"状态在 architecture.md 版本状态段体现，roadmap 内容与二者重复且维护成本高，故移除
+
+### 修改
+- 清理 product-vision.md、architecture.md、agent-design.md、structure.md、README.md 中所有对 roadmap.md 的引用与版本号（v0.2.0~v1.0.0）标注；changelog 历史条目保留原貌不动
+
+---
+
 ## 2026-08-24 — 全站 UI mock 成型与响应式收口
 
 紧接上午产品总纲建立后，下午把原型知识流落进项目，并完成全站样式与响应式收口。Agent 页与知识页均为**纯前端 mock，无真实模型/存储/检索**。

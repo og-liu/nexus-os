@@ -93,4 +93,3 @@ Agent 回复：
 
 - 系统架构：[architecture.md](./architecture.md)
 - 接口设计：[interfaces.md](./interfaces.md)
-- 开发路线：[roadmap.md](./roadmap.md)（v0.4.0 阶段）

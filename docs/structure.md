@@ -82,7 +82,6 @@ docs/
 ├── architecture.md         # 系统架构设计：分层架构、模块划分、数据流
 ├── agent-design.md         # AI Agent 设计：意图理解、任务规划、工具调用
 ├── interfaces.md           # 接口设计：RESTful API、WebSocket、插件 SDK 接口
-├── roadmap.md              # 开发路线图：版本规划与里程碑
 ├── structure.md            # 项目目录结构说明（本文件）
 ├── conventions.md          # 开发规范：配色、组件样式、命名约定等
 └── changelog.md            # 开发日志：按日期记录的变更流水账
