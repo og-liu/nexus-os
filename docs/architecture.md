@@ -153,21 +153,24 @@ UI 更新
 ## 当前版本状态（v0.1.0）
 
 已完成：
-- 项目初始化与技术栈搭建
-- 全局布局（侧边栏 + 主内容区 + 页脚）
-- 公共组件（Sidebar、PageHeader、Footer、LogoIcon）
-- shadcn/ui 基础组件安装
-- 首页 Dashboard（系统概览 + 快捷工具 + 最近活动）
-- 工具中心页面（工具卡片展示）
-- 所有模块路由注册
+- 项目初始化与技术栈搭建（Next.js 16 + React 19 + TS 5 + Tailwind 4 + pnpm）
+- 全局布局（AppShell：桌面常驻侧边栏 + 移动端抽屉 + PageHeader 吸顶 + Footer）
+- 公共组件（Sidebar、AppShell、PageHeader、Footer、LogoIcon）
+- shadcn/ui 基础组件安装（avatar/badge/button/card/dropdown-menu/progress/switch/tabs）
+- 首页 Dashboard（问候时钟、KPI、快捷工具、右栏常驻卡片等）
+- 工具中心页面（59 个工具卡片、搜索筛选、三档响应式）
+- AI Agent 页面 UI mock（对话消息流、任务卡片、语音/图片输入、左侧会话栏）
+- 知识库页面 UI mock（知识流/我的文章/收件箱/回收站/订阅源/自测/回顾 7 个 section，全前端交互）
+- 全站响应式三档断点（移动 <1024 / 窄屏 PC 1024-1279 / 宽屏 ≥1280）
 - 设置页面框架
+- 所有模块路由注册
 
-待开发：
-- 工具实际执行逻辑
-- 文件管理功能
-- AI Agent 对话与工具调用
-- 知识库管理与检索
-- 自动化工作流引擎
-- 插件系统
+待开发（均为真实能力，当前页面为纯 mock）：
+- 工具实际执行逻辑（v0.2.0）
+- 文件管理功能（v0.3.0）
+- AI Agent 模型接入、意图理解与工具调用（v0.4.0）
+- 知识库数据存储、采集、AI 整理与语义检索（v0.5.0）
+- 自动化工作流引擎（v0.6.0）
+- 插件系统（v1.0.0）
 
 详细路线图参见 [roadmap.md](./roadmap.md)。

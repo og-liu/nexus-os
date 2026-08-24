@@ -34,15 +34,15 @@ Nexus OS/
 ```
 src/
 ├── app/                    # Next.js App Router 页面与布局
-│   ├── layout.tsx          # 根布局：侧边栏 + 主内容区 + 页脚，主内容区设最小宽度 900px，全局字体与样式注入
+│   ├── layout.tsx          # 根布局：挂载 AppShell（侧边栏+主内容+页脚），全局字体与样式注入
 │   ├── page.tsx            # 首页 Dashboard：问候/时钟/农历/年度进度、每日一句、KPI 概览、快捷工具、最近活动、自动化任务、最新文章
 │   ├── globals.css         # 全局样式：Tailwind 导入、CSS 变量（shadcn 主题）、自定义动画
 │   ├── icon.svg            # 网站 favicon 图标
 │   │
-│   ├── tools/page.tsx      # 工具中心页面：客户端交互，59 个工具，搜索 + 分类筛选 + 分组展示
+│   ├── tools/page.tsx      # 工具中心页面：客户端交互，59 个工具，搜索 + 分类筛选 + 三档响应式（宽屏内联/窄屏下拉/手机折叠）
 │   ├── files/page.tsx      # 文件管理页面（占位，待开发）
-│   ├── agent/page.tsx      # AI Agent 页面（占位，待开发）
-│   ├── knowledge/page.tsx  # 知识库页面（占位，待开发）
+│   ├── agent/page.tsx      # AI Agent 页面：对话 UI mock（消息流+任务卡片+语音/图片输入），左侧会话栏对齐知识页
+│   ├── knowledge/page.tsx  # 知识库页面：7 个 section（知识流/我的文章/收件箱/回收站/订阅源/自测/回顾），纯前端 mock 全交互
 │   ├── automation/page.tsx # 自动化页面（占位，待开发）
 │   └── settings/page.tsx   # 设置页面：AI 模型配置、工具目录等（框架已搭建，功能待开发）
 │
@@ -57,9 +57,10 @@ src/
 │   │   ├── switch.tsx      # 开关组件
 │   │   └── tabs.tsx        # 标签页组件
 │   │
-│   ├── sidebar.tsx         # 侧边导航栏：路由导航 + 涟漪点击效果
-│   ├── page-header.tsx     # 页面头部组件：统一的页面标题栏（各页面复用），吸顶 + 固定高度 h-16
-│   ├── footer.tsx          # 页脚组件：版权信息 + ICP 备案链接
+│   ├── app-shell.tsx       # 应用外壳：桌面常驻侧边栏 + 移动端抽屉（遮罩+锁背景滚动），整页 h-screen overflow-hidden
+│   ├── sidebar.tsx         # 侧边导航栏：路由导航 + 涟漪点击效果，桌面 hidden lg:flex / 移动抽屉，导航顺序总览/Agent/知识/工具/文件/自动/设置
+│   ├── page-header.tsx     # 页面头部组件：吸顶 h-16，手机汉堡+短标题 / 桌面完整标题，右侧操作区插槽
+│   ├── footer.tsx          # 页脚组件：版权信息 + ICP/公安备案链接，移动端竖排/桌面横排
 │   └── logo-icon.tsx       # Logo SVG 图标组件（内联 SVG，Nexus 字母造型）
 │
 ├── fonts/                  # 本地字体文件
@@ -92,9 +93,9 @@ docs/
 | 页面 | 路由 | 状态 |
 |------|------|------|
 | 首页 Dashboard | `/` | ✅ 已完成（问候/时钟/农历/年度进度、每日一句、KPI、快捷工具、最近活动、自动化任务、最新文章、AI Agent、音乐播放器、便签、待办） |
-| 工具中心 | `/tools` | ✅ 已完成（59 个工具、搜索 + 分类筛选、分组展示） |
+| AI Agent | `/agent` | 🟡 UI mock 已完成（对话消息流、任务卡片、语音/图片输入、左侧会话栏；无真实模型/工具调用） |
+| 知识库 | `/knowledge` | 🟡 UI mock 已完成（知识流/我的文章/收件箱/回收站/订阅源/自测闪卡选择题/回顾统计，全前端交互；无真实存储/AI 加工/检索） |
+| 工具中心 | `/tools` | ✅ 页面已完成（59 个工具卡片、搜索 + 分类筛选、三档响应式；工具均为 mock 无实际执行） |
 | 文件管理 | `/files` | 🔲 占位 |
-| AI Agent | `/agent` | 🔲 占位 |
-| 知识库 | `/knowledge` | 🔲 占位 |
 | 自动化 | `/automation` | 🔲 占位 |
 | 设置 | `/settings` | 🟡 框架已搭建（AI 模型配置 + 工具目录卡片） |

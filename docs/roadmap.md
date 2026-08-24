@@ -6,14 +6,17 @@ Nexus OS 的版本规划与里程碑，记录各阶段的开发重点。
 
 ## v0.1.0 — 基础框架（当前版本）
 
-**目标**：搭建项目骨架，确立技术栈与架构，完成 UI 框架。
+**目标**：搭建项目骨架，确立技术栈与架构，完成全站 UI 框架与核心页面 mock。
 
 - [x] 项目初始化（Next.js 16 + React 19 + TypeScript + pnpm）
-- [x] 全局布局搭建（侧边栏 + 主内容区 + 页脚）
-- [x] 公共组件开发（Sidebar、PageHeader、Footer、LogoIcon）
+- [x] 全局布局搭建（AppShell：桌面常驻侧边栏 + 移动端抽屉 + PageHeader 吸顶 + Footer）
+- [x] 公共组件开发（Sidebar、AppShell、PageHeader、Footer、LogoIcon）
 - [x] shadcn/ui 组件库集成（avatar、badge、button、card、dropdown-menu、progress、switch、tabs）
-- [x] 首页 Dashboard（系统概览、快捷工具入口、最近活动）
-- [x] 工具中心页面（6 个工具卡片展示，状态标注）
+- [x] 首页 Dashboard（系统概览、快捷工具入口、最近活动、右栏常驻卡片）
+- [x] 工具中心页面（59 个工具卡片展示、搜索 + 分类筛选、三档响应式；工具均为 mock）
+- [x] AI Agent 页面 UI mock（对话消息流、任务卡片、语音/图片输入、左侧会话栏；无真实模型调用，能力实现见 v0.4.0）
+- [x] 知识库页面 UI mock（知识流/我的文章/收件箱/回收站/订阅源/自测/回顾 7 个 section 全前端交互；无真实存储与 AI，能力实现见 v0.5.0）
+- [x] 全站响应式三档断点（移动 <1024 抽屉 / 窄屏 PC 1024-1279 / 宽屏 ≥1280）
 - [x] 全部模块路由注册（tools / files / agent / knowledge / automation / settings）
 - [x] 设置页面框架（AI 模型配置 + 工具目录分区）
 - [x] 项目文档体系搭建（docs/ 目录）
