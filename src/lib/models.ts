@@ -56,10 +56,10 @@ export const MODELS: ModelMeta[] = [
     id: "ox-alpha",
     name: "Ox Alpha",
     tag: "免费",
-    desc: "匿名模型 · 1M 上下文 · 支持看图",
+    desc: "匿名模型 · 1M 上下文 · 看图 + 深度思考",
     provider: "openrouter",
     providerModel: "stealth/ox-alpha",
-    supportsThinking: false,
+    supportsThinking: true,
     supportsVision: true,
   },
 ];

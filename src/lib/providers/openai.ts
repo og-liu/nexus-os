@@ -16,6 +16,23 @@ export class ProviderError extends Error {
   }
 }
 
+/** 把上游错误转成给人看的话：429 限流单独友好提示，其余保留原文便于排障 */
+function describeError(
+  provider: ProviderConfig,
+  status: number,
+  raw: string,
+): string {
+  if (status === 429) {
+    return `${provider.name} 暂时被上游限流（已自动重试一次仍未成功）。请稍等几秒再发；若频繁遇到，可考虑接入自己的 Key 或换用其他模型。`;
+  }
+  return `${provider.name} 请求失败（${status}）：${raw}`;
+}
+
+/** 简单延时（429 重试前的退避） */
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 export async function streamChatOpenAI(
   provider: ProviderConfig,
   model: string,
@@ -44,23 +61,40 @@ export async function streamChatOpenAI(
       : { type: "disabled" };
     if (thinking.enabled) body.reasoning_effort = thinking.effort;
   } else {
-    if (thinking.enabled) body.reasoning_effort = thinking.effort;
+    // openai 方言（OpenRouter 等）：用官方 reasoning 对象；effort 只有 low/medium/high 三档
+    if (thinking.enabled) {
+      const effort =
+        thinking.effort === "max"
+          ? "high"
+          : thinking.effort === "high"
+            ? "medium"
+            : "low";
+      body.reasoning = { effort, exclude: false };
+    }
   }
 
-  const res = await fetch(`${provider.baseURL}/chat/completions`, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${apiKey}`,
-    },
-    body: JSON.stringify(body),
-  });
+  const doRequest = () =>
+    fetch(`${provider.baseURL}/chat/completions`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${apiKey}`,
+      },
+      body: JSON.stringify(body),
+    });
+
+  let res = await doRequest();
+
+  // 429 限流：稍等后自动重试一次（上游提示「retry shortly」）
+  if (res.status === 429) {
+    await res.body?.cancel().catch(() => {});
+    await sleep(1500);
+    res = await doRequest();
+  }
 
   if (!res.ok || !res.body) {
     const text = await res.text().catch(() => "");
-    throw new ProviderError(
-      `${provider.name} 请求失败（${res.status}）：${text}`,
-    );
+    throw new ProviderError(describeError(provider, res.status, text));
   }
 
   const reader = res.body.getReader();
