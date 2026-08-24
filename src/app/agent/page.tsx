@@ -329,7 +329,7 @@ export default function AgentPage() {
         {/* 左栏：会话列表 + Agent 任务 */}
         <div
           className={cn(
-            "w-full shrink-0 flex-col overflow-y-auto border-r border-[#E5E5E5] bg-[#F5F5F5] md:flex md:w-[260px]",
+            "w-full shrink-0 flex-col overflow-y-auto border-r border-[#E5E5E5] bg-[#F5F5F5] lg:flex lg:w-[260px]",
             mobileView === "list" ? "flex" : "hidden",
           )}
         >
@@ -422,7 +422,7 @@ export default function AgentPage() {
         {/* 右侧：对话区 */}
         <div
           className={cn(
-            "min-w-0 flex-1 flex-col bg-[#ECECEC] md:flex",
+            "min-w-0 flex-1 flex-col bg-[#ECECEC] lg:flex",
             mobileView === "chat" ? "flex" : "hidden",
           )}
         >
@@ -431,7 +431,7 @@ export default function AgentPage() {
             <button
               aria-label="返回会话列表"
               onClick={() => setMobileView("list")}
-              className="flex h-9 w-9 shrink-0 items-center justify-center rounded-[2px] text-[#666666] transition-colors hover:bg-[#ECECEC] hover:text-[#000000] md:hidden"
+              className="flex h-9 w-9 shrink-0 items-center justify-center rounded-[2px] text-[#666666] transition-colors hover:bg-[#ECECEC] hover:text-[#000000] lg:hidden"
             >
               <ArrowLeft className="h-5 w-5" />
             </button>
@@ -567,7 +567,7 @@ export default function AgentPage() {
                   <Send className="h-4 w-4" />
                 </button>
               </div>
-              <p className="mt-2 hidden text-[11px] text-[#A0A8B4] md:block">
+              <p className="mt-2 hidden text-[11px] text-[#A0A8B4] lg:block">
                 Enter 发送，Shift + Enter 换行
               </p>
             </div>

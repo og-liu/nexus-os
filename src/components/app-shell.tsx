@@ -43,7 +43,7 @@ export function AppShell({ children }: { children: ReactNode }) {
 
       {/* 手机抽屉：仅 md 以下渲染，点击遮罩或导航后关闭 */}
       <div
-        className={`fixed inset-0 z-50 md:hidden ${
+        className={`fixed inset-0 z-50 lg:hidden ${
           navOpen ? "" : "pointer-events-none"
         }`}
       >

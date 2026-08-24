@@ -34,14 +34,14 @@ export function PageHeader({
         <button
           aria-label="打开菜单"
           onClick={openNav}
-          className="flex h-10 w-10 shrink-0 items-center justify-center rounded-[2px] text-[#1F1F1F] transition-colors hover:bg-[#ECECEC] md:hidden"
+          className="flex h-10 w-10 shrink-0 items-center justify-center rounded-[2px] text-[#1F1F1F] transition-colors hover:bg-[#ECECEC] lg:hidden"
         >
           <Menu className="h-5 w-5" />
         </button>
         <h1 className="text-base font-semibold leading-tight text-[#000000] md:truncate md:text-xl">
           {/* 手机端显示短标题，md 及以上显示完整标题 */}
-          <span className="md:hidden">{title}</span>
-          <span className="hidden md:inline">{description ?? title}</span>
+          <span className="lg:hidden">{title}</span>
+          <span className="hidden lg:inline">{description ?? title}</span>
         </h1>
       </div>
       {children ? (

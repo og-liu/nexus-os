@@ -17,6 +17,11 @@ import {
   Pencil,
   RotateCcw,
   Database,
+  ClipboardCheck,
+  History,
+  CheckCircle2,
+  XCircle,
+  RotateCw,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { PageHeader } from "@/components/page-header";
@@ -66,8 +71,61 @@ interface Source {
   on: boolean;
 }
 
-type Section = "feed" | "notes" | "inbox" | "trash" | "sources";
+type Section = "feed" | "notes" | "inbox" | "trash" | "sources" | "quiz" | "review";
 type DetailRef = { type: "feed" | "note"; id: number } | null;
+
+// ---------- 自测 / 回顾 Mock ----------
+
+interface FlashCard {
+  id: number;
+  q: string;
+  a: string;
+}
+
+const flashCards: FlashCard[] = [
+  {
+    id: 1,
+    q: "RAG 的两个核心步骤是什么？",
+    a: "先检索、再生成：先在知识库里搜一遍，命中了用库里的内容回答，没命中才联网。",
+  },
+  {
+    id: 2,
+    q: "一个 Agent 由哪四块组成？",
+    a: "模型 · 工具 · 记忆 · 规划，其中记忆是私有的、跟单个 Agent 走。",
+  },
+  {
+    id: 3,
+    q: "Skill 和工具调用的分工是什么？",
+    a: "Skill 是沉淀下来的流程封装，管复用；工具调用是运行时的能力组合，管灵活，两层配合。",
+  },
+];
+
+interface ChoiceQuestion {
+  id: number;
+  q: string;
+  options: { key: string; text: string; correct?: boolean }[];
+}
+
+const choiceQuestions: ChoiceQuestion[] = [
+  {
+    id: 1,
+    q: "RAG 相比「直接联网 Search」的核心优势是？",
+    options: [
+      { key: "A", text: "基于私有库回答，更相关且省 token", correct: true },
+      { key: "B", text: "总能给出最新新闻" },
+      { key: "C", text: "不需要任何检索" },
+    ],
+  },
+  {
+    id: 2,
+    q: "知识库「保鲜扫描」主要解决什么？",
+    options: [
+      { key: "A", text: "让笔记更好看" },
+      { key: "B", text: "标记过时/失效内容并提示归档", correct: true },
+      { key: "C", text: "自动增加新订阅源" },
+    ],
+  },
+];
 
 // ---------- Mock 数据 ----------
 
@@ -288,6 +346,18 @@ export default function KnowledgePage() {
     okText: string;
     onOk: () => void;
   } | null>(null);
+
+  // 自测
+  const [quizMode, setQuizMode] = useState<"flash" | "choice">("flash");
+  const [flipped, setFlipped] = useState<Record<number, boolean>>({});
+  const [answered, setAnswered] = useState<Record<number, string>>({});
+
+  const toggleFlip = (id: number) =>
+    setFlipped((prev) => ({ ...prev, [id]: !prev[id] }));
+
+  const pickOption = (qid: number, key: string) => {
+    setAnswered((prev) => (prev[qid] ? prev : { ...prev, [qid]: key }));
+  };
 
   const goList = () => {
     setDetail(null);
@@ -544,24 +614,40 @@ export default function KnowledgePage() {
 
   // ----- 导航 -----
 
-  const navItems: {
-    key: Section;
-    label: string;
-    icon: typeof BookOpen;
-    desc: string;
-    count?: number;
+  const navGroups: {
+    label?: string;
+    items: {
+      key: Section;
+      label: string;
+      icon: typeof BookOpen;
+      desc: string;
+      count?: number;
+    }[];
   }[] = [
-    { key: "feed", label: "知识流", icon: BookOpen, desc: `${feed.length} 条已沉淀` },
-    { key: "notes", label: "我的文章", icon: PenLine, desc: `${notes.length} 篇内容` },
-    { key: "inbox", label: "收件箱", icon: Inbox, desc: "AI 初筛等你拍板", count: inbox.length },
-    { key: "trash", label: "回收站", icon: Trash2, desc: "7 天内可捞回", count: trash.length },
     {
-      key: "sources",
-      label: "订阅源",
-      icon: Rss,
-      desc: `${sources.filter((s) => s.on).length} 个在运行`,
+      items: [
+        { key: "feed", label: "知识流", icon: BookOpen, desc: `${feed.length} 条已沉淀` },
+        { key: "notes", label: "我的文章", icon: PenLine, desc: `${notes.length} 篇内容` },
+        { key: "inbox", label: "收件箱", icon: Inbox, desc: "AI 初筛等你拍板", count: inbox.length },
+        { key: "trash", label: "回收站", icon: Trash2, desc: "7 天内可捞回", count: trash.length },
+        {
+          key: "sources",
+          label: "订阅源",
+          icon: Rss,
+          desc: `${sources.filter((s) => s.on).length} 个在运行`,
+        },
+      ],
+    },
+    {
+      label: "学习 & 回顾",
+      items: [
+        { key: "quiz", label: "自测", icon: ClipboardCheck, desc: "闪卡 / 选择题" },
+        { key: "review", label: "回顾", icon: History, desc: "今日与本周沉淀" },
+      ],
     },
   ];
+
+  const navItems = navGroups.flatMap((g) => g.items);
 
   const currentFeed = detail?.type === "feed" ? feed.find((f) => f.id === detail.id) : null;
   const currentNote =
@@ -1036,6 +1122,266 @@ export default function KnowledgePage() {
             </div>
           </div>
         );
+
+      case "quiz":
+        return (
+          <div className="space-y-5">
+            <div>
+              <h2 className="text-lg font-semibold text-black">自测</h2>
+              <p className="mt-1 text-xs text-[#A0A8B4]">
+                拿库内内容出题考你，配遗忘曲线，是学习闭环的关键一环
+              </p>
+            </div>
+
+            <div className="flex gap-2">
+              {(
+                [
+                  { k: "flash", label: "闪卡" },
+                  { k: "choice", label: "选择题" },
+                ] as const
+              ).map((m) => (
+                <button
+                  key={m.k}
+                  onClick={() => setQuizMode(m.k)}
+                  className={cn(
+                    "flex-1 rounded-[2px] py-2.5 text-sm font-medium transition-all",
+                    quizMode === m.k
+                      ? "bg-[#000000] text-white"
+                      : "border border-[#D9D9D9] bg-white text-[#4A4A4A] hover:border-[#000000]",
+                  )}
+                >
+                  {m.label}
+                </button>
+              ))}
+            </div>
+
+            {quizMode === "flash" ? (
+              <div className="grid gap-3 sm:grid-cols-2">
+                {flashCards.map((card) => {
+                  const isFlipped = flipped[card.id];
+                  return (
+                    <div
+                      key={card.id}
+                      onClick={() => toggleFlip(card.id)}
+                      className="relative min-h-[180px] cursor-pointer rounded-[2px] bg-white p-5 transition-shadow hover:shadow-[0_1px_6px_rgba(0,0,0,0.08)]"
+                    >
+                      <p className="text-[11px] tracking-widest text-[#A0A8B4]">
+                        {isFlipped ? "答案" : "闪卡"}
+                      </p>
+                      {isFlipped ? (
+                        <p className="mt-3 text-[15px] leading-7 text-[#2A2A2A]">
+                          <strong className="text-black">
+                            {card.a.split("：")[0]}
+                          </strong>
+                          {card.a.includes("：")
+                            ? `：${card.a.split("：").slice(1).join("：")}`
+                            : ""}
+                        </p>
+                      ) : (
+                        <p className="mt-3 text-[17px] font-semibold leading-relaxed text-black">
+                          {card.q}
+                        </p>
+                      )}
+                      <span className="absolute bottom-3 right-4 flex items-center gap-1 text-xs text-[#A0A8B4]">
+                        <RotateCw className="h-3 w-3" />
+                        {isFlipped ? "点回正面" : "点我翻面"}
+                      </span>
+                    </div>
+                  );
+                })}
+              </div>
+            ) : (
+              <div className="space-y-4">
+                {choiceQuestions.map((q) => {
+                  const picked = answered[q.id];
+                  return (
+                    <div key={q.id} className="rounded-[2px] bg-white p-5">
+                      <p className="text-[15px] font-semibold leading-relaxed text-black">
+                        {q.q}
+                      </p>
+                      <div className="mt-3 space-y-2">
+                        {q.options.map((opt) => {
+                          const isCorrect = opt.correct;
+                          const isPicked = picked === opt.key;
+                          const showResult = !!picked;
+                          return (
+                            <button
+                              key={opt.key}
+                              disabled={showResult}
+                              onClick={() => pickOption(q.id, opt.key)}
+                              className={cn(
+                                "flex w-full items-center gap-3 rounded-[2px] border px-4 py-3 text-left text-sm transition-all",
+                                !showResult &&
+                                  "border-[#E5E5E5] hover:border-[#000000]",
+                                showResult &&
+                                  isCorrect &&
+                                  "border-[#16a34a] bg-[#f0fdf4] text-[#15803d]",
+                                showResult &&
+                                  isPicked &&
+                                  !isCorrect &&
+                                  "border-[#dc2626] bg-[#fef2f2] text-[#b91c1c]",
+                                showResult &&
+                                  !isPicked &&
+                                  !isCorrect &&
+                                  "border-[#EEEEEE] text-[#B0B0B0]",
+                              )}
+                            >
+                              <span
+                                className={cn(
+                                  "flex h-6 w-6 shrink-0 items-center justify-center rounded-[2px] border text-[13px] font-semibold",
+                                  showResult && isCorrect
+                                    ? "border-[#16a34a] bg-[#16a34a] text-white"
+                                    : showResult && isPicked && !isCorrect
+                                      ? "border-[#dc2626] bg-[#dc2626] text-white"
+                                      : "border-[#D9D9D9] text-[#8A8A8A]",
+                                )}
+                              >
+                                {showResult && isCorrect ? (
+                                  <CheckCircle2 className="h-4 w-4" />
+                                ) : showResult && isPicked && !isCorrect ? (
+                                  <XCircle className="h-4 w-4" />
+                                ) : (
+                                  opt.key
+                                )}
+                              </span>
+                              <span className="min-w-0">{opt.text}</span>
+                            </button>
+                          );
+                        })}
+                      </div>
+                      {picked && (
+                        <p
+                          className={cn(
+                            "mt-3 flex items-center gap-1.5 text-xs",
+                            q.options.find((o) => o.key === picked)?.correct
+                              ? "text-[#15803d]"
+                              : "text-[#b91c1c]",
+                          )}
+                        >
+                          {q.options.find((o) => o.key === picked)?.correct ? (
+                            <>
+                              <CheckCircle2 className="h-3.5 w-3.5" />
+                              答对了
+                            </>
+                          ) : (
+                            <>
+                              <XCircle className="h-3.5 w-3.5" />
+                              答错了，正确答案是{" "}
+                              {q.options.find((o) => o.correct)?.key}
+                            </>
+                          )}
+                        </p>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        );
+
+      case "review":
+        return (
+          <div className="space-y-5">
+            <div>
+              <h2 className="text-lg font-semibold text-black">回顾</h2>
+              <p className="mt-1 text-xs text-[#A0A8B4]">
+                AI 主动喂给你：今天干了啥，哪些该复习，一周沉淀了什么
+              </p>
+            </div>
+
+            <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+              {[
+                { num: 8, label: "今日采集" },
+                { num: 5, label: "今日留存" },
+                {
+                  num: trash.length,
+                  label: "今日放弃 →",
+                  jump: () => {
+                    goList();
+                    setSection("trash");
+                  },
+                },
+                {
+                  num: inbox.length,
+                  label: "待你拍板 →",
+                  jump: () => {
+                    goList();
+                    setSection("inbox");
+                  },
+                },
+              ].map((s) => (
+                <button
+                  key={s.label}
+                  onClick={s.jump}
+                  disabled={!s.jump}
+                  className={cn(
+                    "rounded-[2px] bg-white px-4 py-5 text-center transition-shadow",
+                    s.jump &&
+                      "cursor-pointer hover:shadow-[0_1px_6px_rgba(0,0,0,0.08)]",
+                  )}
+                >
+                  <p className="text-2xl font-semibold text-black">{s.num}</p>
+                  <p className="mt-1 text-xs text-[#8A8A8A]">{s.label}</p>
+                </button>
+              ))}
+            </div>
+
+            <div className="rounded-[2px] bg-white px-5 py-4">
+              <h3 className="text-[15px] font-semibold text-black">今日回顾</h3>
+              <ul className="mt-2">
+                {[
+                  { t: "技术晨报 · 08-23 已生成", n: "08:00" },
+                  { t: "建议复习「RAG 是什么」", n: "快到遗忘点" },
+                  { t: "建议复习「智能体四件套」", n: "快到遗忘点" },
+                ].map((li) => (
+                  <li
+                    key={li.t}
+                    className="flex items-center gap-3 border-b border-[#F0F0F0] py-2.5 last:border-0"
+                  >
+                    <span className="min-w-0 flex-1 truncate text-[13.5px] text-[#2A2A2A]">
+                      {li.t}
+                    </span>
+                    <span className="shrink-0 text-xs text-[#A0A8B4]">{li.n}</span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+
+            <div className="rounded-[2px] bg-white px-5 py-4">
+              <h3 className="text-[15px] font-semibold text-black">本周小结</h3>
+              <p className="mt-1 text-xs text-[#A0A8B4]">
+                本周入库 32 条 · 活跃主题分布
+              </p>
+              <div className="mt-3 space-y-2.5">
+                {[
+                  { name: "Agent 开发", count: 14, pct: 44 },
+                  { name: "RAG", count: 7, pct: 22 },
+                  { name: "前端", count: 6, pct: 19 },
+                  { name: "晨报", count: 5, pct: 16 },
+                ].map((topic) => (
+                  <div
+                    key={topic.name}
+                    className="flex items-center gap-3 text-[13px]"
+                  >
+                    <span className="w-20 shrink-0 text-[#4A4A4A]">
+                      {topic.name}
+                    </span>
+                    <span className="h-2 flex-1 overflow-hidden rounded-full bg-[#ECECEC]">
+                      <span
+                        className="block h-full rounded-full bg-[#000000]"
+                        style={{ width: `${topic.pct}%` }}
+                      />
+                    </span>
+                    <span className="w-10 shrink-0 text-right text-xs text-[#8A8A8A]">
+                      {topic.count} 条
+                    </span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+        );
     }
   };
 
@@ -1053,7 +1399,7 @@ export default function KnowledgePage() {
             goList();
             setSection("inbox");
           }}
-          className="relative flex h-9 items-center gap-1.5 rounded-[2px] bg-[#000000] px-3 text-xs font-medium text-white transition-opacity hover:opacity-85 md:hidden"
+          className="relative flex h-9 items-center gap-1.5 rounded-[2px] bg-[#000000] px-3 text-xs font-medium text-white transition-opacity hover:opacity-85 lg:hidden"
         >
           <Plus className="h-3.5 w-3.5" />
           采集
@@ -1066,7 +1412,7 @@ export default function KnowledgePage() {
       {/* 与 Agent 页同款：满高布局，左栏与内容区各自内部滚动 */}
       <div className="flex h-[calc(100%-4rem)]">
         {/* 手机 tab（<md）：横向滑动 */}
-        <div className="fixed inset-x-0 top-16 z-10 flex shrink-0 items-center gap-1.5 overflow-x-auto border-b border-[#E5E5E5] bg-[#F5F5F5] px-4 py-2.5 md:hidden [&::-webkit-scrollbar]:hidden">
+        <div className="fixed inset-x-0 top-16 z-10 flex shrink-0 items-center gap-1.5 overflow-x-auto border-b border-[#E5E5E5] bg-[#F5F5F5] px-4 py-2.5 lg:hidden [&::-webkit-scrollbar]:hidden">
           {navItems.map((item) => (
             <button
               key={item.key}
@@ -1100,7 +1446,7 @@ export default function KnowledgePage() {
         </div>
 
         {/* PC 左栏（md+）：与 Agent 页同款结构 */}
-        <aside className="hidden w-[260px] shrink-0 flex-col overflow-y-auto border-r border-[#E5E5E5] bg-[#F5F5F5] md:flex">
+        <aside className="hidden w-[260px] shrink-0 flex-col overflow-y-auto border-r border-[#E5E5E5] bg-[#F5F5F5] lg:flex">
           {/* 采集 */}
           <div className="p-3">
             <button
@@ -1119,34 +1465,43 @@ export default function KnowledgePage() {
           </div>
 
           {/* 区块导航（双行结构，对齐 Agent 会话项） */}
-          <nav className="flex-1 space-y-0.5 px-3">
-            {navItems.map((item) => (
-              <button
-                key={item.key}
-                onClick={() => {
-                  goList();
-                  setSection(item.key);
-                }}
-                className={cn(
-                  "flex w-full flex-col gap-0.5 rounded-[2px] px-3 py-2.5 text-left transition-colors",
-                  section === item.key
-                    ? "bg-[#d5e3f6]"
-                    : "hover:bg-[#ededed]",
+          <nav className="flex-1 space-y-3 px-3 py-1">
+            {navGroups.map((group, gi) => (
+              <div key={gi} className="space-y-0.5">
+                {group.label && (
+                  <p className="px-3 pb-0.5 pt-1 text-[11px] font-medium text-[#A0A8B4]">
+                    {group.label}
+                  </p>
                 )}
-              >
-                <span className="flex items-center gap-2 text-sm font-medium text-black">
-                  <item.icon className="h-4 w-4 shrink-0" />
-                  <span className="truncate">{item.label}</span>
-                  {item.count !== undefined && item.count > 0 && (
-                    <span className="ml-auto rounded-full bg-[#000000] px-1.5 py-0.5 text-[10px] font-semibold text-white">
-                      {item.count}
+                {group.items.map((item) => (
+                  <button
+                    key={item.key}
+                    onClick={() => {
+                      goList();
+                      setSection(item.key);
+                    }}
+                    className={cn(
+                      "flex w-full flex-col gap-0.5 rounded-[2px] px-3 py-2.5 text-left transition-colors",
+                      section === item.key
+                        ? "bg-[#d5e3f6]"
+                        : "hover:bg-[#ededed]",
+                    )}
+                  >
+                    <span className="flex items-center gap-2 text-sm font-medium text-black">
+                      <item.icon className="h-4 w-4 shrink-0" />
+                      <span className="truncate">{item.label}</span>
+                      {item.count !== undefined && item.count > 0 && (
+                        <span className="ml-auto rounded-full bg-[#000000] px-1.5 py-0.5 text-[10px] font-semibold text-white">
+                          {item.count}
+                        </span>
+                      )}
                     </span>
-                  )}
-                </span>
-                <span className="truncate pl-6 text-xs text-[#8A8A8A]">
-                  {item.desc}
-                </span>
-              </button>
+                    <span className="truncate pl-6 text-xs text-[#8A8A8A]">
+                      {item.desc}
+                    </span>
+                  </button>
+                ))}
+              </div>
             ))}
           </nav>
 

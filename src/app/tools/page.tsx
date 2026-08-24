@@ -677,7 +677,7 @@ export default function ToolsPage() {
         </div>
 
         {/* 窄屏 PC（md~xl）：搜索收成图标，分类收成下拉 */}
-        <div className="hidden items-center gap-1 rounded-[2px] bg-[#ECECEC] px-2 py-1.5 md:flex xl:hidden">
+        <div className="hidden items-center gap-1 rounded-[2px] bg-[#ECECEC] px-2 py-1.5 lg:flex xl:hidden">
           {searchOpen && (
             <div className="relative">
               <Search className="absolute left-3.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-[#999999]" />
@@ -735,7 +735,7 @@ export default function ToolsPage() {
         </div>
 
         {/* 手机端（<md）：仅搜索图标；分类用内容区 chips 横滑条 */}
-        <div className="flex items-center gap-1 md:hidden">
+        <div className="flex items-center gap-1 lg:hidden">
           <button
             aria-label={searchOpen ? "关闭搜索" : "打开搜索"}
             onClick={() => {
@@ -754,7 +754,7 @@ export default function ToolsPage() {
       </PageHeader>
 
       {/* 手机端（<md）：搜索条（点开时出现）+ 分类 chips 横滑条 */}
-      <div className="space-y-3 px-4 pt-4 md:hidden">
+      <div className="space-y-3 px-4 pt-4 lg:hidden">
         {searchOpen && (
           <div className="relative">
             <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-[#999999]" />

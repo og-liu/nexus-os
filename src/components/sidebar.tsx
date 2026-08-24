@@ -109,7 +109,7 @@ export function Sidebar({ variant = "desktop", onNavigate }: SidebarProps) {
 
   // ---------- 桌面常驻版本（原样保留） ----------
   return (
-    <aside className="hidden h-screen w-20 flex-col border-r border-[#E5E5E5] bg-[#F5F5F5] md:flex 2xl:w-56">
+    <aside className="hidden h-screen w-20 flex-col border-r border-[#E5E5E5] bg-[#F5F5F5] lg:flex 2xl:w-56">
       {/* Logo */}
       <div className="flex items-center gap-3 px-5 py-5">
         <div style={{ display: 'flex', margin: '0 auto' }}><LogoIcon className="h-9 w-9 text-black" />
