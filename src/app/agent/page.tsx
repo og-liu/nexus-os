@@ -442,7 +442,7 @@ export default function AgentPage() {
 
           {/* 消息流 */}
           <div className="flex-1 overflow-y-auto px-4 py-4 md:px-6 md:py-6">
-            <div className="mx-auto flex max-w-3xl flex-col gap-5">
+            <div className="flex flex-col gap-5">
               {activeChat?.messages.map((msg, i) =>
                 msg.role === "assistant" ? (
                   <div key={i} className="flex items-start gap-2.5">
@@ -481,7 +481,7 @@ export default function AgentPage() {
 
           {/* 输入区 */}
           <div className="shrink-0 border-t border-[#E5E5E5] bg-white p-3 md:p-4">
-            <div className="mx-auto max-w-3xl">
+            <div>
               {/* 语音提示 */}
               {voiceHint && (
                 <p className="mb-2 text-xs text-[#8A8A8A]">{voiceHint}</p>
