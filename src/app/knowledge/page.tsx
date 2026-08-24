@@ -1126,13 +1126,6 @@ export default function KnowledgePage() {
       case "quiz":
         return (
           <div className="space-y-5">
-            <div>
-              <h2 className="text-lg font-semibold text-black">自测</h2>
-              <p className="mt-1 text-xs text-[#A0A8B4]">
-                拿库内内容出题考你，配遗忘曲线，是学习闭环的关键一环
-              </p>
-            </div>
-
             <div className="flex gap-2">
               {(
                 [
@@ -1283,13 +1276,6 @@ export default function KnowledgePage() {
       case "review":
         return (
           <div className="space-y-5">
-            <div>
-              <h2 className="text-lg font-semibold text-black">回顾</h2>
-              <p className="mt-1 text-xs text-[#A0A8B4]">
-                AI 主动喂给你：今天干了啥，哪些该复习，一周沉淀了什么
-              </p>
-            </div>
-
             <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
               {[
                 { num: 8, label: "今日采集" },
