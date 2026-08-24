@@ -339,7 +339,7 @@ export default function HomePage() {
     <>
       {/* Page Header */}
       <PageHeader description="串联工具、知识与智能，新一代私人专属数字操作系统" />
-      <div className="grid grid-cols-1 gap-4 px-6 py-4 xl:grid-cols-3">
+      <div className="grid grid-cols-1 gap-4 px-4 py-4 md:px-6 xl:grid-cols-3">
         {/* 左列（2/3）：问候时钟+每日一句、KPI、快捷工具、活动+自动化、最新文章 */}
         <div className="space-y-4 xl:col-span-2">
           <div className="flex flex-col gap-4 md:flex-row">

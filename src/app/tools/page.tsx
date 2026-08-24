@@ -734,7 +734,7 @@ export default function ToolsPage() {
           </DropdownMenu>
         </div>
       </PageHeader>
-      <div className="space-y-8 px-6 py-4">
+      <div className="space-y-8 px-4 py-4 md:px-6">
 
         {/* Tools grid by category */}
         {Object.keys(groupedTools).length === 0 ? (

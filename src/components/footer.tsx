@@ -2,8 +2,8 @@ import Link from "next/link";
 
 export function Footer() {
   return (
-    <footer className="bg-[#ECECEC] px-6 py-3">
-      <div className="flex items-center justify-center gap-4 text-xs text-[#A0A8B4]">
+    <footer className="bg-[#ECECEC] px-4 py-3 md:px-6">
+      <div className="flex flex-wrap items-center justify-center gap-x-4 gap-y-1 text-xs text-[#A0A8B4]">
         <span>© {new Date().getFullYear()} Nexus OS</span>
         <Link
           href="https://beian.miit.gov.cn/"

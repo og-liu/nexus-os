@@ -2,8 +2,7 @@ import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import localFont from "next/font/local";
 import "./globals.css";
-import { Sidebar } from "@/components/sidebar";
-import { Footer } from "@/components/footer";
+import { AppShell } from "@/components/app-shell";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -33,22 +32,18 @@ export const metadata: Metadata = {
     "面向个人用户的智能工作空间，整合工具、自动化、知识管理与 AI Agent 能力",
 };
 
-export default function RootLayout({ children }: LayoutProps<"/">) {
+export default function RootLayout({
+  children,
+}: {
+  children: React.ReactNode;
+}) {
   return (
     <html
       lang="zh-CN"
       className={`${sekuya.variable} ${notoSansSC.variable} ${geistSans.variable} ${geistMono.variable} h-full antialiased`}
     >
       <body className="h-full bg-[#F5F7FA]">
-        <div className="flex h-screen overflow-x-auto">
-          <Sidebar />
-          <div className="flex min-w-[900px] flex-1 flex-col overflow-hidden">
-            <main className="flex-1 overflow-y-auto bg-[#ECECEC]">
-              {children}
-            </main>
-            <Footer />
-          </div>
-        </div>
+        <AppShell>{children}</AppShell>
       </body>
     </html>
   );
