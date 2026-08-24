@@ -577,7 +577,7 @@ export default function KnowledgePage() {
   const renderDetail = () => {
     if (currentFeed) {
       return (
-        <div className="mx-auto max-w-3xl">
+        <div className="mx-auto max-w-5xl">
           <button
             onClick={detailBack}
             className="mb-4 flex items-center gap-1.5 text-xs text-[#8A8A8A] transition-colors hover:text-black"
@@ -620,7 +620,7 @@ export default function KnowledgePage() {
 
     if (currentNote) {
       return (
-        <div className="mx-auto max-w-3xl">
+        <div className="mx-auto max-w-5xl">
           <button
             onClick={detailBack}
             className="mb-4 flex items-center gap-1.5 text-xs text-[#8A8A8A] transition-colors hover:text-black"
@@ -750,7 +750,7 @@ export default function KnowledgePage() {
     switch (section) {
       case "feed":
         return (
-          <div className="mx-auto max-w-3xl space-y-4">
+          <div className="mx-auto max-w-5xl space-y-4">
             <div className="relative">
               <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-[#999999]" />
               <input
@@ -805,7 +805,7 @@ export default function KnowledgePage() {
 
       case "notes":
         return (
-          <div className="mx-auto max-w-3xl space-y-4">
+          <div className="mx-auto max-w-5xl space-y-4">
             <div className="flex items-center justify-between px-1">
               <p className="text-xs text-[#A0A8B4]">自己写的文章，可编辑、删除、加入知识流</p>
               <button
@@ -862,7 +862,7 @@ export default function KnowledgePage() {
 
       case "inbox":
         return (
-          <div className="mx-auto max-w-3xl space-y-4">
+          <div className="mx-auto max-w-5xl space-y-4">
             <div className="flex gap-2">
               <div className="relative flex-1">
                 <Link2 className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-[#999999]" />
@@ -930,7 +930,7 @@ export default function KnowledgePage() {
 
       case "trash":
         return (
-          <div className="mx-auto max-w-3xl space-y-4">
+          <div className="mx-auto max-w-5xl space-y-4">
             <p className="px-1 text-xs text-[#A0A8B4]">
               放弃的采集和删除的文章先进这，7 天后彻底删除，过期前都能捞回
             </p>
@@ -982,7 +982,7 @@ export default function KnowledgePage() {
 
       case "sources":
         return (
-          <div className="mx-auto max-w-3xl space-y-4">
+          <div className="mx-auto max-w-5xl space-y-4">
             <p className="px-1 text-xs text-[#A0A8B4]">
               开启后，AI 按频率自动抓取并送进收件箱等你拍板
             </p>
