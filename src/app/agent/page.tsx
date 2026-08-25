@@ -18,6 +18,8 @@ import {
   ChevronDown,
   Check,
 } from "lucide-react";
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 import { cn } from "@/lib/utils";
 import { MODELS, DEFAULT_MODEL_ID, getModelMeta } from "@/lib/models";
 import { PageHeader } from "@/components/page-header";
@@ -65,6 +67,7 @@ interface Message {
   content: string;
   images?: string[];
   reasoning?: string;
+  created_at?: number;
 }
 
 interface SessionMeta {
@@ -110,6 +113,8 @@ const THINKING_PREFIX = "nexus-os:agent:thinking:";
 const MODEL_PREFIX = "nexus-os:agent:model:";
 const MAX_IMAGES = 4;
 const MAX_IMAGE_BYTES = 5 * 1024 * 1024; // 单张 5MB
+// 会话消息分页：一次加载 50 条，往上滚才加载更早的（与后端 PAGE_SIZE 保持一致）
+const PAGE_SIZE = 50;
 
 function loadModel(id: string): string {
   try {
@@ -183,6 +188,31 @@ function formatRelativeTime(ts: number): string {
   return `${d.getMonth() + 1}/${d.getDate()}`;
 }
 
+// 把后端返回的消息行转成前端 Message（解析 images；保留 created_at 用作分页游标）
+function rowToMessage(m: {
+  id: string;
+  role: "user" | "assistant";
+  content: string;
+  images?: string | null;
+  created_at?: number;
+}): Message {
+  let images: string[] | undefined;
+  if (m.images) {
+    try {
+      images = JSON.parse(m.images) as string[];
+    } catch {
+      images = undefined;
+    }
+  }
+  return {
+    id: m.id,
+    role: m.role,
+    content: m.content,
+    images,
+    created_at: m.created_at,
+  };
+}
+
 // ---------- 页面 ----------
 
 export default function AgentPage() {
@@ -209,11 +239,24 @@ export default function AgentPage() {
   const [renameValue, setRenameValue] = useState("");
   const [isDeleting, setIsDeleting] = useState(false);
   const [isRenaming, setIsRenaming] = useState(false);
+  // 分页：当前已加载的消息之上是否还有更早的
+  const [hasMore, setHasMore] = useState(false);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const recognitionRef = useRef<SpeechRecognitionLike | null>(null);
   const baseTextRef = useRef("");
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const sendingRef = useRef(false);
+  // 消息滚动容器（分页加载、贴底跟随都基于它）
+  const scrollRef = useRef<HTMLDivElement>(null);
+  // 是否正在加载更早的消息（防止滚动时重复触发）
+  const loadingOlderRef = useRef(false);
+  // 当前是否贴在底部：贴底时新消息自动跟随滚动，往上翻看时不打扰
+  const stickToBottomRef = useRef(true);
+  // 即将在顶部插入更早的消息（用于保持视口位置不跳动）
+  const prependingRef = useRef(false);
+  // 插入前记录的滚动总高度（插入后用它把视口“顶”回原位）
+  const prevScrollHeightRef = useRef(0);
 
   const activeChat = chats.find((c) => c.id === activeChatId);
 
@@ -278,33 +321,60 @@ export default function AgentPage() {
     setThinkingEnabled(saved.enabled);
     setThinkingEffort(saved.effort);
     setModelId(mid);
-    const res = await fetch(`/api/sessions/${id}`);
+    const res = await fetch(`/api/sessions/${id}?limit=${PAGE_SIZE}`);
     const data = (await res.json()) as {
       messages?: Array<{
         id: string;
         role: "user" | "assistant";
         content: string;
         images?: string | null;
+        created_at?: number;
       }>;
+      hasMore?: boolean;
     };
-    setMessages(
-      (data.messages ?? []).map((m) => {
-        let images: string[] | undefined;
-        if (m.images) {
-          try {
-            images = JSON.parse(m.images) as string[];
-          } catch {
-            images = undefined;
-          }
-        }
-        return { id: m.id, role: m.role, content: m.content, images };
-      }),
-    );
+    setMessages((data.messages ?? []).map(rowToMessage));
+    setHasMore(!!data.hasMore);
+    loadingOlderRef.current = false;
+    stickToBottomRef.current = true; // 打开会话默认贴底
   }, []);
+
+  // 往上滚加载更早的消息（分页）
+  const loadOlder = async () => {
+    if (!activeChatId || !hasMore || loadingOlderRef.current) return;
+    const oldest = messages[0];
+    if (!oldest?.created_at) return;
+    loadingOlderRef.current = true;
+    try {
+      const res = await fetch(
+        `/api/sessions/${activeChatId}?limit=${PAGE_SIZE}&before=${oldest.created_at}`,
+      );
+      const data = (await res.json()) as {
+        messages?: Array<{
+          id: string;
+          role: "user" | "assistant";
+          content: string;
+          images?: string | null;
+          created_at?: number;
+        }>;
+        hasMore?: boolean;
+      };
+      const older = (data.messages ?? []).map(rowToMessage);
+      setHasMore(!!data.hasMore);
+      if (older.length > 0) {
+        const el = scrollRef.current;
+        if (el) prevScrollHeightRef.current = el.scrollHeight;
+        prependingRef.current = true;
+        setMessages((prev) => [...older, ...prev]);
+      }
+    } finally {
+      loadingOlderRef.current = false;
+    }
+  };
 
   const newChat = () => {
     setActiveChatId(null);
     setMessages([]);
+    setHasMore(false);
     window.localStorage.removeItem(LAST_SESSION_KEY);
     setOpenReasoning(new Set());
     // 切回默认模型，并恢复它自己的深度思考偏好
@@ -364,9 +434,21 @@ export default function AgentPage() {
     });
   }, [loadSessions, selectChat]);
 
-  // 消息变化时滚到底部
+  // 消息变化时的滚动处理：
+  // - 刚在顶部插入了更早的消息（预加载）→ 保持视口位置不跳动
+  // - 否则若当前贴着底部 → 跟随到最底（发新消息 / 流式输出时）
+  // - 用户往上翻看时（不贴底）→ 不打扰
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+    const el = scrollRef.current;
+    if (!el) return;
+    if (prependingRef.current) {
+      el.scrollTop += el.scrollHeight - prevScrollHeightRef.current;
+      prependingRef.current = false;
+      return;
+    }
+    if (stickToBottomRef.current) {
+      el.scrollTop = el.scrollHeight;
+    }
   }, [messages]);
 
   // 组件卸载时停止录音
@@ -474,6 +556,8 @@ export default function AgentPage() {
   const handleSend = async () => {
     const text = inputValue.trim();
     if (!text && pendingImages.length === 0) return;
+    if (sendingRef.current) return;
+    sendingRef.current = true;
 
     const images = pendingImages.length > 0 ? [...pendingImages] : undefined;
     setInputValue("");
@@ -487,6 +571,7 @@ export default function AgentPage() {
       images,
     };
     const assistantMsgId = `tmp-a-${Date.now()}`;
+    stickToBottomRef.current = true; // 发新消息时强制跟随到最底
     setMessages((prev) => [
       ...prev,
       userMsg,
@@ -496,6 +581,15 @@ export default function AgentPage() {
 
     let finalSessionId = activeChatId;
     let finalTitle = activeChat?.title ?? "新会话";
+
+    // 空闲超时：60 秒没有新数据就中止，避免卡死锁着发送键
+    const controller = new AbortController();
+    let idleTimer: ReturnType<typeof setTimeout> | null = null;
+    const resetIdle = () => {
+      if (idleTimer) clearTimeout(idleTimer);
+      idleTimer = setTimeout(() => controller.abort(), 60_000);
+    };
+    resetIdle();
 
     try {
       const res = await fetch("/api/chat", {
@@ -508,6 +602,7 @@ export default function AgentPage() {
           thinking: { enabled: thinkingEnabled, effort: thinkingEffort },
           images,
         }),
+        signal: controller.signal,
       });
 
       if (!res.ok || !res.body) {
@@ -521,6 +616,7 @@ export default function AgentPage() {
       while (true) {
         const { done, value } = await reader.read();
         if (done) break;
+        resetIdle();
         buffer += decoder.decode(value, { stream: true });
         const lines = buffer.split("\n");
         buffer = lines.pop() ?? "";
@@ -578,21 +674,35 @@ export default function AgentPage() {
         saveModel(finalSessionId, modelId);
       }
       await loadSessions();
-    } catch {
-      setMessages((prev) =>
-        prev.map((m) =>
-          m.id === assistantMsgId
-            ? { ...m, content: "网络错误，请稍后重试" }
-            : m,
-        ),
-      );
-      showToast("发送失败，请检查服务是否启动并已填写 DEEPSEEK_API_KEY", "error");
+    } catch (err) {
+      if ((err as Error)?.name === "AbortError") {
+        setMessages((prev) =>
+          prev.map((m) =>
+            m.id === assistantMsgId
+              ? { ...m, content: "请求超时，可能网络或服务端卡住了，请重试" }
+              : m,
+          ),
+        );
+        showToast("请求超时，请重试", "error");
+      } else {
+        setMessages((prev) =>
+          prev.map((m) =>
+            m.id === assistantMsgId
+              ? { ...m, content: "网络错误，请稍后重试" }
+              : m,
+          ),
+        );
+        showToast("发送失败，请检查服务是否启动并已填写 DEEPSEEK_API_KEY", "error");
+      }
     } finally {
+      if (idleTimer) clearTimeout(idleTimer);
+      sendingRef.current = false;
       setIsLoading(false);
     }
   };
 
-  const canSend = inputValue.trim().length > 0 || pendingImages.length > 0;
+  const canSend =
+    (inputValue.trim().length > 0 || pendingImages.length > 0) && !isLoading;
 
   return (
     <>
@@ -745,7 +855,18 @@ export default function AgentPage() {
           </div>
 
           {/* 消息流 */}
-          <div className="flex-1 overflow-y-auto px-4 py-4 md:px-6 md:py-6">
+          <div
+            ref={scrollRef}
+            onScroll={(e) => {
+              const el = e.currentTarget;
+              // 是否贴底（距底部 80px 内算贴底）：决定新消息要不要自动跟随
+              stickToBottomRef.current =
+                el.scrollHeight - el.scrollTop - el.clientHeight < 80;
+              // 快到顶部且还有更早的消息 → 预加载上一页
+              if (el.scrollTop < 80) loadOlder();
+            }}
+            className="flex-1 overflow-y-auto px-4 py-4 md:px-6 md:py-6"
+          >
             {messages.length === 0 ? (
               // 默认新会话空界面
               <div className="flex h-full flex-col items-center justify-center gap-3 text-center">
@@ -761,13 +882,13 @@ export default function AgentPage() {
               </div>
             ) : (
               <div className="flex flex-col gap-5">
-                {messages.map((msg, i) =>
+                {messages.map((msg) =>
                   msg.role === "assistant" ? (
-                    <div key={i} className="flex items-start gap-2.5">
+                    <div key={msg.id} className="flex items-start gap-2.5">
                       <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-[2px] bg-[#000000]">
                         <Bot className="h-4.5 w-4.5 text-white" />
                       </div>
-                      <div className="min-w-0 whitespace-pre-wrap break-words rounded-[2px] bg-white px-4 py-3 text-sm leading-relaxed text-[#1F1F1F]">
+                      <div className="min-w-0 break-words rounded-[2px] bg-white px-4 py-3 text-sm leading-relaxed text-[#1F1F1F]">
                         {msg.reasoning ? (
                           <div className="mb-2">
                             <button
@@ -790,14 +911,18 @@ export default function AgentPage() {
                           </div>
                         ) : null}
                         {msg.content ? (
-                          msg.content
+                          <div className="markdown-body">
+                            <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                              {msg.content}
+                            </ReactMarkdown>
+                          </div>
                         ) : (
                           <Loader2 className="h-4 w-4 animate-spin text-[#A0A8B4]" />
                         )}
                       </div>
                     </div>
                   ) : (
-                    <div key={i} className="flex flex-col items-end gap-1.5">
+                    <div key={msg.id} className="flex flex-col items-end gap-1.5">
                       {msg.images && msg.images.length > 0 && (
                         <div className="flex max-w-[85%] flex-wrap justify-end gap-1.5 md:max-w-[70%]">
                           {msg.images.map((src, j) => (

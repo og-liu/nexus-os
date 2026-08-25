@@ -144,3 +144,135 @@
     @apply font-sans;
   }
 }
+/* ---------- Markdown 渲染（浅色极简） ---------- */
+.markdown-body {
+  white-space: normal;
+  word-break: break-word;
+  line-height: 1.7;
+}
+.markdown-body > *:first-child {
+  margin-top: 0;
+}
+.markdown-body > *:last-child {
+  margin-bottom: 0;
+}
+
+.markdown-body h1,
+.markdown-body h2,
+.markdown-body h3,
+.markdown-body h4 {
+  font-weight: 600;
+  color: #1f1f1f;
+  line-height: 1.35;
+  margin: 1em 0 0.4em;
+}
+.markdown-body h1 {
+  font-size: 1.15rem;
+}
+.markdown-body h2 {
+  font-size: 1.05rem;
+}
+.markdown-body h3 {
+  font-size: 0.975rem;
+}
+.markdown-body h4 {
+  font-size: 0.9rem;
+}
+
+.markdown-body p {
+  margin: 0.5em 0;
+}
+
+.markdown-body ul,
+.markdown-body ol {
+  margin: 0.5em 0;
+  padding-left: 1.4em;
+}
+.markdown-body ul {
+  list-style: disc;
+}
+.markdown-body ol {
+  list-style: decimal;
+}
+.markdown-body li {
+  margin: 0.2em 0;
+}
+.markdown-body li > ul,
+.markdown-body li > ol {
+  margin: 0.2em 0;
+}
+
+.markdown-body a {
+  color: #1f1f1f;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.markdown-body a:hover {
+  color: #000;
+}
+
+.markdown-body strong {
+  font-weight: 600;
+}
+
+.markdown-body code {
+  font-family: var(--font-geist-mono), ui-monospace, SFMono-Regular, Menlo,
+    monospace;
+  font-size: 0.8125rem;
+  background: #f5f5f5;
+  border: 1px solid #ebebeb;
+  border-radius: 4px;
+  padding: 0.1em 0.35em;
+}
+
+.markdown-body pre {
+  background: #f5f5f5;
+  border: 1px solid #ebebeb;
+  border-radius: 6px;
+  padding: 0.75rem 0.9rem;
+  margin: 0.6em 0;
+  overflow-x: auto;
+}
+.markdown-body pre code {
+  background: transparent;
+  border: none;
+  padding: 0;
+  font-size: 0.8125rem;
+  line-height: 1.6;
+  white-space: pre;
+}
+
+.markdown-body blockquote {
+  margin: 0.6em 0;
+  padding: 0.1em 0 0.1em 0.9em;
+  border-left: 3px solid #d9d9d9;
+  color: #6b6b6b;
+}
+
+.markdown-body hr {
+  border: none;
+  border-top: 1px solid #e5e5e5;
+  margin: 1em 0;
+}
+
+.markdown-body table {
+  border-collapse: collapse;
+  margin: 0.6em 0;
+  width: 100%;
+  font-size: 0.8125rem;
+}
+.markdown-body th,
+.markdown-body td {
+  border: 1px solid #e5e5e5;
+  padding: 0.4em 0.7em;
+  text-align: left;
+}
+.markdown-body th {
+  background: #fafafa;
+  font-weight: 600;
+}
+
+.markdown-body img {
+  max-width: 100%;
+  border-radius: 4px;
+}
