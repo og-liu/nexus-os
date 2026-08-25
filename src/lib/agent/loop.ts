@@ -340,27 +340,71 @@ const SUMMARY_INSTRUCTION = [
 ].join("\n");
 
 /**
- * 规划失败时的降级计划：把用户原始诉求当成「单个推理步骤」。
+ * 从用户消息里提取纯文本（用于「是否简单直答」的判断）。
  *
- * 规划器可能返回 null（JSON 解析失败）或抛异常（模型/网络故障）。此时不能让整个请求
- * 直接挂掉，退化为「单步直接回答」，等效于走回旧版单步 ReAct 的能力，保证用户体验不崩。
+ * 多模态分段（ChatContentPart[]）里可能混着文本段与图片段，这里只挑文本段拼起来，
+ * 图片段用「[图片]」占位顶位，保证长度估算不被图片段截断。
  */
-function fallbackPlan(userContent: string | ChatContentPart[]): Plan {
-  const text =
-    typeof userContent === "string"
-      ? userContent
-      : userContent
-          .map((p) => (p.type === "text" ? p.text : "[图片]"))
-          .join("")
-          .trim();
+function extractText(userContent: string | ChatContentPart[]): string {
+  if (typeof userContent === "string") return userContent.trim();
+  return userContent
+    .map((p) => (p.type === "text" ? p.text : "[图片]"))
+    .join("")
+    .trim();
+}
+
+/**
+ * 判断用户消息是否属于「简单直答」——不值得走规划拆解。
+ *
+ * 为什么需要这个判断：原本 generatePlan 是「逢消息必拆」，连「你好」「为什么这么多消息」
+ * 这种打招呼 / 闲聊 / 追问都要被拆成计划，既白花一次规划调用，又容易把用户原话塞进步骤
+ * 描述，导致前端进度面板冒出「你好 0/1 ✅ 你好」这种把用户说话内容当任务的怪象。
+ *
+ * 这里用启发式（不额外调 LLM）快速判断：只要文本里没有「任务型关键词」，就视为简单直答。
+ * 判断为简单直答后走单步计划——注意单步步骤内部仍是完整 ReAct，模型照样能调工具查天气 /
+ * 联网搜索（见 buildStepInstruction 的第 2 条要求），所以即使判断偏「激进」，也只是少了
+ * 多步拆解的条理性，不会答错。
+ *
+ * 含图片的消息默认不算简单直答，交给规划器判断（看图 / 对比等可能是复杂多步意图）。
+ *
+ * @param userContent 用户本轮诉求
+ * @returns true = 简单直答（跳过规划走单步）；false = 值得拆多步
+ */
+function isSimpleQuery(userContent: string | ChatContentPart[]): boolean {
+  // 含图片的多模态消息交给规划器判断
+  if (Array.isArray(userContent) && userContent.some((p) => p.type !== "text")) {
+    return false;
+  }
+  const text = extractText(userContent);
+
+  // 任务型关键词：出现任意一个，就说明用户在「交代一件要做的事」，值得拆多步。
+  const TASK_KEYWORDS = [
+    "调研", "分析", "对比", "评估", "梳理", "总结", "报告",
+    "帮我", "帮忙", "查一下", "查查", "搜索一下",
+    "规划", "筹备", "安排", "写", "生成", "制作", "整理",
+    "列出", "清单", "怎么做", "如何", "教程", "步骤", "方案",
+  ];
+  const hasTaskKeyword = TASK_KEYWORDS.some((k) => text.includes(k));
+  return !hasTaskKeyword;
+}
+
+/**
+ * 单步兜底计划：不再把用户原话塞进 step description。
+ *
+ * 为什么不能用原话当描述：规划失败 / 简单直答时，如果直接把用户原话（如「你好」「我没问你
+ * PHP 的事了呀」）当成步骤描述，前端进度面板会显示「✅ 你好」「✅ 我没问你PHP…」这种把
+ * 用户说话内容当成「已完成任务」的怪象；执行模型读上下文时也可能把多条原话误解成
+ * 「用户连问了好几遍」。真正要回答的内容仍留在 conversation 的 user 消息里，模型自然看得见。
+ */
+function singleStepPlan(): Plan {
   return {
-    goal: text ? text.slice(0, 50) : "回答用户请求",
+    goal: "回答用户的问题",
     steps: [
       {
         id: "step1",
-        description: text || "根据用户请求给出回答",
+        description: "基于对话上下文回答用户的当前问题",
         tool: null,
-        reason: "规划失败，退化为单步直接回答",
+        reason: "无需拆解多步，直接单步回答",
         status: "pending",
       },
     ],
@@ -786,17 +830,23 @@ export async function agentLoop(
     usage: { promptTokens: 0, completionTokens: 0, totalTokens: 0 },
   };
 
-  // ── 1. 生成计划（失败则降级为单步计划）────────────────────────
+  // ── 1. 生成计划（简单直答跳过规划；规划失败降级为单步计划）──
   let plan: Plan;
-  try {
-    const generated = await generatePlan(modelId, userContent, history);
-    if (generated && generated.steps.length > 0) {
-      plan = generated;
-    } else {
-      plan = fallbackPlan(userContent);
+  if (isSimpleQuery(userContent)) {
+    // 简单直答（打招呼 / 闲聊 / 追问 / 无任务意图）：不拆多步，直接单步回答。
+    // 既省一次规划调用，也避免把用户原话塞进步骤描述（见 singleStepPlan 注释）。
+    plan = singleStepPlan();
+  } else {
+    try {
+      const generated = await generatePlan(modelId, userContent, history);
+      if (generated && generated.steps.length > 0) {
+        plan = generated;
+      } else {
+        plan = singleStepPlan();
+      }
+    } catch {
+      plan = singleStepPlan();
     }
-  } catch {
-    plan = fallbackPlan(userContent);
   }
 
   // 发出计划创建事件（steps 带初始 pending 状态，供前端画进度条 + route 持久化）

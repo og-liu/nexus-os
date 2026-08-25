@@ -125,12 +125,10 @@ export async function generatePlan(
     plan.steps = plan.steps.slice(0, MAX_PLAN_STEPS);
   }
 
-  // 兜底：goal 缺失时用用户原话的前 50 字顶替，保证进度提示永远有东西可显示
+  // 兜底：goal 缺失（模型没给）时用中性描述顶替，保证进度提示永远有东西可显示。
+  // 不再用用户原话补 goal——把原话顶在进度面板标题上，观感是把用户说的话当成了任务目标。
   if (!plan.goal) {
-    plan.goal =
-      typeof userContent === "string"
-        ? userContent.slice(0, 50)
-        : "处理用户请求";
+    plan.goal = "处理用户请求";
   }
 
   return plan;
