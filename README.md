@@ -13,7 +13,7 @@ Nexus OS 是一个面向个人用户打造的智能工作空间，将日常工�
 | 模块 | 路由 | 说明 |
 |------|------|------|
 | 总览 | `/` | 系统 Dashboard：状态概览、快捷入口、最近活动 |
-| AI Agent | `/agent` | 多模型真实对话（DeepSeek 全家 + OpenRouter 可扩展）、流式输出、深度思考（按模型独立）、图片看图、多会话管理、语音输入；知识库优先问答（RAG）规划中 |
+| AI Agent | `/agent` | 多模型真实对话（DeepSeek + OpenRouter）、流式输出、深度思考（按模型独立）、图片看图、多会话管理、语音输入、工具调用（天气 / 联网搜索）；知识库优先问答（RAG）规划中 |
 | 知识库 | `/knowledge` | 知识流/我的文章/收件箱/回收站/订阅源/自测/回顾，采集→审查→整理→阅读流水线（当前为 UI mock） |
 | 工具中心 | `/tools` | 59 个工具卡片、搜索筛选、三档响应式（工具均为 mock） |
 | 文件管理 | `/files` | 本地文件浏览、分类、搜索与管理（待开发） |
@@ -58,6 +58,7 @@ pnpm install
 #    DEEPSEEK_API_KEY=你的密钥
 #    密钥从 https://platform.deepseek.com 获取
 #    可选：要接 OpenRouter（如 Ox Alpha）再填 OPENROUTER_API_KEY=你的密钥
+#    用联网搜索时填 TAVILY_API_KEY=你的密钥（https://tavily.com 获取，1000 次/月免费）
 #    模型切换在 Agent 页顶部的模型选择器里完成，默认 deepseek-v4-flash
 
 # 5. 启动开发服务器
@@ -97,6 +98,7 @@ pnpm 是一个快速、节省磁盘空间的包管理器。本项目在 `package
 | [接口设计](docs/interfaces.md) | RESTful API、WebSocket 通信、插件 SDK 接口 |
 | [目录结构说明](docs/structure.md) | 项目中每个目录和关键文件的用途 |
 | [开发规范](docs/conventions.md) | 配色、组件样式、命名约定、技术约定 |
+| [工具系统](docs/tools.md) | 工具架构、天气/搜索工具、搜索抽象层、Agent Loop、SSE 事件、前端展示、加新工具步骤 |
 | [开发日志](docs/changelog.md) | 按日期记录的变更流水账 |
 
 ---

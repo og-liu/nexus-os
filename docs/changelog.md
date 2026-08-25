@@ -4,6 +4,31 @@
 
 ---
 
+## 2026-08-25 — Agent 工具调用落地：Agent Loop + 真实天气/搜索 + 真流式
+
+### 新增
+- **Agent Loop 核心** `src/lib/agent/loop.ts`：模型决策 → 执行工具 → 结果回传 → 再决策的循环（MAX_STEPS=5 防死循环）；SSE 事件扩充为 tool_call / tool_result / tool_error / delta / reasoning
+- **工具注册表** `src/lib/agent/tools.ts`：`buildToolsSchema()` 生成 Function Calling 工具清单 + `getTool()` 按名取工具 + 工具定义
+- **真实天气工具 get_weather**：Open-Meteo 免费 API（无需 Key），两步调用（地理编码 geocoding → 天气预报 forecast），WMO 天气代码翻译中文，支持全球城市
+- **联网搜索工具 web_search**：抽象搜索层 `src/lib/search/`（`types.ts` 接口 + `tavily.ts` 实现 + `index.ts` 工厂，按 SEARCH_PROVIDER 环境变量切换供应商），对接 Tavily（1000 次/月免费）
+- **工具系统文档** `docs/tools.md`：8 章节覆盖工具架构 / 两个工具说明 / 搜索抽象层 / Loop 机制 / SSE 事件 / 前端展示 / 加新工具步骤 / 环境变量
+
+### 修改
+- **Agent Loop 真流式**（性能优化）：`callLLM` 由 `stream:false`（阻塞等整段生成 3-8s）改为 `stream:true`，正文/思考实时 delta 推送，tool_calls 的 arguments 按 index 增量拼接；**首字延迟从 8-10s 降至 1-2s**，删除假流式（4 字分块 + 15ms sleep）
+- **系统提示** `route.ts`：SYSTEM_PROMPT 增加工具使用规则、搜索规范（6 条）、"全程中文思考"指令
+- **对话界面** `agent/page.tsx`：工具调用改折叠式 ToolCallsBlock（一行摘要 + 点击展开详情，按天气/搜索分组）；修复双 loading、兜底消息不发送（跑满 MAX_STEPS 转圈）两个 bug
+- **生成中控件锁定**：isLoading 时禁用模型切换 / 思考模式 / 图片上传 / 语音输入
+- **思考过程默认展开**：新消息思考默认展开、流式增长可见，点标题可收起
+
+### 决策记录
+- 天气选 Open-Meteo：免费、无需 Key、两步 API，支持全球城市
+- 搜索选 Tavily：免费额度、返回已清洗正文（免二次抓网页）
+- 搜索层做抽象：`SearchProvider` 接口 + 工厂，未来切 Serper/Brave 只需实现接口 + 改环境变量
+- 不引入 Vercel AI SDK：手写 Loop 与天气工具一致，便于理解全链路
+- **工具调用暂不落库**：messages 表尚无 tool_calls / tool_call_id / tool_name 字段，Demo 阶段工具调用过程仅存活于前端内存（刷新即消失）；下一步补 SQLite 持久化
+
+---
+
 ## 2026-08-24 — 模型接入开放化：多供应商架构 + 接入 Ox Alpha
 
 ### 新增

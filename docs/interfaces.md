@@ -71,6 +71,9 @@ Content-Type: application/json
 
 - `delta`：正文片段（content）
 - `reasoning`：思考过程片段（不落库）
+- `tool_call`：模型决定调用工具（toolName、args、callId）
+- `tool_result`：工具执行成功（toolName、result、callId）
+- `tool_error`：工具执行失败（toolName、error、callId）
 - `error`：错误信息（message）
 - `done`：完成（sessionId、title）
 

@@ -180,8 +180,10 @@ if (provider === "serper") {
 
 ```
 for step = 0 to 4 (MAX_STEPS=5):
-    1. callLLM(messages) — 非流式调用，带 tools schema
-    2. 如果无 tool_calls → 模型给了最终回答 → 流式吐出 → return
+    1. callLLM(messages) — 真流式调用（stream:true），带 tools schema
+       · 正文/思考实时通过 onEvent("delta"/"reasoning") 推给前端
+       · tool_calls 的 arguments 按 index 增量拼接到流结束
+    2. 如果无 tool_calls → 最终回答已流式吐完 → return
     3. 如果有 tool_calls:
        a. assistant 消息（含 tool_calls）加入 messages
        b. 逐个执行工具：
@@ -201,7 +203,7 @@ for step = 0 to 4 (MAX_STEPS=5):
 | `tool_result` | 工具执行成功 | spinner 变绿勾，可展开看结果 |
 | `tool_error` | 工具执行抛异常 | spinner 变红叉，显示错误 |
 | `delta` | 模型最终文本逐块输出 | 打字机效果渲染回复 |
-| `reasoning` | 模型思考过程（DeepSeek） | 可折叠的思考过程块 |
+| `reasoning` | 模型思考过程（DeepSeek） | 思考过程块（默认展开，可点击收起） |
 
 ### 安全边界
 
