@@ -906,12 +906,7 @@ export default function AgentPage() {
       userMsg,
       { id: assistantMsgId, role: "assistant", content: "" },
     ]);
-    // 思考过程默认展开：新消息一开始就处于展开态，思考流式增长时用户直接可见
-    setOpenReasoning((prev) => {
-      const next = new Set(prev);
-      next.add(assistantMsgId);
-      return next;
-    });
+    // 思考过程默认收起：不自动加入展开集合，用户点击「思考过程」时才展开，避免占篇幅
     setIsLoading(true);
 
     let finalSessionId = activeChatId;
