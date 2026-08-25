@@ -56,6 +56,22 @@ export function getDb(): Database.Database {
 
     CREATE INDEX IF NOT EXISTS idx_messages_session
       ON messages (session_id, created_at);
+
+    -- 任务计划表：规划（Plan-and-Execute）模式下，把拆解出的计划持久化，
+    -- 为后续「人工确认(HITL)」和「跨轮恢复」打数据地基。steps 存 JSON 字符串。
+    CREATE TABLE IF NOT EXISTS task_plans (
+      id TEXT PRIMARY KEY,
+      session_id TEXT NOT NULL,
+      goal TEXT,
+      steps TEXT,
+      status TEXT,
+      created_at INTEGER NOT NULL,
+      updated_at INTEGER NOT NULL,
+      FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE CASCADE
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_task_plans_session
+      ON task_plans (session_id, created_at);
   `);
 
   // 迁移：给已存在的旧库 messages 表补 tool_calls / reasoning / usage 列（工具调用、思考过程、token 用量持久化）

@@ -18,6 +18,7 @@ import {
   getDefaultThinkingEffort,
 } from "@/lib/models";
 import { agentLoop, type ToolCallRecord, type TokenUsage } from "@/lib/agent/loop";
+import { savePlan } from "@/lib/agent/plan-store";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -251,6 +252,50 @@ export async function POST(req: NextRequest) {
                 break;
               case "reasoning":
                 send({ type: "reasoning", content: event.content });
+                break;
+              // ── 规划-执行新增事件：透传给前端 + 持久化计划 ──────────
+              case "plan_created":
+                send({
+                  type: "plan_created",
+                  goal: event.goal,
+                  steps: event.steps,
+                });
+                // 落库活动计划（running）：HITL / 跨轮恢复的数据基础，本次只存不恢复
+                savePlan(db, sid, { goal: event.goal, steps: event.steps }, "running");
+                break;
+              case "step_start":
+                send({
+                  type: "step_start",
+                  stepId: event.stepId,
+                  index: event.index,
+                  total: event.total,
+                  description: event.description,
+                });
+                break;
+              case "step_done":
+                send({
+                  type: "step_done",
+                  stepId: event.stepId,
+                  index: event.index,
+                  result: event.result,
+                });
+                break;
+              case "step_failed":
+                send({
+                  type: "step_failed",
+                  stepId: event.stepId,
+                  index: event.index,
+                  error: event.error,
+                });
+                break;
+              case "plan_done":
+                send({
+                  type: "plan_done",
+                  completed: event.completed,
+                  total: event.total,
+                });
+                // 计划收尾：用最终完整快照覆盖落库，状态翻为 done
+                savePlan(db, sid, { goal: event.goal, steps: event.steps }, "done");
                 break;
             }
           },
