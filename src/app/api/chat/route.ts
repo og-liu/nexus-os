@@ -2,7 +2,7 @@ import { type NextRequest } from "next/server";
 import { randomUUID } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
-import { getDb, type MessageRow } from "@/lib/db";
+import { getDb, type MessageRow, type MessageStatus } from "@/lib/db";
 import {
   ProviderError,
   type ChatMessage,
@@ -25,7 +25,12 @@ import {
   type ToolCallRecord,
   type TokenUsage,
 } from "@/lib/agent/loop";
-import { savePlan, getPausedPlan } from "@/lib/agent/plan-store";
+import {
+  savePlan,
+  getPausedPlan,
+  updatePlanStatus,
+  PLAN_STATUS,
+} from "@/lib/agent/plan-store";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -166,9 +171,9 @@ export async function POST(req: NextRequest) {
   // 图片落盘
   const savedPaths = images.map(saveImage).filter((p): p is string => !!p);
 
-  // 落库用户消息
+  // 落库用户消息（user 消息没有生命周期状态，status 恒为 NULL）
   db.prepare(
-    `INSERT INTO messages (id, session_id, role, content, images, tool_calls, reasoning, usage, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    `INSERT INTO messages (id, session_id, role, content, images, tool_calls, reasoning, usage, status, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   ).run(
     randomUUID(),
     sid,
@@ -178,14 +183,41 @@ export async function POST(req: NextRequest) {
     null,
     null,
     null,
+    null,
     now,
   );
 
-  // 取出历史消息
+  // 【真停止 / 刷新保留的关键】提前为 assistant 消息 INSERT 一行占位记录（status=running）。
+  // 这样在 agentLoop 还没跑完、甚至被中途打断时，这条 assistant 消息在库里已经「存在」，
+  // 后续的增量落盘只需 UPDATE 这条占位行；刷新页面读历史也能看到「进行中/已停止」的半截消息，
+  // 彻底解决「agentLoop 跑完才落库 → 中途刷新即丢」的问题。
+  const assistantMsgId = randomUUID();
+  db.prepare(
+    `INSERT INTO messages (id, session_id, role, content, images, tool_calls, reasoning, usage, status, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+  ).run(
+    assistantMsgId,
+    sid,
+    "assistant",
+    "",
+    null,
+    null,
+    null,
+    null,
+    "running",
+    now,
+  );
+
+  // 取出历史消息（喂给模型做上下文）。
+  // 过滤掉 status='running' 的消息：那是「正在生成中」的 assistant 占位行（内容还是空壳），
+  // 不应该被当成历史上下文喂给模型。user 消息恒为 NULL、assistant 的 done/stopped/failed 都保留。
+  // 注意：SQL 里 `status != 'running'` 对 NULL 会返回 NULL（被 WHERE 判为 false），
+  // 所以必须显式写 `status IS NULL OR status != 'running'` 才能让 user 消息通过。
   const historyRows = db
     .prepare(
       `SELECT * FROM (
-         SELECT * FROM messages WHERE session_id = ? ORDER BY created_at DESC LIMIT ?
+         SELECT * FROM messages
+         WHERE session_id = ? AND (status IS NULL OR status != 'running')
+         ORDER BY created_at DESC LIMIT ?
        ) ORDER BY created_at ASC`,
     )
     .all(sid, MAX_CONTEXT_TURNS * 2) as MessageRow[];
@@ -225,6 +257,48 @@ export async function POST(req: NextRequest) {
       let assistantToolCalls: ToolCallRecord[] | null = null;
       let assistantReasoning = "";
       let assistantUsage: TokenUsage | null = null;
+
+      // ── 「边跑边存」增量落盘（真停止 / 刷新保留的核心）──────────────
+      // assistant 消息在请求一进来就已 INSERT 好占位行（status=running，见上文），
+      // 这里负责把 loop 产出的半截内容「增量写回」那行占位记录，让刷新/停止后还能读回。
+      const persistAssistant = (status: MessageStatus) => {
+        db.prepare(
+          `UPDATE messages
+           SET status = ?, content = ?, tool_calls = ?, reasoning = ?, usage = ?
+           WHERE id = ?`,
+        ).run(
+          status,
+          assistantContent,
+          assistantToolCalls ? JSON.stringify(assistantToolCalls) : null,
+          assistantReasoning || null,
+          assistantUsage ? JSON.stringify(assistantUsage) : null,
+          assistantMsgId,
+        );
+      };
+
+      // 终态标志：一旦定格为 done/stopped/failed，节流 timer 就不能再写回 running
+      let settled = false;
+      // 节流落盘：正常流式过程中，每 800ms 把已累积内容写库一次。
+      // 即便进程崩溃（不是走正常 abort 路径），最多也只丢最近 800ms 的增量。
+      const persistTimer = setInterval(() => {
+        if (!settled) persistAssistant("running");
+      }, 800);
+
+      // 取消标志：req.signal 一旦 abort（用户点停止 / 刷新断连）就置 true，
+      // 供 catch 里区分「主动取消」还是「真·模型报错」。
+      let cancelled = false;
+      const markCancelled = () => {
+        cancelled = true;
+      };
+      req.signal.addEventListener("abort", markCancelled, { once: true });
+
+      // 收尾：无论 done/stopped/failed 哪条路径，都要停掉节流 timer 并解绑 abort 监听
+      const cleanup = () => {
+        settled = true;
+        clearInterval(persistTimer);
+        req.signal.removeEventListener("abort", markCancelled);
+      };
+
       try {
         // 事件回调：agentLoop / resumeLoop 共用同一套「透传 + 持久化」逻辑。
         // 单独抽出来，是因为两条链路（全新执行 / 断点续跑）都要复用同一份事件处理。
@@ -331,6 +405,7 @@ export async function POST(req: NextRequest) {
             content,
             thinking,
             handleEvent,
+            req.signal,
           );
         } else {
           loopResult = await agentLoop(
@@ -340,6 +415,7 @@ export async function POST(req: NextRequest) {
             buildContent(content, images),
             thinking,
             handleEvent,
+            req.signal,
           );
         }
 
@@ -353,27 +429,37 @@ export async function POST(req: NextRequest) {
         assistantReasoning = loopResult.reasoning;
         assistantUsage = loopResult.usage;
       } catch (e) {
-        const message =
-          e instanceof ProviderError ? e.message : "调用失败，请稍后重试";
-        send({ type: "error", message });
+        cleanup();
+        // 区分「用户主动停止 / 断连」与「真·模型报错」：
+        //   - 取消：AbortError（fetch 被 signal 中止，或 loop 内部循环检查主动抛出），
+        //     或 cancel 标志已被 abort 监听置位 → 消息定格 stopped（保留已产出半截），
+        //     活动计划同步标 stopped，并给前端发 stopped 事件。
+        //   - 报错：ProviderError 等其他异常 → 消息定格 failed，计划标 failed，走原 error 事件。
+        const isCancelled =
+          cancelled || (e instanceof Error && e.name === "AbortError");
+        if (isCancelled) {
+          persistAssistant("stopped");
+          updatePlanStatus(db, sid, PLAN_STATUS.STOPPED);
+          send({ type: "stopped" });
+        } else {
+          const message =
+            e instanceof ProviderError ? e.message : "调用失败，请稍后重试";
+          persistAssistant("failed");
+          updatePlanStatus(db, sid, PLAN_STATUS.FAILED);
+          send({ type: "error", message });
+        }
         controller.close();
         return;
       }
 
+      // 正常完成：停掉节流落盘，把占位消息定格为 done
+      cleanup();
       if (assistantContent) {
-        db.prepare(
-          `INSERT INTO messages (id, session_id, role, content, images, tool_calls, reasoning, usage, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-        ).run(
-          randomUUID(),
-          sid,
-          "assistant",
-          assistantContent,
-          null,
-          assistantToolCalls ? JSON.stringify(assistantToolCalls) : null,
-          assistantReasoning || null,
-          assistantUsage ? JSON.stringify(assistantUsage) : null,
-          Date.now(),
-        );
+        persistAssistant("done");
+      } else {
+        // 极端情况：正常返回但没有正文（如规划失败走直答但也没吐出字），
+        // 占位消息是空壳，直接删掉这条空占位，避免历史里多一条空白消息。
+        db.prepare(`DELETE FROM messages WHERE id = ?`).run(assistantMsgId);
       }
 
       let title = "新会话";

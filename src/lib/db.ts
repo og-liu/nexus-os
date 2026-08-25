@@ -9,6 +9,19 @@ export interface SessionRow {
   updated_at: number;
 }
 
+/**
+ * 消息的「生命周期状态」，用于支撑「真停止 / 刷新保留 / 断点恢复」。
+ *
+ * - user 消息本身没有状态（用户说出去就是终态），落库时 status 存 NULL；
+ * - assistant 消息则贯穿一条生命周期：
+ *     running —— 生成中（占位一行，边跑边更新，刷新页面能读回半截）
+ *     done    —— 正常生成完
+ *     stopped —— 用户主动点停止 / 刷新断连，保留已产出的半截内容
+ *     failed  —— 模型报错 / 工具失败，本轮没有产出该消息
+ * 集中在这里定义类型，route 落库时取同一套字面量，避免魔法字符串散落。
+ */
+export type MessageStatus = "running" | "done" | "stopped" | "failed";
+
 export interface MessageRow {
   id: string;
   session_id: string;
@@ -18,6 +31,8 @@ export interface MessageRow {
   tool_calls: string | null;
   reasoning: string | null;
   usage: string | null;
+  /** 消息状态：user 消息为 NULL；assistant 消息见 MessageStatus 说明 */
+  status: string | null;
   created_at: number;
 }
 
@@ -50,6 +65,7 @@ export function getDb(): Database.Database {
       tool_calls TEXT,
       reasoning TEXT,
       usage TEXT,
+      status TEXT,
       created_at INTEGER NOT NULL,
       FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE CASCADE
     );
@@ -87,6 +103,9 @@ export function getDb(): Database.Database {
   }
   if (!cols.some((c) => c.name === "usage")) {
     db.exec(`ALTER TABLE messages ADD COLUMN usage TEXT`);
+  }
+  if (!cols.some((c) => c.name === "status")) {
+    db.exec(`ALTER TABLE messages ADD COLUMN status TEXT`);
   }
 
   return db;

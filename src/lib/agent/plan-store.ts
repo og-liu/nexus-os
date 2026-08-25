@@ -22,6 +22,10 @@ export const PLAN_STATUS = {
   FAILED: "failed",
   /** 暂停中（预留给 HITL 人工确认、跨轮恢复） */
   PAUSED: "paused",
+  /** 已停止（用户主动中断 / 刷新断连，保留已产出，供「继续/放弃」恢复） */
+  STOPPED: "stopped",
+  /** 已放弃（用户明确放弃这轮，不再恢复） */
+  CANCELLED: "cancelled",
 } as const;
 
 /** 计划状态的联合类型（从常量对象推导，保证写表读表都走同一套取值） */
