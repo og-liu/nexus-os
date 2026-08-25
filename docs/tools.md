@@ -204,6 +204,7 @@ for step = 0 to 4 (MAX_STEPS=5):
 | `tool_error` | 工具执行抛异常 | spinner 变红叉，显示错误 |
 | `delta` | 模型最终文本逐块输出 | 打字机效果渲染回复 |
 | `reasoning` | 模型思考过程（DeepSeek） | 思考过程块（默认展开，可点击收起） |
+| `done` | 流结束（携带 sessionId / title / usage） | 落定会话、显示「本轮 N tokens」 |
 
 ### 安全边界
 
@@ -230,6 +231,18 @@ for step = 0 to 4 (MAX_STEPS=5):
   - 搜索：每次搜索列出前 4 条结果标题（可点击跳转），超过 4 条显示「等 N 条」
 - **部分失败**：橙色警告图标（城市名查不到等非致命情况）
 - **多工具混合**：天气和搜索分组显示，摘要用空格分隔
+- **持久化还原**：工具调用过程落库到 `messages.tool_calls`（TEXT 存 JSON），刷新 / 重开历史会话照样本还原卡片，不再刷新即消失
+
+### 思考过程展示
+
+- 思考过程（reasoning）实时流式增长、**默认展开**、点击标题才收起
+- 思考全文落库到 `messages.reasoning`，重开历史会话同样还原并默认展开
+
+### token 消耗展示
+
+- 每轮回复结束时，气泡底部显示 `⚡ 本轮 X tokens · 输入 / 输出`
+- 用量来自模型流式最后那个 usage 块（`stream_options.include_usage`），`agentLoop` 把一轮内多次模型调用的输入/输出/total 累加
+- 用量落库到 `messages.usage`（TEXT 存 JSON），重开历史会话同样还原显示，不再刷新即消失
 
 ### 控件锁定
 

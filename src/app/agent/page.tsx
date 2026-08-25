@@ -73,6 +73,13 @@ interface ToolCallEvent {
   error?: string;
 }
 
+// 单条消息的 token 用量（与后端 loop.ts 的 TokenUsage 对齐）
+interface TokenUsage {
+  promptTokens: number;
+  completionTokens: number;
+  totalTokens: number;
+}
+
 interface Message {
   id: string;
   role: "user" | "assistant";
@@ -80,6 +87,7 @@ interface Message {
   images?: string[];
   reasoning?: string;
   toolCalls?: ToolCallEvent[];
+  usage?: TokenUsage;
   created_at?: number;
 }
 
@@ -201,12 +209,21 @@ function formatRelativeTime(ts: number): string {
   return `${d.getMonth() + 1}/${d.getDate()}`;
 }
 
-// 把后端返回的消息行转成前端 Message（解析 images；保留 created_at 用作分页游标）
+// 把 token 数格式化成可读短格式：1200 → 1.2k；小于 1000 直接显示
+function formatTokens(n: number): string {
+  if (n >= 1000) return `${(n / 1000).toFixed(1)}k`;
+  return String(n);
+}
+
+// 把后端返回的消息行转成前端 Message（解析 images / tool_calls / usage；保留 created_at 用作分页游标）
 function rowToMessage(m: {
   id: string;
   role: "user" | "assistant";
   content: string;
   images?: string | null;
+  tool_calls?: string | null;
+  reasoning?: string | null;
+  usage?: string | null;
   created_at?: number;
 }): Message {
   let images: string[] | undefined;
@@ -217,11 +234,30 @@ function rowToMessage(m: {
       images = undefined;
     }
   }
+  let toolCalls: ToolCallEvent[] | undefined;
+  if (m.tool_calls) {
+    try {
+      toolCalls = JSON.parse(m.tool_calls) as ToolCallEvent[];
+    } catch {
+      toolCalls = undefined;
+    }
+  }
+  let usage: TokenUsage | undefined;
+  if (m.usage) {
+    try {
+      usage = JSON.parse(m.usage) as TokenUsage;
+    } catch {
+      usage = undefined;
+    }
+  }
   return {
     id: m.id,
     role: m.role,
     content: m.content,
     images,
+    toolCalls,
+    reasoning: m.reasoning ?? undefined,
+    usage,
     created_at: m.created_at,
   };
 }
@@ -474,6 +510,9 @@ export default function AgentPage() {
         role: "user" | "assistant";
         content: string;
         images?: string | null;
+        tool_calls?: string | null;
+        reasoning?: string | null;
+        usage?: string | null;
         created_at?: number;
       }>;
       hasMore?: boolean;
@@ -500,6 +539,9 @@ export default function AgentPage() {
           role: "user" | "assistant";
           content: string;
           images?: string | null;
+          tool_calls?: string | null;
+          reasoning?: string | null;
+          usage?: string | null;
           created_at?: number;
         }>;
         hasMore?: boolean;
@@ -789,6 +831,7 @@ export default function AgentPage() {
               callId?: string;
               result?: unknown;
               error?: string;
+              usage?: TokenUsage;
             };
             if (obj.type === "reasoning" && obj.content) {
               setMessages((prev) =>
@@ -869,6 +912,13 @@ export default function AgentPage() {
             } else if (obj.type === "done") {
               if (obj.sessionId) finalSessionId = obj.sessionId;
               if (obj.title) finalTitle = obj.title;
+              if (obj.usage) {
+                setMessages((prev) =>
+                  prev.map((m) =>
+                    m.id === assistantMsgId ? { ...m, usage: obj.usage } : m,
+                  ),
+                );
+              }
             }
           } catch {
             // 忽略无法解析的行
@@ -1131,6 +1181,14 @@ export default function AgentPage() {
                         ) : msg.toolCalls?.some((tc) => tc.status === "running") ? null : (
                           <Loader2 className="h-4 w-4 animate-spin text-[#A0A8B4]" />
                         )}
+                        {msg.usage ? (
+                          <div className="mt-2 flex items-center gap-1.5 border-t border-[#F0F0F0] pt-1.5 text-[11px] text-[#A0A8B4]">
+                            <Zap className="h-3 w-3 shrink-0" />
+                            <span>
+                              本轮 {formatTokens(msg.usage.totalTokens)} tokens · 输入 {formatTokens(msg.usage.promptTokens)} / 输出 {formatTokens(msg.usage.completionTokens)}
+                            </span>
+                          </div>
+                        ) : null}
                       </div>
                     </div>
                   ) : (

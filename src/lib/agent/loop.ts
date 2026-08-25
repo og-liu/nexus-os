@@ -23,6 +23,26 @@ export type LoopEvent =
   | { type: "delta"; content: string }
   | { type: "reasoning"; content: string };
 
+/** 落库用的一条工具调用记录（与前端 ToolCallEvent 对齐，只存终态 success/error） */
+export interface ToolCallRecord {
+  callId: string;
+  toolName: string;
+  args: Record<string, unknown>;
+  status: "success" | "error";
+  result?: unknown;
+  error?: string;
+}
+
+/** 一次 LLM 调用的 token 用量（整个 Loop 会多次调用 LLM，最终累加成这一轮的总用量落库） */
+export interface TokenUsage {
+  /** 输入 token（prompt） */
+  promptTokens: number;
+  /** 输出 token（completion，含思考过程） */
+  completionTokens: number;
+  /** 总计 */
+  totalTokens: number;
+}
+
 /** 扩展的消息类型，增加 tool 角色（OpenAI function calling 格式） */
 type AgentMessage =
   | ChatMessage
@@ -45,12 +65,16 @@ type AgentMessage =
 interface LLMResult {
   /** 模型输出的文本（流式过程中已通过 onEvent 实时吐出，这里是完整拼接供落库用） */
   content: string;
+  /** 模型思考过程（流式过程中已实时吐出，这里是完整拼接供落库用） */
+  reasoning: string;
   /** 模型发起的工具调用（如果有） */
   toolCalls: Array<{
     id: string;
     name: string;
     args: Record<string, unknown>;
   }>;
+  /** 本次调用的 token 用量（由流式最后的 usage 块给出） */
+  usage: TokenUsage;
 }
 
 /**
@@ -83,6 +107,8 @@ async function callLLM(
     tools: buildToolsSchema(),
     tool_choice: "auto",
     stream: true,
+    // 流式默认不回传 token 用量，显式要求最后补一个带 usage 的块（OpenAI 兼容接口通用参数）
+    stream_options: { include_usage: true },
   };
 
   if (provider.thinkingStyle === "deepseek") {
@@ -111,6 +137,8 @@ async function callLLM(
 
   // 累积文本内容
   let contentFull = "";
+  // 累积思考过程（DeepSeek reasoning_content，多块拼接）
+  let reasoningFull = "";
   // 累积 tool_calls：OpenAI 流式返回的 tool_calls 是增量的
   // 每个 chunk 可能带 index、id（通常仅首块）、function.name（首块）、function.arguments（分片）
   interface StreamToolCall {
@@ -119,6 +147,8 @@ async function callLLM(
     argsBuffer: string;
   }
   const toolCallMap = new Map<number, StreamToolCall>();
+  // token 用量：只在流最后的 usage 块里给出（该块 choices 为空数组，其余块的 usage 为 null）
+  let usage: TokenUsage = { promptTokens: 0, completionTokens: 0, totalTokens: 0 };
 
   while (true) {
     const { done, value } = await reader.read();
@@ -153,14 +183,32 @@ async function callLLM(
               }>;
             };
           }>;
+          usage?: {
+            prompt_tokens?: number;
+            completion_tokens?: number;
+            total_tokens?: number;
+          };
         };
+
+        // usage 块优先处理：该块 choices 为空数组，且出现在流最后（其余块 usage 为 null）
+        if (json.usage) {
+          usage = {
+            promptTokens: json.usage.prompt_tokens ?? 0,
+            completionTokens: json.usage.completion_tokens ?? 0,
+            totalTokens: json.usage.total_tokens ?? 0,
+          };
+          continue;
+        }
 
         const delta = json.choices?.[0]?.delta;
         if (!delta) continue;
 
         // 1) 思考过程（DeepSeek reasoning_content）
         const reasoning = delta.reasoning_content ?? delta.reasoning ?? "";
-        if (reasoning) onEvent({ type: "reasoning", content: reasoning });
+        if (reasoning) {
+          reasoningFull += reasoning;
+          onEvent({ type: "reasoning", content: reasoning });
+        }
 
         // 2) 正文文本——实时吐出
         const text = delta.content ?? "";
@@ -207,7 +255,7 @@ async function callLLM(
     });
   }
 
-  return { content: contentFull, toolCalls };
+  return { content: contentFull, reasoning: reasoningFull, toolCalls, usage };
 }
 
 /**
@@ -230,7 +278,7 @@ export async function agentLoop(
   userContent: string | ChatContentPart[],
   thinking: ThinkingOptions,
   onEvent: (event: LoopEvent) => void,
-): Promise<string> {
+): Promise<{ content: string; reasoning: string; toolCalls: ToolCallRecord[]; usage: TokenUsage }> {
   // 组装初始消息：系统提示 + 历史 + 当前用户消息
   const messages: AgentMessage[] = [
     { role: "system", content: systemPrompt },
@@ -238,13 +286,24 @@ export async function agentLoop(
     { role: "user", content: userContent },
   ];
 
+  // 收集整轮 Loop 里的工具调用过程，最终随回答一起落库（方案 A）
+  const toolRecords: ToolCallRecord[] = [];
+  // 累积整轮 Loop 的思考过程（可能有多次工具循环，每次都可能有思考）
+  let reasoningFull = "";
+  // 累积整轮 Loop 的 token 用量（一轮可能多次调用 LLM，全部求和作为这轮的总消耗）
+  const totalUsage: TokenUsage = { promptTokens: 0, completionTokens: 0, totalTokens: 0 };
+
   for (let step = 0; step < MAX_STEPS; step++) {
     // 1. 流式调用大模型——文本实时推给前端，工具调用在流结束后拿到
-    const { content, toolCalls } = await callLLM(modelId, messages, thinking, onEvent);
+    const { content, reasoning, toolCalls, usage } = await callLLM(modelId, messages, thinking, onEvent);
+    reasoningFull += reasoning;
+    totalUsage.promptTokens += usage.promptTokens;
+    totalUsage.completionTokens += usage.completionTokens;
+    totalUsage.totalTokens += usage.totalTokens;
 
     // 2. 没有工具调用 → 最终回答已通过流式吐完，直接返回
     if (toolCalls.length === 0) {
-      return content;
+      return { content, reasoning: reasoningFull, toolCalls: toolRecords, usage: totalUsage };
     }
 
     // 3. 有工具调用——把 assistant 的 tool_calls 消息加入历史
@@ -268,6 +327,13 @@ export async function agentLoop(
       if (!tool) {
         const errorMsg = `工具「${tc.name}」不存在`;
         onEvent({ type: "tool_error", toolName: tc.name, error: errorMsg, callId: tc.id });
+        toolRecords.push({
+          callId: tc.id,
+          toolName: tc.name,
+          args: tc.args,
+          status: "error",
+          error: errorMsg,
+        });
         messages.push({
           role: "tool",
           content: JSON.stringify({ error: errorMsg }),
@@ -279,6 +345,13 @@ export async function agentLoop(
       try {
         const result = await tool.execute(tc.args);
         onEvent({ type: "tool_result", toolName: tc.name, result, callId: tc.id });
+        toolRecords.push({
+          callId: tc.id,
+          toolName: tc.name,
+          args: tc.args,
+          status: "success",
+          result,
+        });
         messages.push({
           role: "tool",
           content: JSON.stringify(result),
@@ -287,6 +360,13 @@ export async function agentLoop(
       } catch (e) {
         const errorMsg = e instanceof Error ? e.message : String(e);
         onEvent({ type: "tool_error", toolName: tc.name, error: errorMsg, callId: tc.id });
+        toolRecords.push({
+          callId: tc.id,
+          toolName: tc.name,
+          args: tc.args,
+          status: "error",
+          error: errorMsg,
+        });
         // 错误也喂回给模型，让它决定怎么办（换个方式、告诉用户等）
         messages.push({
           role: "tool",
@@ -302,5 +382,5 @@ export async function agentLoop(
   // 超过最大轮次兜底——直接吐给前端
   const fallback = "抱歉，我处理了太多步骤还是没能完成，可能是工具调用遇到了问题，请换个方式提问。";
   onEvent({ type: "delta", content: fallback });
-  return fallback;
+  return { content: fallback, reasoning: reasoningFull, toolCalls: toolRecords, usage: totalUsage };
 }

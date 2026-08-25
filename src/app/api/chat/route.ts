@@ -10,7 +10,7 @@ import {
   type ThinkingOptions,
 } from "@/lib/providers";
 import { isValidModelId, DEFAULT_MODEL_ID, getModelMeta } from "@/lib/models";
-import { agentLoop } from "@/lib/agent/loop";
+import { agentLoop, type ToolCallRecord, type TokenUsage } from "@/lib/agent/loop";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -149,13 +149,16 @@ export async function POST(req: NextRequest) {
 
   // 落库用户消息
   db.prepare(
-    `INSERT INTO messages (id, session_id, role, content, images, created_at) VALUES (?, ?, ?, ?, ?, ?)`,
+    `INSERT INTO messages (id, session_id, role, content, images, tool_calls, reasoning, usage, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   ).run(
     randomUUID(),
     sid,
     "user",
     content,
     savedPaths.length > 0 ? JSON.stringify(savedPaths) : null,
+    null,
+    null,
+    null,
     now,
   );
 
@@ -196,8 +199,11 @@ export async function POST(req: NextRequest) {
       };
 
       let assistantContent = "";
+      let assistantToolCalls: ToolCallRecord[] | null = null;
+      let assistantReasoning = "";
+      let assistantUsage: TokenUsage | null = null;
       try {
-        assistantContent = await agentLoop(
+        const loopResult = await agentLoop(
           model,
           SYSTEM_PROMPT,
           history,
@@ -238,6 +244,11 @@ export async function POST(req: NextRequest) {
             }
           },
         );
+        assistantContent = loopResult.content;
+        assistantToolCalls =
+          loopResult.toolCalls.length > 0 ? loopResult.toolCalls : null;
+        assistantReasoning = loopResult.reasoning;
+        assistantUsage = loopResult.usage;
       } catch (e) {
         const message =
           e instanceof ProviderError ? e.message : "调用失败，请稍后重试";
@@ -248,8 +259,18 @@ export async function POST(req: NextRequest) {
 
       if (assistantContent) {
         db.prepare(
-          `INSERT INTO messages (id, session_id, role, content, images, created_at) VALUES (?, ?, ?, ?, ?, ?)`,
-        ).run(randomUUID(), sid, "assistant", assistantContent, null, Date.now());
+          `INSERT INTO messages (id, session_id, role, content, images, tool_calls, reasoning, usage, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        ).run(
+          randomUUID(),
+          sid,
+          "assistant",
+          assistantContent,
+          null,
+          assistantToolCalls ? JSON.stringify(assistantToolCalls) : null,
+          assistantReasoning || null,
+          assistantUsage ? JSON.stringify(assistantUsage) : null,
+          Date.now(),
+        );
       }
 
       let title = "新会话";
@@ -261,7 +282,7 @@ export async function POST(req: NextRequest) {
         ).run(title, Date.now(), sid);
       }
 
-      send({ type: "done", sessionId: sid, title });
+      send({ type: "done", sessionId: sid, title, usage: assistantUsage });
       controller.close();
     },
   });

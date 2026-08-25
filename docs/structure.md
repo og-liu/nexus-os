@@ -77,7 +77,7 @@ src/
 └── lib/
     ├── utils.ts            # 工具函数：cn() — 合并 clsx + tailwind-merge 的类名处理
     ├── models.ts           # 模型注册表：模型元信息（id/供应商/能力），前端选择器与后端白名单共用
-    ├── db.ts               # SQLite 访问：getDb() 连接，sessions/messages 表操作
+    ├── db.ts               # SQLite 访问：getDb() 连接，sessions/messages 表操作；messages 含 tool_calls/reasoning/usage 字段（工具调用、思考过程、token 用量持久化），内置幂等迁移自动补列
     ├── agent/              # Agent Loop 核心（工具调用编排）
     │   ├── loop.ts         # Agent 循环：流式调模型 → 拼接 tool_calls → 执行工具 → 回传再决策
     │   └── tools.ts        # 工具注册表：天气 get_weather / 搜索 web_search + buildToolsSchema/getTool
@@ -110,7 +110,7 @@ docs/
 | 页面 | 路由 | 状态 |
 |------|------|------|
 | 首页 Dashboard | `/` | ✅ 已完成（问候/时钟/农历/年度进度、每日一句、KPI、快捷工具、最近活动、自动化任务、最新文章、AI Agent、音乐播放器、便签、待办） |
-| AI Agent | `/agent` | ✅ 真实对话已实现（多模型切换、流式输出、深度思考、图片看图、SQLite 会话持久化、工具调用——天气/联网搜索；意图理解/任务规划待开发） |
+| AI Agent | `/agent` | ✅ 真实对话已实现（多模型切换、流式输出、深度思考、图片看图、SQLite 会话持久化、工具调用——天气/联网搜索、工具调用/思考过程/token 用量落库还原；意图理解/任务规划待开发） |
 | 知识库 | `/knowledge` | 🟡 UI mock 已完成（知识流/我的文章/收件箱/回收站/订阅源/自测闪卡选择题/回顾统计，全前端交互；无真实存储/AI 加工/检索） |
 | 工具中心 | `/tools` | ✅ 页面已完成（59 个工具卡片、搜索 + 分类筛选、三档响应式；工具均为 mock 无实际执行） |
 | 文件管理 | `/files` | 🔲 占位 |

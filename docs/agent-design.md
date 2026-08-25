@@ -2,7 +2,7 @@
 
 本文档描述 Nexus OS 中 AI Agent 模块的设计思路与架构规划。
 
-> **当前状态**：`/agent` 已从 UI mock 落地为真实对话——DeepSeek 多模型切换、SSE 流式输出、深度思考（按模型独立）、图片看图、SQLite 会话持久化均已实现；模型接入已开放为多供应商架构（DeepSeek / OpenRouter）。**工具调用已落地**：Agent Loop（模型决策 → 执行工具 → 结果回传循环，上限 5 轮）+ 工具注册表 + 真实天气（Open-Meteo）+ 联网搜索（Tavily），且已改为真流式（首字 1-2s）。意图理解、任务规划等更高级编排能力仍在规划中。本文档描述的是目标架构设计，其中「工具调用」部分已按 Loop 方式实现雏形。
+> **当前状态**：`/agent` 已从 UI mock 落地为真实对话——DeepSeek 多模型切换、SSE 流式输出、深度思考（按模型独立）、图片看图、SQLite 会话持久化均已实现；模型接入已开放为多供应商架构（DeepSeek / OpenRouter）。**工具调用已落地**：Agent Loop（模型决策 → 执行工具 → 结果回传循环，上限 5 轮）+ 工具注册表 + 真实天气（Open-Meteo）+ 联网搜索（Tavily），且已改为真流式（首字 1-2s）；工具调用过程、思考过程与 token 用量均随消息落库（messages.tool_calls / messages.reasoning / messages.usage），刷新 / 重开会话可还原展示。意图理解、任务规划等更高级编排能力仍在规划中。本文档描述的是目标架构设计，其中「工具调用」部分已按 Loop 方式实现雏形。
 
 ---
 

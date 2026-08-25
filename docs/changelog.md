@@ -19,13 +19,15 @@
 - **对话界面** `agent/page.tsx`：工具调用改折叠式 ToolCallsBlock（一行摘要 + 点击展开详情，按天气/搜索分组）；修复双 loading、兜底消息不发送（跑满 MAX_STEPS 转圈）两个 bug
 - **生成中控件锁定**：isLoading 时禁用模型切换 / 思考模式 / 图片上传 / 语音输入
 - **思考过程默认展开**：新消息思考默认展开、流式增长可见，点标题可收起
+- **数据库持久化落地**：messages 表加 `tool_calls` / `reasoning` / `usage` 三列，`agentLoop` 返回值由纯文本改为 `{ content, reasoning, toolCalls, usage }`，assistant 落库时把工具调用 JSON、思考全文与整轮 token 用量一并存入；前端 `rowToMessage` 解析还原，重开会话工具卡片、思考过程、本轮 token 消耗仍在（不再刷新即消失）
+- **token 用量采集**：`callLLM` 请求加 `stream_options: { include_usage: true }`，从流式最后的 usage 块取 prompt/completion/total token；`agentLoop` 把一轮内多次调用（思考 + 工具后总结，最多 5 轮）的用量累加，随回复回传给前端展示「本轮 X tokens · 输入 / 输出」
 
 ### 决策记录
 - 天气选 Open-Meteo：免费、无需 Key、两步 API，支持全球城市
 - 搜索选 Tavily：免费额度、返回已清洗正文（免二次抓网页）
 - 搜索层做抽象：`SearchProvider` 接口 + 工厂，未来切 Serper/Brave 只需实现接口 + 改环境变量
 - 不引入 Vercel AI SDK：手写 Loop 与天气工具一致，便于理解全链路
-- **工具调用暂不落库**：messages 表尚无 tool_calls / tool_call_id / tool_name 字段，Demo 阶段工具调用过程仅存活于前端内存（刷新即消失）；下一步补 SQLite 持久化
+- **工具调用、思考过程与 token 用量持久化（方案 A）**：messages 表新增 `tool_calls` / `reasoning` / `usage` 三列（TEXT 存 JSON），assistant 消息落库时把工具调用过程、完整思考内容与整轮 token 用量一起存，刷新 / 重开会话可还原展示（复用 ToolCallsBlock 与思考展开态）；`getDb()` 内做幂等迁移（PRAGMA 检测列后 ALTER 补列，旧库自动升级，不删库重建）
 
 ---
 

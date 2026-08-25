@@ -15,6 +15,9 @@ export interface MessageRow {
   role: "user" | "assistant";
   content: string;
   images: string | null;
+  tool_calls: string | null;
+  reasoning: string | null;
+  usage: string | null;
   created_at: number;
 }
 
@@ -44,6 +47,9 @@ export function getDb(): Database.Database {
       role TEXT NOT NULL,
       content TEXT NOT NULL,
       images TEXT,
+      tool_calls TEXT,
+      reasoning TEXT,
+      usage TEXT,
       created_at INTEGER NOT NULL,
       FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE CASCADE
     );
@@ -51,6 +57,21 @@ export function getDb(): Database.Database {
     CREATE INDEX IF NOT EXISTS idx_messages_session
       ON messages (session_id, created_at);
   `);
+
+  // 迁移：给已存在的旧库 messages 表补 tool_calls / reasoning / usage 列（工具调用、思考过程、token 用量持久化）
+  // CREATE TABLE IF NOT EXISTS 不会给已有表加分，这里用 PRAGMA 检测后 ALTER 补列，幂等安全
+  const cols = db.prepare(`PRAGMA table_info(messages)`).all() as Array<{
+    name: string;
+  }>;
+  if (!cols.some((c) => c.name === "tool_calls")) {
+    db.exec(`ALTER TABLE messages ADD COLUMN tool_calls TEXT`);
+  }
+  if (!cols.some((c) => c.name === "reasoning")) {
+    db.exec(`ALTER TABLE messages ADD COLUMN reasoning TEXT`);
+  }
+  if (!cols.some((c) => c.name === "usage")) {
+    db.exec(`ALTER TABLE messages ADD COLUMN usage TEXT`);
+  }
 
   return db;
 }
