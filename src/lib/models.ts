@@ -1,3 +1,5 @@
+import type { ThinkingEffort } from "./providers/types";
+
 // 模型注册表：所有可选模型的元信息集中在这里。
 // 加模型 / 换供应商，只需在这里增删条目、并在 providers/index.ts 登记供应商，
 // 前端选择器、后端白名单校验、深度思考开关显隐都会自动跟着走。
@@ -19,6 +21,11 @@ export interface ModelMeta {
   supportsThinking: boolean;
   /** 是否支持看图（决定图片上传是否可用 + 是否真正把图片发给模型） */
   supportsVision: boolean;
+  /**
+   * 支持的思考档位（按供应商真实枚举，仅 supportsThinking 为 true 时有意义）。
+   * 数组第一个元素即该模型的默认档；不写则回落通用三档 low/high/max。
+   */
+  thinkingEfforts?: ThinkingEffort[];
 }
 
 export const MODELS: ModelMeta[] = [
@@ -31,6 +38,8 @@ export const MODELS: ModelMeta[] = [
     providerModel: "deepseek-v4-flash",
     supportsThinking: true,
     supportsVision: false,
+    // DeepSeek 官方 reasoning_effort 只有 high / max 两档，没有 low
+    thinkingEfforts: ["high", "max"],
   },
   {
     id: "deepseek-v4-pro",
@@ -41,6 +50,7 @@ export const MODELS: ModelMeta[] = [
     providerModel: "deepseek-v4-pro",
     supportsThinking: true,
     supportsVision: false,
+    thinkingEfforts: ["high", "max"],
   },
   {
     id: "deepseek-v4-flash-vision-exp",
@@ -61,6 +71,8 @@ export const MODELS: ModelMeta[] = [
     providerModel: "stealth/ox-alpha",
     supportsThinking: true,
     supportsVision: true,
+    // OpenRouter（openai 方言）low / high / max 映射为官方 low / medium / high，三档都合法
+    thinkingEfforts: ["low", "high", "max"],
   },
 ];
 
@@ -74,4 +86,17 @@ export function getModelMeta(id: string): ModelMeta | undefined {
 /** 后端白名单校验：仅放行注册表内存在的模型 id */
 export function isValidModelId(id: unknown): id is string {
   return typeof id === "string" && MODELS.some((m) => m.id === id);
+}
+
+/** 某模型支持的思考档位（未声明时回落通用三档 low/high/max） */
+export function getThinkingEfforts(id: string): ThinkingEffort[] {
+  const meta = getModelMeta(id);
+  return meta?.thinkingEfforts && meta.thinkingEfforts.length > 0
+    ? meta.thinkingEfforts
+    : (["low", "high", "max"] as ThinkingEffort[]);
+}
+
+/** 某模型的默认思考档（档位表第一个元素） */
+export function getDefaultThinkingEffort(id: string): ThinkingEffort {
+  return getThinkingEfforts(id)[0] ?? "low";
 }

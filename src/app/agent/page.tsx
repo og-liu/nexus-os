@@ -23,7 +23,13 @@ import {
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { cn } from "@/lib/utils";
-import { MODELS, DEFAULT_MODEL_ID, getModelMeta } from "@/lib/models";
+import {
+  MODELS,
+  DEFAULT_MODEL_ID,
+  getModelMeta,
+  getThinkingEfforts,
+  getDefaultThinkingEffort,
+} from "@/lib/models";
 import { PageHeader } from "@/components/page-header";
 import { Toast, type ToastData, type ToastType } from "@/components/toast";
 
@@ -159,26 +165,36 @@ function saveModel(id: string, model: string) {
 
 type ThinkingEffort = "low" | "high" | "max";
 
+/** 思考档位 → 按钮文案 */
+const EFFORT_LABELS: Record<ThinkingEffort, string> = {
+  low: "低",
+  high: "高",
+  max: "最高",
+};
+
 function loadThinking(modelId: string): {
   enabled: boolean;
   effort: ThinkingEffort;
 } {
+  // 不同供应商合法档位不同：按模型档位表校验，非法/缺失值回落该模型默认档
+  const efforts = getThinkingEfforts(modelId);
+  const fallback = getDefaultThinkingEffort(modelId);
   try {
     const raw = window.localStorage.getItem(THINKING_PREFIX + modelId);
     if (raw) {
       const parsed = JSON.parse(raw) as { enabled?: boolean; effort?: string };
+      const effort = efforts.includes(parsed.effort as ThinkingEffort)
+        ? (parsed.effort as ThinkingEffort)
+        : fallback;
       return {
         enabled: parsed.enabled === true,
-        effort:
-          parsed.effort === "high" || parsed.effort === "max"
-            ? parsed.effort
-            : "low",
+        effort,
       };
     }
   } catch {
     // 忽略解析失败，回落默认
   }
-  return { enabled: false, effort: "low" };
+  return { enabled: false, effort: fallback };
 }
 
 function saveThinking(
@@ -409,7 +425,9 @@ export default function AgentPage() {
   const [isListening, setIsListening] = useState(false);
   const [toast, setToast] = useState<ToastData | null>(null);
   const [thinkingEnabled, setThinkingEnabled] = useState(false);
-  const [thinkingEffort, setThinkingEffort] = useState<ThinkingEffort>("low");
+  const [thinkingEffort, setThinkingEffort] = useState<ThinkingEffort>(
+    () => getDefaultThinkingEffort(DEFAULT_MODEL_ID),
+  );
   const [openReasoning, setOpenReasoning] = useState<Set<string>>(new Set());
   const [modelId, setModelId] = useState<string>(DEFAULT_MODEL_ID);
   const [modelMenuOpen, setModelMenuOpen] = useState(false);
@@ -438,6 +456,8 @@ export default function AgentPage() {
   const prependingRef = useRef(false);
   // 插入前记录的滚动总高度（插入后用它把视口“顶”回原位）
   const prevScrollHeightRef = useRef(0);
+  // 输入法组合态标记：候选词未敲定（compositionstart→end 之间）按回车不应触发发送
+  const composingRef = useRef(false);
 
   const activeChat = chats.find((c) => c.id === activeChatId);
 
@@ -1318,13 +1338,7 @@ export default function AgentPage() {
                         "flex items-center gap-0.5 rounded-[2px] border border-[#E5E5E5] bg-white p-0.5",
                         isLoading && "opacity-40",
                       )}>
-                        {(
-                          [
-                            ["low", "低"],
-                            ["high", "高"],
-                            ["max", "最高"],
-                          ] as [ThinkingEffort, string][]
-                        ).map(([value, label]) => (
+                        {getThinkingEfforts(modelId).map((value) => (
                           <button
                             key={value}
                             onClick={() => !isLoading && setEffort(value)}
@@ -1337,7 +1351,7 @@ export default function AgentPage() {
                                 : "text-[#666666] hover:text-[#000000]",
                             )}
                           >
-                            {label}
+                            {EFFORT_LABELS[value]}
                           </button>
                         ))}
                       </div>
@@ -1424,8 +1438,18 @@ export default function AgentPage() {
                     isListening ? "正在听你说…" : "给 Agent 发消息…"
                   }
                   onChange={(e) => setInputValue(e.target.value)}
+                  onCompositionStart={() => {
+                    composingRef.current = true;
+                  }}
+                  onCompositionEnd={() => {
+                    composingRef.current = false;
+                  }}
                   onKeyDown={(e) => {
-                    if (e.key === "Enter" && !e.shiftKey) {
+                    if (
+                      e.key === "Enter" &&
+                      !e.shiftKey &&
+                      !composingRef.current
+                    ) {
                       e.preventDefault();
                       handleSend();
                     }

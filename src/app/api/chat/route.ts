@@ -8,8 +8,15 @@ import {
   type ChatMessage,
   type ChatContentPart,
   type ThinkingOptions,
+  type ThinkingEffort,
 } from "@/lib/providers";
-import { isValidModelId, DEFAULT_MODEL_ID, getModelMeta } from "@/lib/models";
+import {
+  isValidModelId,
+  DEFAULT_MODEL_ID,
+  getModelMeta,
+  getThinkingEfforts,
+  getDefaultThinkingEffort,
+} from "@/lib/models";
 import { agentLoop, type ToolCallRecord, type TokenUsage } from "@/lib/agent/loop";
 
 export const runtime = "nodejs";
@@ -115,9 +122,13 @@ export async function POST(req: NextRequest) {
   const supportsVision = getModelMeta(model)?.supportsVision ?? false;
   const effortRaw = body?.thinking?.effort;
   const supportsThinking = getModelMeta(model)?.supportsThinking ?? false;
+  // 档位按模型档位表兜底：非法/缺失值回落该模型默认档（DeepSeek 无 low 档）
+  const efforts = getThinkingEfforts(model);
   const thinking: ThinkingOptions = {
     enabled: supportsThinking && body?.thinking?.enabled === true,
-    effort: effortRaw === "high" || effortRaw === "max" ? effortRaw : "low",
+    effort: efforts.includes(effortRaw as ThinkingEffort)
+      ? (effortRaw as ThinkingEffort)
+      : getDefaultThinkingEffort(model),
   };
 
   if (!content && incomingImages.length === 0) {
