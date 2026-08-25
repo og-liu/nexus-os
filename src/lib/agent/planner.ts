@@ -62,6 +62,7 @@ export async function generatePlan(
   modelId: string,
   userContent: string | ChatContentPart[],
   history: ChatMessage[],
+  signal?: AbortSignal,
 ): Promise<Plan | null> {
   // ── 1. 解析模型与供应商（与 loop.ts 的 callLLM 同一套路由，保证行为一致）──
   const meta = getModelMeta(modelId) ?? getModelMeta(DEFAULT_MODEL_ID);
@@ -101,6 +102,7 @@ export async function generatePlan(
       Authorization: `Bearer ${apiKey}`,
     },
     body: JSON.stringify(body),
+    signal,
   });
 
   if (!res.ok) {

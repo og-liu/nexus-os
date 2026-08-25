@@ -31,6 +31,17 @@ const STEP_MAX_ROUNDS = 4;
 // 重试能让模型换个工具 / 换个参数 / 换种思路再试，提升鲁棒性。
 const STEP_RETRY_LIMIT = 2;
 
+/**
+ * 判断一个异常是否为「取消/中断」触发的 AbortError。
+ *
+ * 为什么需要它：用户主动点「停止」或刷新页面关掉连接，底层的 fetch 会因为 AbortSignal 中止
+ * 而抛出 name 为 "AbortError" 的异常。这类异常不应该被当成「模型报错」去重试，而应该立即
+ * 向上冒泡、让整轮快速收尾。这里单独抽一个判断函数，避免在多处散落魔法字符串。
+ */
+function isAbortError(e: unknown): boolean {
+  return e instanceof Error && e.name === "AbortError";
+}
+
 /** Loop 向外部吐出的事件（SSE 推给前端） */
 export type LoopEvent =
   | { type: "tool_call"; toolName: string; args: Record<string, unknown>; callId: string }
@@ -119,6 +130,7 @@ async function callLLM(
   messages: AgentMessage[],
   thinking: ThinkingOptions,
   onEvent: (event: LoopEvent) => void,
+  signal?: AbortSignal,
 ): Promise<LLMResult> {
   const meta = getModelMeta(modelId) ?? getModelMeta(DEFAULT_MODEL_ID);
   const provider = meta ? PROVIDERS[meta.provider] : undefined;
@@ -153,6 +165,7 @@ async function callLLM(
       Authorization: `Bearer ${apiKey}`,
     },
     body: JSON.stringify(body),
+    signal,
   });
 
   if (!res.ok || !res.body) {
@@ -445,6 +458,8 @@ interface RunContext {
   reasoning: string;
   /** 全程 token 用量累积 */
   usage: TokenUsage;
+  /** 取消信号：用户主动停止 / 客户端断开时触发，贯穿到底层模型请求与每一步循环检查 */
+  signal?: AbortSignal;
 }
 
 /** 深拷贝一份计划的快照（steps 逐个浅拷贝）：事件 / 返回值里暴露的 plan 不能被后续执行原地改掉 */
@@ -474,6 +489,10 @@ async function executeToolCalls(
   let failed = 0;
 
   for (const tc of toolCalls) {
+    // 取消检查：用户中途叫停，立即中断，不再执行剩余的工具调用
+    if (ctx.signal?.aborted) {
+      throw new DOMException("已取消", "AbortError");
+    }
     // 通知前端：开始调用工具
     onEvent({ type: "tool_call", toolName: tc.name, args: tc.args, callId: tc.id });
 
@@ -544,8 +563,10 @@ async function executeOneStep(
     for (let round = 0; round < STEP_MAX_ROUNDS; round++) {
       let result: LLMResult;
       try {
-        result = await callLLM(modelId, ctx.conversation, thinking, onEvent);
+        result = await callLLM(modelId, ctx.conversation, thinking, onEvent, ctx.signal);
       } catch (e) {
+        // 用户取消：signal 已中止，立即上抛终止整轮，不走重试
+        if (isAbortError(e) || ctx.signal?.aborted) throw e;
         // 模型报错（限流 / 网络 / 上游故障等）→ 该次尝试失败，走重试
         lastError = e instanceof Error ? e.message : String(e);
         attemptOk = false;
@@ -621,8 +642,10 @@ async function directReply(
   for (let round = 0; round < STEP_MAX_ROUNDS; round++) {
     let result: LLMResult;
     try {
-      result = await callLLM(modelId, ctx.conversation, thinking, onEvent);
+      result = await callLLM(modelId, ctx.conversation, thinking, onEvent, ctx.signal);
     } catch (e) {
+      // 用户取消：立即上抛终止整轮，不做兜底替换
+      if (isAbortError(e) || ctx.signal?.aborted) throw e;
       // 模型报错（限流 / 网络 / 上游故障），给一句兜底话术，不让本轮挂掉
       return {
         content: "抱歉，我这边回答时遇到点问题，请稍后重试。",
@@ -703,6 +726,10 @@ async function runPlanSteps(
   const totalSteps = plan.steps.length;
 
   for (let i = startIndex; i < plan.steps.length; i++) {
+    // 取消检查：用户叫停后不再开始新的步骤
+    if (ctx.signal?.aborted) {
+      throw new DOMException("已取消", "AbortError");
+    }
     const step = plan.steps[i];
     // 补问步骤走「提问指令」，普通步骤走标准执行指令
     const isAsk = step.askUser === true;
@@ -875,6 +902,7 @@ export async function agentLoop(
   userContent: string | ChatContentPart[],
   thinking: ThinkingOptions,
   onEvent: (event: LoopEvent) => void,
+  signal?: AbortSignal,
 ): Promise<LoopResult> {
   // ── 执行上下文：system + history + 用户消息 作为对话起点 ───────
   // 后续每一步的中间结果（工具调用、步骤结论）都会继续往里追加，
@@ -888,6 +916,7 @@ export async function agentLoop(
     toolRecords: [],
     reasoning: "",
     usage: { promptTokens: 0, completionTokens: 0, totalTokens: 0 },
+    signal,
   };
 
   // ── 1. 生成计划（简单直答直接回答；规划失败也退回直答）────
@@ -903,7 +932,7 @@ export async function agentLoop(
   // 查天气 / 联网搜索），只是不展示计划进度。
   let plan: Plan;
   try {
-    const generated = await generatePlan(modelId, userContent, history);
+    const generated = await generatePlan(modelId, userContent, history, signal);
     if (!generated || generated.steps.length === 0) {
       return directReply(ctx, modelId, thinking, onEvent);
     }
@@ -964,6 +993,7 @@ export async function resumeLoop(
   answer: string,
   thinking: ThinkingOptions,
   onEvent: (event: LoopEvent) => void,
+  signal?: AbortSignal,
 ): Promise<LoopResult> {
   // ── 执行上下文：system + history（history 已含上一轮问句与本轮回答）────
   const ctx: RunContext = {
@@ -971,6 +1001,7 @@ export async function resumeLoop(
     toolRecords: [],
     reasoning: "",
     usage: { promptTokens: 0, completionTokens: 0, totalTokens: 0 },
+    signal,
   };
 
   // ── 1. 找到暂停的补问步骤，把用户回答作为其产出，使命完成 ─────
