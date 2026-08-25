@@ -1144,7 +1144,7 @@ export default function AgentPage() {
                 {messages.map((msg) =>
                   msg.role === "assistant" ? (
                     <div key={msg.id} className="flex items-start gap-2.5">
-                      <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-[2px] bg-[#000000]">
+                      <div className="hidden h-8 w-8 shrink-0 items-center justify-center rounded-[2px] bg-[#000000] sm:flex">
                         <Bot className="h-4.5 w-4.5 text-white" />
                       </div>
                       <div className="min-w-0 break-words rounded-[2px] bg-white px-4 py-3 text-sm leading-relaxed text-[#1F1F1F]">
