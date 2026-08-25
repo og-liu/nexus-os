@@ -20,6 +20,7 @@ import {
 import {
   agentLoop,
   resumeLoop,
+  resumeStoppedLoop,
   type LoopResult,
   type LoopEvent,
   type ToolCallRecord,
@@ -28,6 +29,7 @@ import {
 import {
   savePlan,
   getPausedPlan,
+  getRecoverablePlan,
   updatePlanStatus,
   PLAN_STATUS,
 } from "@/lib/agent/plan-store";
@@ -120,9 +122,12 @@ export async function POST(req: NextRequest) {
     model?: string;
     thinking?: { enabled?: boolean; effort?: string };
     images?: string[];
+    /** 断点恢复标记：为 true 时表示「继续执行上次中断的计划」，此时 content 可为空 */
+    resume?: boolean;
   } | null;
 
   const content = body?.content?.trim() ?? "";
+  const resume = body?.resume === true;
   const sessionId = typeof body?.sessionId === "string" ? body.sessionId : null;
   const incomingImages = Array.isArray(body?.images)
     ? body.images.filter(
@@ -144,7 +149,8 @@ export async function POST(req: NextRequest) {
       : getDefaultThinkingEffort(model),
   };
 
-  if (!content && incomingImages.length === 0) {
+  // 断点恢复（resume）时 content 允许为空——它不是一条新消息，而是一个「继续执行」的动作
+  if (!content && incomingImages.length === 0 && !resume) {
     return new Response("消息不能为空", { status: 400 });
   }
 
@@ -171,21 +177,25 @@ export async function POST(req: NextRequest) {
   // 图片落盘
   const savedPaths = images.map(saveImage).filter((p): p is string => !!p);
 
-  // 落库用户消息（user 消息没有生命周期状态，status 恒为 NULL）
-  db.prepare(
-    `INSERT INTO messages (id, session_id, role, content, images, tool_calls, reasoning, usage, status, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-  ).run(
-    randomUUID(),
-    sid,
-    "user",
-    content,
-    savedPaths.length > 0 ? JSON.stringify(savedPaths) : null,
-    null,
-    null,
-    null,
-    null,
-    now,
-  );
+  // 落库用户消息（user 消息没有生命周期状态，status 恒为 NULL）。
+  // 断点恢复（resume）不是一条新消息，而是「继续执行」的系统动作，不落 user 消息，
+  // 否则历史里会多一条空白的「用户气泡」。
+  if (!resume) {
+    db.prepare(
+      `INSERT INTO messages (id, session_id, role, content, images, tool_calls, reasoning, usage, status, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    ).run(
+      randomUUID(),
+      sid,
+      "user",
+      content,
+      savedPaths.length > 0 ? JSON.stringify(savedPaths) : null,
+      null,
+      null,
+      null,
+      null,
+      now,
+    );
+  }
 
   // 【真停止 / 刷新保留的关键】提前为 assistant 消息 INSERT 一行占位记录（status=running）。
   // 这样在 agentLoop 还没跑完、甚至被中途打断时，这条 assistant 消息在库里已经「存在」，
@@ -245,6 +255,17 @@ export async function POST(req: NextRequest) {
   // 判断该会话是否有「暂停中、等待用户回复」的计划（HITL 补问后）。
   // 有则本轮走续跑（resumeLoop），把用户这轮的 content 当作补问的答案；无则正常走 agentLoop。
   const pausedPlan = getPausedPlan(db, sid);
+
+  // 断点恢复：读取「可恢复的未完成计划」（running / stopped），供 resume 分支与「归档旧计划」使用。
+  const recoverablePlan = getRecoverablePlan(db, sid);
+
+  // resume 请求的前置校验：必须存在「已停止（stopped）」的计划才能续跑。若没有（例如用户
+  // 在别的窗口已放弃、或计划已完成），直接拒绝，并清掉刚才临时创建的 assistant 占位行，
+  // 避免库里残留一条空壳消息。
+  if (resume && (!recoverablePlan || recoverablePlan.status !== "stopped")) {
+    db.prepare(`DELETE FROM messages WHERE id = ?`).run(assistantMsgId);
+    return new Response("没有可恢复的中断任务", { status: 400 });
+  }
 
   const encoder = new TextEncoder();
   const stream = new ReadableStream({
@@ -393,10 +414,23 @@ export async function POST(req: NextRequest) {
           }
         };
 
-        // 根据「是否有待续的暂停计划」分两条路：续跑 / 正常执行
+        // 根据请求类型分三条路：断点恢复 / 补问续跑 / 正常执行
         let loopResult: LoopResult;
-        if (pausedPlan) {
-          // 续跑：用户这轮是回来回答补问的，content 即 answer；history 里已含上一轮问句与本轮回答
+        if (resume && recoverablePlan) {
+          // 断点恢复：先把手里的 stopped 计划翻回 running（这样 loop 内 plan_created 事件触发
+          // 的 savePlan 能原地更新同一条记录、planId 保持不变），再从断点续跑。
+          updatePlanStatus(db, sid, PLAN_STATUS.RUNNING);
+          loopResult = await resumeStoppedLoop(
+            model,
+            SYSTEM_PROMPT,
+            history,
+            { goal: recoverablePlan.goal, steps: recoverablePlan.steps },
+            thinking,
+            handleEvent,
+            req.signal,
+          );
+        } else if (pausedPlan) {
+          // 补问续跑：用户这轮是回来回答补问的，content 即 answer；history 里已含上一轮问句与本轮回答
           loopResult = await resumeLoop(
             model,
             SYSTEM_PROMPT,
@@ -408,6 +442,11 @@ export async function POST(req: NextRequest) {
             req.signal,
           );
         } else {
+          // 正常新消息：若上一轮残留了一份「已停止」的计划，先归档成 cancelled（被这轮新消息取代），
+          // 否则它会一直挂在库里，前端会错误地提示「可继续」。
+          if (recoverablePlan && recoverablePlan.status === "stopped") {
+            updatePlanStatus(db, sid, PLAN_STATUS.CANCELLED);
+          }
           loopResult = await agentLoop(
             model,
             SYSTEM_PROMPT,

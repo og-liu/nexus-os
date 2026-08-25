@@ -42,9 +42,19 @@ export interface TaskPlanRow {
   updated_at: number;
 }
 
-// 「活动中的计划」的 SQL 元组：被 savePlan / getActivePlan / updatePlanStatus 复用，
+// 「活动中的计划」的 SQL 元组：被 savePlan / getActivePlan 复用，
 // 保证「当前计划」的判定口径一致。用模板拼接是因为 better-sqlite3 不方便对 IN 列表做参数化。
 const ACTIVE_STATUSES = `('${PLAN_STATUS.RUNNING}', '${PLAN_STATUS.PAUSED}')`;
+
+// 「未完成」状态的 SQL 元组：running / paused / stopped 都还没有走到终态（done/failed/cancelled）。
+// 供 updatePlanStatus 使用——断点恢复要把 stopped 翻回 running、放弃要把 stopped 翻成 cancelled，
+// 都需要能「够得到」stopped 这条记录，所以这里的口径比 ACTIVE_STATUSES 更宽。
+const UNFINISHED_STATUSES = `('${PLAN_STATUS.RUNNING}', '${PLAN_STATUS.PAUSED}', '${PLAN_STATUS.STOPPED}')`;
+
+// 「可恢复」状态的 SQL 元组：断点恢复只针对 running / stopped。
+// 为什么不含 paused：paused 是「补问步骤在等你回复」，走的是 resumeLoop（补问续跑），
+// 而不是断点恢复；两者恢复动作不同，不能混用同一个读取口径。
+const RECOVERABLE_STATUSES = `('${PLAN_STATUS.RUNNING}', '${PLAN_STATUS.STOPPED}')`;
 
 /**
  * 保存（或更新）某会话的当前计划。
@@ -165,10 +175,56 @@ export function getPausedPlan(
 }
 
 /**
- * 更新某会话当前活动计划的状态。
+ * 读取某会话「可恢复的未完成计划」：running 或 stopped。
  *
- * 典型用法：执行到 plan_done 时把状态从 running 翻成 done。
- * 若该会话没有活动计划，静默跳过（幂等，不抛错）。
+ * 为什么需要它（区别于 getActivePlan / getPausedPlan）：
+ *   - getActivePlan：只认 running / paused（「还在推进中」），route 用它做进度透传；
+ *   - getPausedPlan：只认 paused（「在等补问回复」），route 用它决定要不要走 resumeLoop；
+ *   - 而这里关心的是「有没有一份半途而废、还能接着跑的计划」——用户点停止 / 刷新断连后，
+ *     计划被标成了 stopped（或极短暂的 running 残留），前端要据此渲染「已中断 + 继续 / 放弃」入口。
+ *
+ * @returns 计划的 goal / steps（含各步 status/result）+ 当前状态（running 还是 stopped）；无则返回 null
+ */
+export function getRecoverablePlan(
+  db: Database.Database,
+  sessionId: string,
+): {
+  goal: string;
+  steps: PlanStep[];
+  status: "running" | "stopped";
+} | null {
+  const row = db
+    .prepare(
+      `SELECT * FROM task_plans
+       WHERE session_id = ? AND status IN ${RECOVERABLE_STATUSES}
+       ORDER BY created_at DESC LIMIT 1`,
+    )
+    .get(sessionId) as TaskPlanRow | undefined;
+
+  if (!row) return null;
+
+  // steps 存的是 JSON 字符串，读回来可能损坏，损坏时按「没有可恢复的计划」处理
+  try {
+    const steps = JSON.parse(row.steps) as PlanStep[];
+    if (!Array.isArray(steps)) return null;
+    return {
+      goal: row.goal ?? "",
+      steps,
+      status: row.status === "running" ? "running" : "stopped",
+    };
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * 更新某会话「未完成计划」的状态。
+ *
+ * 覆盖 running / paused / stopped 三种未完成状态（UNFINISHED_STATUSES），典型用法：
+ *   - 执行到计划收尾 / 取消 / 报错 → 翻成 done / cancelled / failed / stopped；
+ *   - 断点恢复点「继续」→ 把 stopped 翻回 running；
+ *   - 断点恢复点「放弃」→ 把 stopped 翻成 cancelled。
+ * 若该会话没有未完成计划，静默跳过（幂等，不抛错）。
  */
 export function updatePlanStatus(
   db: Database.Database,
@@ -179,6 +235,6 @@ export function updatePlanStatus(
   db.prepare(
     `UPDATE task_plans
      SET status = ?, updated_at = ?
-     WHERE session_id = ? AND status IN ${ACTIVE_STATUSES}`,
+     WHERE session_id = ? AND status IN ${UNFINISHED_STATUSES}`,
   ).run(status, now, sessionId);
 }

@@ -112,6 +112,8 @@ interface PlanProgress {
   completed: number;
   /** 步骤总数 */
   total: number;
+  /** 是否「已中断、可恢复」：停止/刷新后读回的 stopped 计划，渲染「继续/放弃」入口 */
+  stopped?: boolean;
 }
 
 interface Message {
@@ -327,7 +329,17 @@ function rowToMessage(m: {
 // 最关键的「暂停态」：补问那一步会额外展开「等待你回复 + 问题内容」，底部还有一条
 // 黑底提示「已暂停等你补充信息」，让用户一眼看出「现在轮到我了，不是卡死」。
 
-function PlanBlock({ plan }: { plan: PlanProgress }) {
+function PlanBlock({
+  plan,
+  onResume,
+  onAbandon,
+}: {
+  plan: PlanProgress;
+  /** 点「继续执行」：从断点恢复上次中断的计划 */
+  onResume?: () => void;
+  /** 点「放弃」：丢弃这份半截计划 */
+  onAbandon?: () => void;
+}) {
   if (!plan.steps || plan.steps.length === 0) return null;
 
   // 各状态对应的图标（纯黑白灰 + 少量语义色，对齐全局视觉风格）
@@ -400,6 +412,24 @@ function PlanBlock({ plan }: { plan: PlanProgress }) {
       {plan.paused && !plan.done ? (
         <div className="mt-2 rounded-[2px] bg-[#000000] px-2 py-1.5 text-[11px] text-white">
           已暂停等你补充信息，回复后我会从断点继续执行
+        </div>
+      ) : null}
+
+      {/* 已中断（stopped）：展示「继续 / 放弃」入口，让用户决定接着跑还是丢弃这半截任务 */}
+      {plan.stopped && !plan.done ? (
+        <div className="mt-2 flex items-center gap-2">
+          <button
+            onClick={onResume}
+            className="flex items-center gap-1 rounded-[2px] bg-[#000000] px-2.5 py-1 text-xs font-medium text-white transition-opacity hover:opacity-85"
+          >
+            继续执行
+          </button>
+          <button
+            onClick={onAbandon}
+            className="rounded-[2px] border border-[#E5E5E5] bg-white px-2.5 py-1 text-xs text-[#1F1F1F] transition-colors hover:bg-[#F5F5F5]"
+          >
+            放弃
+          </button>
         </div>
       ) : null}
     </div>
@@ -665,11 +695,55 @@ export default function AgentPage() {
         tool_calls?: string | null;
         reasoning?: string | null;
         usage?: string | null;
+        status?: string | null;
         created_at?: number;
       }>;
       hasMore?: boolean;
+      plan?: {
+        goal: string;
+        steps: Array<{
+          id: string;
+          description: string;
+          status?: "pending" | "running" | "done" | "failed" | "skipped" | "paused";
+        }>;
+        status: "running" | "stopped";
+      } | null;
     };
-    setMessages((data.messages ?? []).map(rowToMessage));
+    const msgs = (data.messages ?? []).map(rowToMessage);
+    // 断点恢复：把后端返回的「可恢复计划」（仅 stopped）挂到最后一次被停止的消息上，
+    // 重画进度面板并渲染「继续 / 放弃」入口。running 是 stopped 落库前的短暂中间态，
+    // 这里不特殊处理（刷新后很快会由批次2的 abort 机制转成 stopped）。
+    if (data.plan && data.plan.status === "stopped") {
+      const recovered: PlanProgress = {
+        goal: data.plan.goal,
+        steps: data.plan.steps.map((s) => ({
+          id: s.id,
+          description: s.description,
+          // running 是「被打断时正在跑」的残留，恢复后会重新执行，显示为 pending 更准确
+          status:
+            s.status === "done"
+              ? ("done" as const)
+              : s.status === "failed"
+                ? ("failed" as const)
+                : s.status === "paused"
+                  ? ("paused" as const)
+                  : ("pending" as const),
+        })),
+        paused: false,
+        done: false,
+        stopped: true,
+        completed: data.plan.steps.filter((s) => s.status === "done").length,
+        total: data.plan.steps.length,
+      };
+      // 从最后往前找，挂到「最后一条被停止（stopped）的 assistant 消息」上
+      for (let i = msgs.length - 1; i >= 0; i--) {
+        if (msgs[i].role === "assistant" && msgs[i].stopped) {
+          msgs[i].plan = recovered;
+          break;
+        }
+      }
+    }
+    setMessages(msgs);
     setHasMore(!!data.hasMore);
     loadingOlderRef.current = false;
     stickToBottomRef.current = true; // 打开会话默认贴底
@@ -901,32 +975,34 @@ export default function AgentPage() {
     abortRef.current?.abort();
   };
 
-  const handleSend = async () => {
-    const text = inputValue.trim();
-    if (!text && pendingImages.length === 0) return;
-    if (sendingRef.current) return;
+  // 发一轮对话的核心流程：本地占位 + 流式请求 + 事件处理 + 收尾。
+  // handleSend（正常聊天）与 handleResume（断点恢复「继续」）都走这里，差异只在：
+  //   - content / images 是否为空；
+  //   - 是否带 resume 标记，让后端从「最后完成的步骤之后」续跑。
+  const sendMessage = async (
+    content: string,
+    images: string[] | undefined,
+    resume: boolean,
+  ) => {
     sendingRef.current = true;
-    // 新一轮发送：清掉上一轮可能残留的「主动停止」标记，避免影响这轮正常的异常判断
+    // 新一轮：清掉上一轮可能残留的「主动停止」标记，避免影响这轮正常的异常判断
     userStoppedRef.current = false;
 
-    const images = pendingImages.length > 0 ? [...pendingImages] : undefined;
-    setInputValue("");
-    setPendingImages([]);
-
-    // 本地先 push 用户消息 + 空白的助手占位消息
-    const userMsg: Message = {
-      id: `tmp-u-${Date.now()}`,
-      role: "user",
-      content: text,
-      images,
-    };
+    // 本地先 push 消息：正常聊天是「用户消息 + 助手占位」；断点恢复没有用户消息，只 push 助手占位
     const assistantMsgId = `tmp-a-${Date.now()}`;
     stickToBottomRef.current = true; // 发新消息时强制跟随到最底
-    setMessages((prev) => [
-      ...prev,
-      userMsg,
-      { id: assistantMsgId, role: "assistant", content: "" },
-    ]);
+    if (resume) {
+      setMessages((prev) => [
+        ...prev,
+        { id: assistantMsgId, role: "assistant" as const, content: "" },
+      ]);
+    } else {
+      setMessages((prev) => [
+        ...prev,
+        { id: `tmp-u-${Date.now()}`, role: "user" as const, content, images },
+        { id: assistantMsgId, role: "assistant" as const, content: "" },
+      ]);
+    }
     // 思考过程默认收起：不自动加入展开集合，用户点击「思考过程」时才展开，避免占篇幅
     setIsLoading(true);
 
@@ -949,11 +1025,12 @@ export default function AgentPage() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          content: text,
+          content,
           sessionId: activeChatId,
           model: modelId,
           thinking: { enabled: thinkingEnabled, effort: thinkingEffort },
           images,
+          ...(resume ? { resume: true } : {}),
         }),
         signal: controller.signal,
       });
@@ -1324,6 +1401,38 @@ export default function AgentPage() {
     }
   };
 
+  // 正常发送一条消息：取输入 → 交给 sendMessage 走流式聊天
+  const handleSend = async () => {
+    const text = inputValue.trim();
+    if (!text && pendingImages.length === 0) return;
+    if (sendingRef.current) return;
+
+    const images = pendingImages.length > 0 ? [...pendingImages] : undefined;
+    setInputValue("");
+    setPendingImages([]);
+
+    await sendMessage(text, images, false);
+  };
+
+  // 断点恢复「继续」：以 resume 标记请求后端从最后完成的步骤之后续跑。
+  // 没有新输入（content 为空、无图片），后端据此走 resumeStoppedLoop 而非 agentLoop。
+  const handleResume = async () => {
+    if (sendingRef.current) return;
+    await sendMessage("", undefined, true);
+  };
+
+  // 断点恢复「放弃」：调 /api/plan 把 stopped 计划翻 cancelled，再重载当前会话，
+  // 让 getRecoverablePlan 读不到计划，从而隐藏「继续 / 放弃」入口。
+  const handleAbandon = async () => {
+    if (!activeChatId) return;
+    await fetch("/api/plan", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ sessionId: activeChatId }),
+    });
+    await selectChat(activeChatId);
+  };
+
   const canSend =
     (inputValue.trim().length > 0 || pendingImages.length > 0) && !isLoading;
 
@@ -1533,7 +1642,13 @@ export default function AgentPage() {
                             )}
                           </div>
                         ) : null}
-                        {msg.plan ? <PlanBlock plan={msg.plan} /> : null}
+                        {msg.plan ? (
+                          <PlanBlock
+                            plan={msg.plan}
+                            onResume={handleResume}
+                            onAbandon={handleAbandon}
+                          />
+                        ) : null}
                         {msg.toolCalls && msg.toolCalls.length > 0 ? (
                           <ToolCallsBlock toolCalls={msg.toolCalls} />
                         ) : null}

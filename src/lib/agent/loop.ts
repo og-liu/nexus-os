@@ -1050,3 +1050,127 @@ export async function resumeLoop(
   // ── 5. 全部完成 → 汇总 + 收尾 ─────────────────────────────────
   return finishPlan(ctx, modelId, thinking, plan, onEvent);
 }
+
+/**
+ * 组装「断点恢复」的上下文摘要：把已完成步骤的结果摘要成一段话喂给模型。
+ *
+ * 与 buildResumeRecap（补问恢复）的区别：补问恢复要把「你问了什么、用户答了什么」补回来，
+ * 而断点恢复没有补问、没有答案，只是「中途被打断、现在接着做」，所以只需要回放已完成/失败
+ * 步骤的结果，让模型续跑时不失忆。
+ */
+function buildStopResumeRecap(plan: Plan): string {
+  const lines: string[] = [];
+  lines.push(
+    "（承接上一轮：你之前已经把这批任务拆成步骤逐一执行，中途被打断，现在继续完成剩下的步骤。）",
+  );
+  lines.push("");
+
+  const doneSteps = plan.steps.filter((s) => s.status === "done");
+  if (doneSteps.length > 0) {
+    lines.push("已经完成的步骤及其结果：");
+    for (const s of doneSteps) {
+      lines.push(`- ${s.description}：${s.result ?? ""}`);
+    }
+    lines.push("");
+  }
+
+  const failedSteps = plan.steps.filter((s) => s.status === "failed");
+  if (failedSteps.length > 0) {
+    lines.push("已经失败（跳过）的步骤：");
+    for (const s of failedSteps) {
+      lines.push(`- ${s.description}`);
+    }
+    lines.push("");
+  }
+
+  lines.push("请从下一个还未完成的步骤继续执行。");
+  return lines.join("\n");
+}
+
+/**
+ * 从「停止点」断点恢复：把上次中断的计划接着跑完。
+ *
+ * 与 resumeLoop（补问续跑）的区别：
+ *   - resumeLoop 是「补问步骤等你回复」后继续，需要把补问步骤的答案填回去、
+ *     并从补问步骤之后继续；
+ *   - 本函数是「用户主动停止 / 刷新断连」后继续，没有补问、没有答案，
+ *     只需找到「最后一个已完成步骤」，从它之后继续。
+ *
+ * 一个容易踩的坑：被停止的那一刻，可能有某个步骤正处于 running（跑了一半被打断）。
+ * 它的 status 还挂在 "running" 上，但那次执行已经死了。恢复时不能把它当 done（它没跑完），
+ * 必须重置回 pending 重新执行——否则会凭空少一步。
+ *
+ * @param modelId      项目内模型 id
+ * @param systemPrompt 系统提示词
+ * @param history      历史消息（不含被打断那轮未完成的占位）
+ * @param plan         上次中断时持久化下来的计划（含各步 status/result）
+ * @param thinking     深度思考配置
+ * @param onEvent      事件回调（SSE 推给前端）
+ * @returns LoopResult：同 agentLoop（可能再次暂停，也可能正常完成）
+ */
+export async function resumeStoppedLoop(
+  modelId: string,
+  systemPrompt: string,
+  history: ChatMessage[],
+  plan: Plan,
+  thinking: ThinkingOptions,
+  onEvent: (event: LoopEvent) => void,
+  signal?: AbortSignal,
+): Promise<LoopResult> {
+  // ── 执行上下文：system + history ─────────────────────────────
+  const ctx: RunContext = {
+    conversation: [{ role: "system", content: systemPrompt }, ...history],
+    toolRecords: [],
+    reasoning: "",
+    usage: { promptTokens: 0, completionTokens: 0, totalTokens: 0 },
+    signal,
+  };
+
+  // ── 1. 定位断点：最后一个「已完成」步骤的下标；残留的 running 步骤重置回 pending ──
+  //   遍历找出最后一个 done 下标，同时把中断时残留的 running 步骤收回到 pending（重新执行）。
+  let lastDoneIndex = -1;
+  for (let i = 0; i < plan.steps.length; i++) {
+    const s = plan.steps[i];
+    if (s.status === "done") {
+      lastDoneIndex = i;
+    } else if (s.status === "running") {
+      // 被停止时正在跑、但没跑完：不能当 done，重置为待执行
+      s.status = "pending";
+    }
+  }
+  const startIndex = lastDoneIndex + 1;
+
+  // ── 2. 上下文重建：把已完成步骤的结果摘要喂进对话，避免续跑「失忆」 ───────────
+  ctx.conversation.push({
+    role: "user",
+    content: buildStopResumeRecap(plan),
+  });
+
+  // ── 3. 发恢复后计划快照（plan_created）让前端重画进度 ───────────────────
+  //   复用 plan_created 事件（route 收到它时本就 savePlan("running")），
+  //   这样断点恢复天然把 stopped 计划翻回 running，route 层无需额外分支。
+  onEvent({
+    type: "plan_created",
+    goal: plan.goal,
+    steps: snapshotPlan(plan).steps,
+  });
+
+  // ── 4. 从断点继续执行剩余步骤 ─────────────────────────────────────
+  const run = await runPlanSteps(ctx, modelId, thinking, plan, startIndex, onEvent);
+
+  if (run.paused) {
+    // 续跑过程中又遇到一个补问步骤 → 再次暂停（返回新快照）
+    return {
+      content: plan.steps[run.pausedIndex].result ?? "",
+      reasoning: ctx.reasoning,
+      toolCalls: ctx.toolRecords,
+      usage: ctx.usage,
+      paused: true,
+      plan: snapshotPlan(plan),
+      pausedIndex: run.pausedIndex,
+    };
+  }
+
+  // ── 5. 全部完成 → 汇总 + 收尾 ─────────────────────────────────
+  return finishPlan(ctx, modelId, thinking, plan, onEvent);
+}

@@ -1,5 +1,6 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { getDb } from "@/lib/db";
+import { getRecoverablePlan } from "@/lib/agent/plan-store";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -48,7 +49,12 @@ export async function GET(
   // 裁掉多取的那 1 条，再倒回正序（ASC）给前端展示
   const messages = (hasMore ? rows.slice(0, limit) : rows).reverse();
 
-  return NextResponse.json({ session, messages, hasMore });
+  // 断点恢复：顺带返回该会话「可恢复的未完成计划」（running / stopped）。
+  // 前端据此在最后一次中断的那条 assistant 消息上重画进度面板 + 「继续 / 放弃」入口。
+  // 只在首页（before 为空）返回；翻更早的历史页时不需要，也避免重复携带。
+  const plan = before == null ? getRecoverablePlan(db, id) : null;
+
+  return NextResponse.json({ session, messages, hasMore, plan });
 }
 
 export async function DELETE(
