@@ -1002,8 +1002,15 @@ export default function AgentPage() {
         { id: assistantMsgId, role: "assistant" as const, content: "" },
       ]);
     } else {
+      // 发新消息 = 上一轮任务被取代：把仍在「已停止」态的任务即时归档成「已放弃」，
+      // 并摘掉它的进度面板（「继续/放弃」按钮随之消失）。与后端在收到新消息时把旧
+      // stopped 计划翻 cancelled 的逻辑对齐，避免刷新前 UI 残留两个「可恢复」任务。
       setMessages((prev) => [
-        ...prev,
+        ...prev.map((m) =>
+          m.role === "assistant" && m.stopped
+            ? { ...m, stopped: false, cancelled: true, plan: undefined }
+            : m,
+        ),
         { id: `tmp-u-${Date.now()}`, role: "user" as const, content, images },
         { id: assistantMsgId, role: "assistant" as const, content: "" },
       ]);
@@ -1660,13 +1667,14 @@ export default function AgentPage() {
                         {msg.toolCalls && msg.toolCalls.length > 0 ? (
                           <ToolCallsBlock toolCalls={msg.toolCalls} />
                         ) : null}
+                        {/* 兜底转圈只在「内容为空且未停止/未归档」时显示；stopped/cancelled 已是终态必须收敛转圈，否则半截空消息永久空转 */}
                         {msg.content ? (
                           <div className="markdown-body">
                             <ReactMarkdown remarkPlugins={[remarkGfm]}>
                               {msg.content}
                             </ReactMarkdown>
                           </div>
-                        ) : msg.stopped ? null : msg.toolCalls?.some(
+                        ) : msg.stopped || msg.cancelled ? null : msg.toolCalls?.some(
                             (tc) => tc.status === "running",
                           ) ? null : (
                           <Loader2 className="h-4 w-4 animate-spin text-[#A0A8B4]" />
