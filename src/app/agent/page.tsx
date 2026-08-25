@@ -86,6 +86,33 @@ interface TokenUsage {
   totalTokens: number;
 }
 
+// 计划进度里的单个步骤（前端展示态；与后端 PlanStep 对齐，但只保留前端渲染所需信息）
+interface PlanStepUi {
+  id: string;
+  description: string;
+  status: "pending" | "running" | "done" | "failed" | "paused";
+  /** 步骤完成后的文本结果（step_done 事件带回，暂不展示，留给后续扩展） */
+  result?: string;
+  /** 步骤失败原因（step_failed 事件带回） */
+  error?: string;
+  /** 补问步骤抛给用户的问题（plan_paused 事件带回） */
+  question?: string;
+}
+
+// 计划进度：一次任务规划（Plan-and-Execute）的执行进度，挂在这轮的 assistant 消息上做展示
+interface PlanProgress {
+  goal: string;
+  steps: PlanStepUi[];
+  /** 是否停在「补问步骤、等用户输入」的暂停态 */
+  paused: boolean;
+  /** 计划是否已收尾（plan_done） */
+  done: boolean;
+  /** 已完成的步骤数 */
+  completed: number;
+  /** 步骤总数 */
+  total: number;
+}
+
 interface Message {
   id: string;
   role: "user" | "assistant";
@@ -95,6 +122,8 @@ interface Message {
   toolCalls?: ToolCallEvent[];
   usage?: TokenUsage;
   created_at?: number;
+  /** 这轮任务规划的执行进度（收到 plan_created 后挂上，随 step_*、plan_* 事件逐步刷新） */
+  plan?: PlanProgress;
 }
 
 interface SessionMeta {
@@ -276,6 +305,98 @@ function rowToMessage(m: {
     usage,
     created_at: m.created_at,
   };
+}
+
+// ---------- 计划进度展示组件（任务规划：Plan-and-Execute） ----------
+//
+// 什么时候会有这个面板：模型把「一句话需求」拆成一串步骤、逐步骤执行时，
+// 后端会推 plan_created → step_* → plan_paused / plan_done 这一串事件。
+// 前端把这些事件翻译成一张「进度清单」挂在 assistant 消息上：
+//   - 灰色空心圆 = 还没轮到（pending）
+//   - 转圈        = 正在做（running）
+//   - 绿色对勾    = 做完了（done）
+//   - 橙色叉      = 做失败了，跳过（failed）
+//   - 蓝色小时钟  = 补问步骤，停下来等你回复（paused）
+// 最关键的「暂停态」：补问那一步会额外展开「等待你回复 + 问题内容」，底部还有一条
+// 黑底提示「已暂停等你补充信息」，让用户一眼看出「现在轮到我了，不是卡死」。
+
+function PlanBlock({ plan }: { plan: PlanProgress }) {
+  if (!plan.steps || plan.steps.length === 0) return null;
+
+  // 各状态对应的图标（纯黑白灰 + 少量语义色，对齐全局视觉风格）
+  const statusIcon = (s: PlanStepUi["status"]) => {
+    switch (s) {
+      case "running":
+        return <Loader2 className="h-3 w-3 shrink-0 animate-spin text-[#000000]" />;
+      case "done":
+        return <CheckCircle2 className="h-3 w-3 shrink-0 text-[#34C759]" />;
+      case "failed":
+        return <XCircle className="h-3 w-3 shrink-0 text-[#FF9500]" />;
+      case "paused":
+        return <Clock3 className="h-3 w-3 shrink-0 text-[#007AFF]" />;
+      default:
+        return (
+          <span className="mt-0.5 h-2.5 w-2.5 shrink-0 rounded-full border border-[#C9C9C9]" />
+        );
+    }
+  };
+
+  return (
+    <div className="mb-2 rounded-[2px] bg-[#F5F5F5] px-3 py-2">
+      {/* 计划目标 + 进度计数 */}
+      <div className="flex items-center justify-between gap-2">
+        <span className="min-w-0 truncate text-xs font-medium text-[#1F1F1F]">
+          {plan.goal || "任务计划"}
+        </span>
+        <span className="shrink-0 text-[11px] tabular-nums text-[#A0A8B4]">
+          {plan.done ? "已完成" : `${plan.completed}/${plan.total}`}
+        </span>
+      </div>
+
+      {/* 步骤清单 */}
+      <div className="mt-1.5 flex flex-col gap-1">
+        {plan.steps.map((s) => (
+          <div key={s.id}>
+            <div className="flex items-start gap-1.5">
+              <span className="mt-0.5">{statusIcon(s.status)}</span>
+              <span
+                className={cn(
+                  "min-w-0 break-words text-xs leading-relaxed",
+                  s.status === "pending"
+                    ? "text-[#A0A8B4]"
+                    : s.status === "failed"
+                      ? "text-[#FF9500]"
+                      : "text-[#1F1F1F]",
+                )}
+              >
+                {s.description}
+              </span>
+            </div>
+            {/* 补问步骤：突出展示「等待你回复」+ 问题内容 */}
+            {s.status === "paused" && s.question ? (
+              <div className="mt-1 ml-4 rounded-[2px] border border-[#E5E5E5] bg-white px-2 py-1.5">
+                <span className="text-[11px] font-medium text-[#007AFF]">等待你回复</span>
+                <p className="mt-0.5 whitespace-pre-wrap break-words text-xs leading-relaxed text-[#1F1F1F]">
+                  {s.question}
+                </p>
+              </div>
+            ) : null}
+            {/* 失败步骤：附失败原因 */}
+            {s.status === "failed" && s.error ? (
+              <div className="mt-0.5 ml-4 text-[11px] text-[#FF9500]">{s.error}</div>
+            ) : null}
+          </div>
+        ))}
+      </div>
+
+      {/* 暂停态总提示：黑底醒目，明确「现在轮到你，不是卡死」 */}
+      {plan.paused && !plan.done ? (
+        <div className="mt-2 rounded-[2px] bg-[#000000] px-2 py-1.5 text-[11px] text-white">
+          已暂停等你补充信息，回复后我会从断点继续执行
+        </div>
+      ) : null}
+    </div>
+  );
 }
 
 // ---------- 工具调用展示组件（紧凑折叠式） ----------
@@ -841,7 +962,20 @@ export default function AgentPage() {
           const payload = trimmed.slice(5).trim();
           try {
             const obj = JSON.parse(payload) as {
-              type: "delta" | "reasoning" | "error" | "done" | "tool_call" | "tool_result" | "tool_error";
+              type:
+                | "delta"
+                | "reasoning"
+                | "error"
+                | "done"
+                | "tool_call"
+                | "tool_result"
+                | "tool_error"
+                | "plan_created"
+                | "step_start"
+                | "step_done"
+                | "step_failed"
+                | "plan_paused"
+                | "plan_done";
               content?: string;
               message?: string;
               sessionId?: string;
@@ -852,6 +986,19 @@ export default function AgentPage() {
               result?: unknown;
               error?: string;
               usage?: TokenUsage;
+              // ── 计划进度事件字段（与后端 loop.ts 的 LoopEvent 对齐） ──
+              goal?: string;
+              steps?: Array<{
+                id: string;
+                description: string;
+                status?: "pending" | "running" | "done" | "failed" | "skipped" | "paused";
+              }>;
+              stepId?: string;
+              index?: number;
+              total?: number;
+              description?: string;
+              question?: string;
+              completed?: number;
             };
             if (obj.type === "reasoning" && obj.content) {
               setMessages((prev) =>
@@ -917,6 +1064,141 @@ export default function AgentPage() {
                             ? { ...tc, status: "error" as const, error: obj.error }
                             : tc,
                         ),
+                      }
+                    : m,
+                ),
+              );
+            // ── 任务规划（Plan-and-Execute）事件：刷新这轮消息上的计划进度面板 ──
+            } else if (obj.type === "plan_created" && obj.goal && obj.steps) {
+              // 收到计划：初始化进度面板。
+              // 关键：继承后端 steps 已带的 status（不要一律重置成 pending）——
+              // 断点续跑时，后端 resumeLoop 发的 plan_created 快照里「已完成步骤」已是 done，
+              // 只有继承它，续跑这一轮的面板才不会把前面做完的步骤又退回灰色。
+              const createdSteps = obj.steps ?? [];
+              setMessages((prev) =>
+                prev.map((m) =>
+                  m.id === assistantMsgId
+                    ? {
+                        ...m,
+                        plan: {
+                          goal: obj.goal!,
+                          steps: createdSteps.map((s) => ({
+                            id: s.id,
+                            description: s.description,
+                            status:
+                              s.status === "done"
+                                ? ("done" as const)
+                                : s.status === "failed"
+                                  ? ("failed" as const)
+                                  : s.status === "paused"
+                                    ? ("paused" as const)
+                                    : ("pending" as const),
+                          })),
+                          paused: false,
+                          done: false,
+                          completed: createdSteps.filter((s) => s.status === "done")
+                            .length,
+                          total: createdSteps.length,
+                        },
+                      }
+                    : m,
+                ),
+              );
+            } else if (obj.type === "step_start" && obj.stepId) {
+              // 开始执行某一步：把这一步浮起为 running
+              setMessages((prev) =>
+                prev.map((m) =>
+                  m.id === assistantMsgId && m.plan
+                    ? {
+                        ...m,
+                        plan: {
+                          ...m.plan,
+                          steps: m.plan.steps.map((s) =>
+                            s.id === obj.stepId ? { ...s, status: "running" as const } : s,
+                          ),
+                        },
+                      }
+                    : m,
+                ),
+              );
+            } else if (obj.type === "step_done" && obj.stepId) {
+              // 某一步完成：标 done，完成计数 +1
+              setMessages((prev) =>
+                prev.map((m) =>
+                  m.id === assistantMsgId && m.plan
+                    ? {
+                        ...m,
+                        plan: {
+                          ...m.plan,
+                          completed: m.plan.completed + 1,
+                          steps: m.plan.steps.map((s) =>
+                            s.id === obj.stepId
+                              ? {
+                                  ...s,
+                                  status: "done" as const,
+                                  result:
+                                    typeof obj.result === "string" ? obj.result : undefined,
+                                }
+                              : s,
+                          ),
+                        },
+                      }
+                    : m,
+                ),
+              );
+            } else if (obj.type === "step_failed" && obj.stepId) {
+              // 某一步失败（重试耗尽被跳过）：标 failed，附失败原因
+              setMessages((prev) =>
+                prev.map((m) =>
+                  m.id === assistantMsgId && m.plan
+                    ? {
+                        ...m,
+                        plan: {
+                          ...m.plan,
+                          steps: m.plan.steps.map((s) =>
+                            s.id === obj.stepId
+                              ? { ...s, status: "failed" as const, error: obj.error }
+                              : s,
+                          ),
+                        },
+                      }
+                    : m,
+                ),
+              );
+            } else if (obj.type === "plan_paused" && obj.stepId) {
+              // 补问步骤触发暂停：把这一步标 paused + 挂上问题，整条计划进入「等你输入」态
+              setMessages((prev) =>
+                prev.map((m) =>
+                  m.id === assistantMsgId && m.plan
+                    ? {
+                        ...m,
+                        plan: {
+                          ...m.plan,
+                          paused: true,
+                          steps: m.plan.steps.map((s) =>
+                            s.id === obj.stepId
+                              ? { ...s, status: "paused" as const, question: obj.question }
+                              : s,
+                          ),
+                        },
+                      }
+                    : m,
+                ),
+              );
+            } else if (obj.type === "plan_done") {
+              // 计划收尾：标记完成、解除暂停、用最终计数覆盖
+              setMessages((prev) =>
+                prev.map((m) =>
+                  m.id === assistantMsgId && m.plan
+                    ? {
+                        ...m,
+                        plan: {
+                          ...m.plan,
+                          done: true,
+                          paused: false,
+                          completed: obj.completed ?? m.plan.total,
+                          total: obj.total ?? m.plan.total,
+                        },
                       }
                     : m,
                 ),
@@ -1189,6 +1471,7 @@ export default function AgentPage() {
                             )}
                           </div>
                         ) : null}
+                        {msg.plan ? <PlanBlock plan={msg.plan} /> : null}
                         {msg.toolCalls && msg.toolCalls.length > 0 ? (
                           <ToolCallsBlock toolCalls={msg.toolCalls} />
                         ) : null}
