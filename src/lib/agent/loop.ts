@@ -621,6 +621,87 @@ async function executeOneStep(
 }
 
 /**
+ * 简单直答：不做规划、不发任何计划/步骤事件，直接围绕用户消息做「单轮或多轮 ReAct」回答。
+ *
+ * 为什么单独一条路径，而不是复用 executeOneStep / runPlanSteps：那些函数是围绕「步骤」设计的
+ * ——会 push 一条「第 x/y 步」的指令、发 step_start / step_done，前端据此渲染「计划进度面板」。
+ * 而打招呼、闲聊、追问这类简单直答根本没有「计划」这回事，挂一个进度面板反而突兀
+ * （用户会看到「回答用户的问题 / 已完成」这种多余的框）。所以这里只复用最底层的 callLLM +
+ * executeToolCalls，跳过一切「步骤」语义与计划事件，前端自然不渲染进度面板。
+ *
+ * @returns LoopResult（不含 plan 字段，route 层不会落任何计划记录）
+ */
+async function directReply(
+  ctx: RunContext,
+  modelId: string,
+  thinking: ThinkingOptions,
+  onEvent: (event: LoopEvent) => void,
+): Promise<LoopResult> {
+  // 多轮 ReAct：模型回答若发起工具调用（如查天气、搜索），执行完回填再让模型综合，
+  // 直到给出纯文本答案。轮次上限复用 STEP_MAX_ROUNDS，防止模型反复调工具不收敛。
+  for (let round = 0; round < STEP_MAX_ROUNDS; round++) {
+    let result: LLMResult;
+    try {
+      result = await callLLM(modelId, ctx.conversation, thinking, onEvent);
+    } catch (e) {
+      // 模型报错（限流 / 网络 / 上游故障），给一句兜底话术，不让本轮挂掉
+      return {
+        content: "抱歉，我这边回答时遇到点问题，请稍后重试。",
+        reasoning: ctx.reasoning,
+        toolCalls: ctx.toolRecords,
+        usage: ctx.usage,
+        paused: false,
+      };
+    }
+    ctx.reasoning += result.reasoning;
+    accumulateUsage(ctx, result.usage);
+
+    // 模型没再调工具 → 这就是最终回答
+    if (result.toolCalls.length === 0) {
+      ctx.conversation.push({ role: "assistant", content: result.content });
+      return {
+        content: result.content,
+        reasoning: ctx.reasoning,
+        toolCalls: ctx.toolRecords,
+        usage: ctx.usage,
+        paused: false,
+      };
+    }
+
+    // 有工具调用：先回填 assistant 的 tool_calls 消息，再执行工具回填结果，回到循环让模型综合
+    ctx.conversation.push({
+      role: "assistant",
+      content: result.content || null,
+      tool_calls: result.toolCalls.map((tc) => ({
+        id: tc.id,
+        type: "function",
+        function: { name: tc.name, arguments: JSON.stringify(tc.args) },
+      })),
+    });
+    const execOutcome = await executeToolCalls(ctx, result.toolCalls, onEvent);
+    // 工具全部失败 → 给兜底话术
+    if (execOutcome.failed > 0 && execOutcome.succeeded === 0) {
+      return {
+        content: "抱歉，我这边回答时遇到点问题，请稍后重试。",
+        reasoning: ctx.reasoning,
+        toolCalls: ctx.toolRecords,
+        usage: ctx.usage,
+        paused: false,
+      };
+    }
+  }
+
+  // 轮次超限仍未拿到文本答案 → 兜底话术
+  return {
+    content: "抱歉，我一时没答上来，换个说法再问我一次？",
+    reasoning: ctx.reasoning,
+    toolCalls: ctx.toolRecords,
+    usage: ctx.usage,
+    paused: false,
+  };
+}
+
+/**
  * 从 plan.steps[startIndex] 起逐步骤执行，直到：
  *   - 遇 ask_user 补问步骤 → 暂停（返回 paused=true），不执行后续步骤、不进汇总；
  *   - 全部剩余步骤执行完 → 返回 paused=false。
@@ -830,23 +911,23 @@ export async function agentLoop(
     usage: { promptTokens: 0, completionTokens: 0, totalTokens: 0 },
   };
 
-  // ── 1. 生成计划（简单直答跳过规划；规划失败降级为单步计划）──
-  let plan: Plan;
+  // ── 1. 生成计划（简单直答直接回答，不拆计划）──────────────
+  // 简单直答（打招呼 / 闲聊 / 追问 / 无任务意图）没有「计划」这回事：直接一轮 ReAct 回答，
+  // 且不发任何 plan / step 事件，前端因此不会渲染「计划进度面板」，体验等同普通聊天。
   if (isSimpleQuery(userContent)) {
-    // 简单直答（打招呼 / 闲聊 / 追问 / 无任务意图）：不拆多步，直接单步回答。
-    // 既省一次规划调用，也避免把用户原话塞进步骤描述（见 singleStepPlan 注释）。
-    plan = singleStepPlan();
-  } else {
-    try {
-      const generated = await generatePlan(modelId, userContent, history);
-      if (generated && generated.steps.length > 0) {
-        plan = generated;
-      } else {
-        plan = singleStepPlan();
-      }
-    } catch {
+    return directReply(ctx, modelId, thinking, onEvent);
+  }
+
+  let plan: Plan;
+  try {
+    const generated = await generatePlan(modelId, userContent, history);
+    if (generated && generated.steps.length > 0) {
+      plan = generated;
+    } else {
       plan = singleStepPlan();
     }
+  } catch {
+    plan = singleStepPlan();
   }
 
   // 发出计划创建事件（steps 带初始 pending 状态，供前端画进度条 + route 持久化）
