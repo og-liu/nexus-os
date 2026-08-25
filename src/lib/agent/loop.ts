@@ -388,28 +388,7 @@ function isSimpleQuery(userContent: string | ChatContentPart[]): boolean {
   return !hasTaskKeyword;
 }
 
-/**
- * 单步兜底计划：不再把用户原话塞进 step description。
- *
- * 为什么不能用原话当描述：规划失败 / 简单直答时，如果直接把用户原话（如「你好」「我没问你
- * PHP 的事了呀」）当成步骤描述，前端进度面板会显示「✅ 你好」「✅ 我没问你PHP…」这种把
- * 用户说话内容当成「已完成任务」的怪象；执行模型读上下文时也可能把多条原话误解成
- * 「用户连问了好几遍」。真正要回答的内容仍留在 conversation 的 user 消息里，模型自然看得见。
- */
-function singleStepPlan(): Plan {
-  return {
-    goal: "回答用户的问题",
-    steps: [
-      {
-        id: "step1",
-        description: "基于对话上下文回答用户的当前问题",
-        tool: null,
-        reason: "无需拆解多步，直接单步回答",
-        status: "pending",
-      },
-    ],
-  };
-}
+
 
 /**
  * 单步执行结果的抽象：ok 表示该步是否成功完成。
@@ -911,23 +890,26 @@ export async function agentLoop(
     usage: { promptTokens: 0, completionTokens: 0, totalTokens: 0 },
   };
 
-  // ── 1. 生成计划（简单直答直接回答，不拆计划）──────────────
+  // ── 1. 生成计划（简单直答直接回答；规划失败也退回直答）────
   // 简单直答（打招呼 / 闲聊 / 追问 / 无任务意图）没有「计划」这回事：直接一轮 ReAct 回答，
-  // 且不发任何 plan / step 事件，前端因此不会渲染「计划进度面板」，体验等同普通聊天。
+  // 不发任何 plan / step 事件，前端因此不会渲染「计划进度面板」，体验等同普通聊天。
   if (isSimpleQuery(userContent)) {
     return directReply(ctx, modelId, thinking, onEvent);
   }
 
+  // 尝试规划：只有真正值得拆的任务才走规划。规划失败（JSON 解析失败 / 模型报错 / 返回空）
+  // 时，不回退成「单步计划 + 进度面板」——那会冒出一个「回答用户的问题」的假计划框，
+  // 观感同样奇怪。直接退回 directReply，让模型围绕用户原话正常回答（该路径照样能调工具
+  // 查天气 / 联网搜索），只是不展示计划进度。
   let plan: Plan;
   try {
     const generated = await generatePlan(modelId, userContent, history);
-    if (generated && generated.steps.length > 0) {
-      plan = generated;
-    } else {
-      plan = singleStepPlan();
+    if (!generated || generated.steps.length === 0) {
+      return directReply(ctx, modelId, thinking, onEvent);
     }
+    plan = generated;
   } catch {
-    plan = singleStepPlan();
+    return directReply(ctx, modelId, thinking, onEvent);
   }
 
   // 发出计划创建事件（steps 带初始 pending 状态，供前端画进度条 + route 持久化）
