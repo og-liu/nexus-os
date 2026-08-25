@@ -129,6 +129,8 @@ interface Message {
   plan?: PlanProgress;
   /** 是否已被用户主动停止：停止后保留已产出的半截内容，渲染「已停止」角标并收敛转圈 */
   stopped?: boolean;
+  /** 是否已被归档（任务被后续新消息取代）：渲染「已放弃」角标，不提供「继续/放弃」入口 */
+  cancelled?: boolean;
 }
 
 interface SessionMeta {
@@ -309,9 +311,12 @@ function rowToMessage(m: {
     toolCalls,
     reasoning: m.reasoning ?? undefined,
     usage,
-    // 后端 status（running/done/stopped/failed）：只有 stopped 需要前端标记，用于渲染「已停止」角标。
-    // 这样「停止后刷新」从历史读回的半截消息，也能正确显示停止态而不是被当成普通消息或转圈。
+    // 后端 status（running/done/stopped/failed/cancelled）：只有 stopped / cancelled 需要前端标记。
+    //   - stopped   → 渲染「已停止」角标（可恢复，带「继续/放弃」按钮）
+    //   - cancelled → 渲染「已放弃」角标（被新消息取代后归档，不再可恢复）
+    // 这样「停止/归档后刷新」从历史读回的半截消息，也能正确显示对应状态而不是被当成普通消息。
     stopped: m.status === "stopped",
+    cancelled: m.status === "cancelled",
     created_at: m.created_at,
   };
 }
@@ -1356,11 +1361,14 @@ export default function AgentPage() {
                         ? { ...tc, status: "error" as const, error: "已停止" }
                         : tc,
                     ),
-                    // 计划里正在执行的步骤退回 pending，进度面板不再有转圈
+                    // 计划里正在执行的步骤退回 pending，进度面板不再有转圈；
+                    // 同时把计划面板标成 stopped，让「继续/放弃」按钮在停止当下就出现，
+                    // 而不是等刷新后从后端读回 stopped 计划才补上。
                     plan: m.plan
                       ? {
                           ...m.plan,
                           paused: false,
+                          stopped: true,
                           steps: m.plan.steps.map((s) =>
                             s.status === "running"
                               ? { ...s, status: "pending" as const }
@@ -1667,6 +1675,11 @@ export default function AgentPage() {
                           <div className="mt-2 flex items-center gap-1.5 text-[11px] text-[#A0A8B4]">
                             <Square className="h-3 w-3 shrink-0" />
                             <span>已停止</span>
+                          </div>
+                        ) : msg.cancelled ? (
+                          <div className="mt-2 flex items-center gap-1.5 text-[11px] text-[#A0A8B4]">
+                            <Square className="h-3 w-3 shrink-0" />
+                            <span>已放弃</span>
                           </div>
                         ) : null}
                         {msg.usage ? (

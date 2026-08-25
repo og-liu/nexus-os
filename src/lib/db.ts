@@ -14,13 +14,19 @@ export interface SessionRow {
  *
  * - user 消息本身没有状态（用户说出去就是终态），落库时 status 存 NULL；
  * - assistant 消息则贯穿一条生命周期：
- *     running —— 生成中（占位一行，边跑边更新，刷新页面能读回半截）
- *     done    —— 正常生成完
- *     stopped —— 用户主动点停止 / 刷新断连，保留已产出的半截内容
- *     failed  —— 模型报错 / 工具失败，本轮没有产出该消息
+ *     running   —— 生成中（占位一行，边跑边更新，刷新页面能读回半截）
+ *     done      —— 正常生成完
+ *     stopped   —— 用户主动点停止 / 刷新断连，保留已产出的半截内容（「继续/放弃」入口由此判断）
+ *     failed    —— 模型报错 / 工具失败，本轮没有产出该消息
+ *     cancelled —— 该消息对应的任务被后续新消息取代、已归档，不再可恢复（区别于 stopped）
  * 集中在这里定义类型，route 落库时取同一套字面量，避免魔法字符串散落。
  */
-export type MessageStatus = "running" | "done" | "stopped" | "failed";
+export type MessageStatus =
+  | "running"
+  | "done"
+  | "stopped"
+  | "failed"
+  | "cancelled";
 
 export interface MessageRow {
   id: string;

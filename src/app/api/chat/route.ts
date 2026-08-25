@@ -219,14 +219,18 @@ export async function POST(req: NextRequest) {
 
   // 取出历史消息（喂给模型做上下文）。
   // 过滤掉 status='running' 的消息：那是「正在生成中」的 assistant 占位行（内容还是空壳），
-  // 不应该被当成历史上下文喂给模型。user 消息恒为 NULL、assistant 的 done/stopped/failed 都保留。
-  // 注意：SQL 里 `status != 'running'` 对 NULL 会返回 NULL（被 WHERE 判为 false），
-  // 所以必须显式写 `status IS NULL OR status != 'running'` 才能让 user 消息通过。
+  // 不应该被当成历史上下文喂给模型。
+  // 同时过滤掉 status='stopped' 的半截 assistant 消息：那是用户中途叫停、写到一半就断掉的
+  // 内容。若把它也喂给模型，模型会看到「自己上一句刚说要做什么、还没说完」，于是在用户
+  // 发新话题时自作主张地把旧任务接着做下去（表现为「停止后换话题仍执行上一轮内容」）。
+  // user 消息恒为 NULL、assistant 的 done/failed 都保留（保证多轮对话连贯）。
+  // 注意：SQL 里 `status != 'x'` 对 NULL 会返回 NULL（被 WHERE 判为 false），
+  // 所以必须显式写 `status IS NULL OR status NOT IN (...)` 才能让 user 消息通过。
   const historyRows = db
     .prepare(
       `SELECT * FROM (
          SELECT * FROM messages
-         WHERE session_id = ? AND (status IS NULL OR status != 'running')
+         WHERE session_id = ? AND (status IS NULL OR status NOT IN ('running', 'stopped'))
          ORDER BY created_at DESC LIMIT ?
        ) ORDER BY created_at ASC`,
     )
@@ -444,8 +448,18 @@ export async function POST(req: NextRequest) {
         } else {
           // 正常新消息：若上一轮残留了一份「已停止」的计划，先归档成 cancelled（被这轮新消息取代），
           // 否则它会一直挂在库里，前端会错误地提示「可继续」。
+          // 同时要把那条「已停止」的 assistant 消息一并收尾成 cancelled：计划归档后，
+          // 前端 getRecoverablePlan 读不到它、不再渲染「继续/放弃」按钮；若消息仍挂着
+          // stopped，刷新后会留下一个「已停止」的空壳角标（既没卡片也没按钮），观感很怪。
           if (recoverablePlan && recoverablePlan.status === "stopped") {
             updatePlanStatus(db, sid, PLAN_STATUS.CANCELLED);
+            db.prepare(
+              `UPDATE messages SET status = 'cancelled' WHERE id = (
+                 SELECT id FROM messages
+                 WHERE session_id = ? AND role = 'assistant' AND status = 'stopped'
+                 ORDER BY created_at DESC LIMIT 1
+               )`,
+            ).run(sid);
           }
           loopResult = await agentLoop(
             model,
