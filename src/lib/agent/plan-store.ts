@@ -1,7 +1,8 @@
 // 计划的持久化层：把「规划-执行」过程中生成的计划写进 SQLite。
 //
-// 本次的定位是「打数据地基」——只实现保存/读取计划最基本的能力，让「人工确认(HITL)」
-// 和「跨轮恢复」如果要接，数据结构已经就位；完整的暂停-恢复编排留待后续。
+// 本次在「打数据地基」（savePlan / getActivePlan）之上，又补上了「暂停-恢复」需要的读取能力
+// （getPausedPlan）：执行器遇到补问步骤会暂停并把计划存成 paused 态，route 下一轮靠
+// getPausedPlan 判断「该会话是否在等用户回复、要不要走续跑」。数据表结构本身无需变动。
 //
 // 设计约定：一个 session 同一时刻最多存在一个「活动中的计划」（running / paused），
 // 保证 getActivePlan 能稳定取到「当前还没走完的那份计划」；历史上已完成的计划（done /
@@ -115,6 +116,41 @@ export function getActivePlan(
   if (!row) return null;
 
   // steps 存的是 JSON 字符串，读回来可能损坏，损坏时按「无计划」处理
+  try {
+    const steps = JSON.parse(row.steps) as PlanStep[];
+    if (!Array.isArray(steps)) return null;
+    return { goal: row.goal ?? "", steps };
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * 读取某会话「暂停中」的计划（HITL 补问后等待用户回复），带步骤进度。
+ *
+ * 为什么需要单独一个函数，而不是复用 getActivePlan：
+ *   - getActivePlan 的语义是「当前还没走完的那份活动计划」，running / paused 都算；
+ *   - 而 route 在每轮请求开始时，需要**精确判断**「用户这轮是不是回来回答补问的」——
+ *     只有 paused 状态才代表「在等用户输入、该走续跑」，running 代表「上一轮还在正常执行」。
+ *   两者判定口径不同，混用会让「正常执行中」的会话被误当成「待续跑」。
+ *
+ * @returns 含步骤 status/result 的计划（steps 已反序列化）；该会话没有 paused 计划或数据损坏时返回 null
+ */
+export function getPausedPlan(
+  db: Database.Database,
+  sessionId: string,
+): Plan | null {
+  const row = db
+    .prepare(
+      `SELECT * FROM task_plans
+       WHERE session_id = ? AND status = ?
+       ORDER BY created_at DESC LIMIT 1`,
+    )
+    .get(sessionId, PLAN_STATUS.PAUSED) as TaskPlanRow | undefined;
+
+  if (!row) return null;
+
+  // steps 存的是 JSON 字符串，读回来可能损坏，损坏时按「没有可续跑的计划」处理
   try {
     const steps = JSON.parse(row.steps) as PlanStep[];
     if (!Array.isArray(steps)) return null;

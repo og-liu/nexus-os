@@ -17,8 +17,15 @@ import {
   getThinkingEfforts,
   getDefaultThinkingEffort,
 } from "@/lib/models";
-import { agentLoop, type ToolCallRecord, type TokenUsage } from "@/lib/agent/loop";
-import { savePlan } from "@/lib/agent/plan-store";
+import {
+  agentLoop,
+  resumeLoop,
+  type LoopResult,
+  type LoopEvent,
+  type ToolCallRecord,
+  type TokenUsage,
+} from "@/lib/agent/loop";
+import { savePlan, getPausedPlan } from "@/lib/agent/plan-store";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -203,6 +210,10 @@ export async function POST(req: NextRequest) {
 
   db.prepare(`UPDATE sessions SET updated_at = ? WHERE id = ?`).run(now, sid);
 
+  // 判断该会话是否有「暂停中、等待用户回复」的计划（HITL 补问后）。
+  // 有则本轮走续跑（resumeLoop），把用户这轮的 content 当作补问的答案；无则正常走 agentLoop。
+  const pausedPlan = getPausedPlan(db, sid);
+
   const encoder = new TextEncoder();
   const stream = new ReadableStream({
     async start(controller) {
@@ -215,91 +226,127 @@ export async function POST(req: NextRequest) {
       let assistantReasoning = "";
       let assistantUsage: TokenUsage | null = null;
       try {
-        const loopResult = await agentLoop(
-          model,
-          SYSTEM_PROMPT,
-          history,
-          buildContent(content, images),
-          thinking,
-          (event) => {
-            switch (event.type) {
-              case "tool_call":
-                send({
-                  type: "tool_call",
-                  toolName: event.toolName,
-                  args: event.args,
-                  callId: event.callId,
-                });
-                break;
-              case "tool_result":
-                send({
-                  type: "tool_result",
-                  toolName: event.toolName,
-                  result: event.result,
-                  callId: event.callId,
-                });
-                break;
-              case "tool_error":
-                send({
-                  type: "tool_error",
-                  toolName: event.toolName,
-                  error: event.error,
-                  callId: event.callId,
-                });
-                break;
-              case "delta":
-                send({ type: "delta", content: event.content });
-                break;
-              case "reasoning":
-                send({ type: "reasoning", content: event.content });
-                break;
-              // ── 规划-执行新增事件：透传给前端 + 持久化计划 ──────────
-              case "plan_created":
-                send({
-                  type: "plan_created",
-                  goal: event.goal,
-                  steps: event.steps,
-                });
-                // 落库活动计划（running）：HITL / 跨轮恢复的数据基础，本次只存不恢复
-                savePlan(db, sid, { goal: event.goal, steps: event.steps }, "running");
-                break;
-              case "step_start":
-                send({
-                  type: "step_start",
-                  stepId: event.stepId,
-                  index: event.index,
-                  total: event.total,
-                  description: event.description,
-                });
-                break;
-              case "step_done":
-                send({
-                  type: "step_done",
-                  stepId: event.stepId,
-                  index: event.index,
-                  result: event.result,
-                });
-                break;
-              case "step_failed":
-                send({
-                  type: "step_failed",
-                  stepId: event.stepId,
-                  index: event.index,
-                  error: event.error,
-                });
-                break;
-              case "plan_done":
-                send({
-                  type: "plan_done",
-                  completed: event.completed,
-                  total: event.total,
-                });
-                // 计划收尾：用最终完整快照覆盖落库，状态翻为 done
-                savePlan(db, sid, { goal: event.goal, steps: event.steps }, "done");
-                break;
-            }
-          },
-        );
+        // 事件回调：agentLoop / resumeLoop 共用同一套「透传 + 持久化」逻辑。
+        // 单独抽出来，是因为两条链路（全新执行 / 断点续跑）都要复用同一份事件处理。
+        const handleEvent = (event: LoopEvent) => {
+          switch (event.type) {
+            case "tool_call":
+              send({
+                type: "tool_call",
+                toolName: event.toolName,
+                args: event.args,
+                callId: event.callId,
+              });
+              break;
+            case "tool_result":
+              send({
+                type: "tool_result",
+                toolName: event.toolName,
+                result: event.result,
+                callId: event.callId,
+              });
+              break;
+            case "tool_error":
+              send({
+                type: "tool_error",
+                toolName: event.toolName,
+                error: event.error,
+                callId: event.callId,
+              });
+              break;
+            case "delta":
+              send({ type: "delta", content: event.content });
+              break;
+            case "reasoning":
+              send({ type: "reasoning", content: event.content });
+              break;
+            // ── 规划-执行新增事件：透传给前端 + 持久化计划 ──────────
+            case "plan_created":
+              send({
+                type: "plan_created",
+                goal: event.goal,
+                steps: event.steps,
+              });
+              // 落库活动计划（running）：全新执行或断点续跑都会发，收到即把计划翻成 running
+              savePlan(db, sid, { goal: event.goal, steps: event.steps }, "running");
+              break;
+            case "step_start":
+              send({
+                type: "step_start",
+                stepId: event.stepId,
+                index: event.index,
+                total: event.total,
+                description: event.description,
+              });
+              break;
+            case "step_done":
+              send({
+                type: "step_done",
+                stepId: event.stepId,
+                index: event.index,
+                result: event.result,
+              });
+              break;
+            case "step_failed":
+              send({
+                type: "step_failed",
+                stepId: event.stepId,
+                index: event.index,
+                error: event.error,
+              });
+              break;
+            case "plan_paused":
+              // 补问步骤触发暂停：透传给前端（等用户输入）。这里只透传不落库——
+              // paused 计划的持久化在 agentLoop/resumeLoop 返回之后统一处理（见下方）。
+              send({
+                type: "plan_paused",
+                goal: event.goal,
+                stepId: event.stepId,
+                index: event.index,
+                question: event.question,
+                steps: event.steps,
+              });
+              break;
+            case "plan_done":
+              send({
+                type: "plan_done",
+                completed: event.completed,
+                total: event.total,
+              });
+              // 计划收尾：用最终完整快照覆盖落库，状态翻为 done
+              savePlan(db, sid, { goal: event.goal, steps: event.steps }, "done");
+              break;
+          }
+        };
+
+        // 根据「是否有待续的暂停计划」分两条路：续跑 / 正常执行
+        let loopResult: LoopResult;
+        if (pausedPlan) {
+          // 续跑：用户这轮是回来回答补问的，content 即 answer；history 里已含上一轮问句与本轮回答
+          loopResult = await resumeLoop(
+            model,
+            SYSTEM_PROMPT,
+            history,
+            pausedPlan,
+            content,
+            thinking,
+            handleEvent,
+          );
+        } else {
+          loopResult = await agentLoop(
+            model,
+            SYSTEM_PROMPT,
+            history,
+            buildContent(content, images),
+            thinking,
+            handleEvent,
+          );
+        }
+
+        // 补问暂停：用返回的完整计划快照把计划持久化成 paused 态（含各步进度 + 暂停步骤断点）
+        if (loopResult.paused && loopResult.plan) {
+          savePlan(db, sid, loopResult.plan, "paused");
+        }
         assistantContent = loopResult.content;
         assistantToolCalls =
           loopResult.toolCalls.length > 0 ? loopResult.toolCalls : null;

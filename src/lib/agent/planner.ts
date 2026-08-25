@@ -28,15 +28,21 @@ const PLANNER_SYSTEM_PROMPT = [
   "   需要查资料、查事实时优先用工具；纯推理、组织语言、做判断的步骤 tool 设为 null。",
   "3. 缺少关键信息要先补问：如果用户请求缺少必要信息（例如要查天气却没给出城市），",
   "   把「向用户补问关键信息」也作为一个步骤（tool 为 null）。",
-  "4. 步骤排好先后：有依赖关系的步骤必须按顺序排列，被依赖的步骤靠前。",
-  "5. 只描述「要做什么」，不要写「结果会是什么」；结果要靠真正执行才得出。",
-  "6. 严格输出 JSON，不要输出任何其他解释文字或代码块标记，格式如下：",
+  "4. 补问步骤要打标记：凡是「需要向用户索取缺失信息、等待用户回复」的步骤，",
+  "   必须在那个步骤的 JSON 里加 \"ask_user\": true；且 ask_user 为 true 的步骤，tool 必须是 null。",
+  "   （这个标记会让执行器在该步停下来把问题抛给用户，而不是继续往下跑。）",
+  "5. 步骤排好先后：有依赖关系的步骤必须按顺序排列，被依赖的步骤靠前。",
+  "6. 只描述「要做什么」，不要写「结果会是什么」；结果要靠真正执行才得出。",
+  "7. 严格输出 JSON，不要输出任何其他解释文字或代码块标记，格式如下：",
   '{"goal":"一句话概括用户目标","steps":[{"id":"step1","description":"步骤描述","tool":"web_search","reason":"为什么需要这一步"}]}',
+  "   补问步骤示例（注意 ask_user 字段，且 tool 为 null）：",
+  '{"goal":"查询指定城市天气","steps":[{"id":"step1","description":"向用户确认要查询的城市","tool":null,"reason":"用户没给出城市，需要先确认","ask_user":true},{"id":"step2","description":"查询该城市天气","tool":"get_weather","reason":"拿到城市后查询"}]}',
   "",
   "# 字段说明",
   "- goal：一句话概括用户最终想要什么。",
   "- steps：步骤数组（1~8 个）。每个元素含 id（step1、step2…）、description（做什么）、",
   "  tool（只能是 get_weather / web_search / null 三者之一）、reason（为什么需要这一步）。",
+  "- ask_user：可选字段，布尔值。仅当该步骤是「向用户补问信息、等待回复」时设为 true（此时 tool 必须为 null）；普通步骤不写这个字段。",
 ].join("\n");
 
 /**
@@ -182,9 +188,17 @@ export function parsePlan(rawText: string): Plan | null {
     const description = typeof s.description === "string" ? s.description : "";
     if (!id || !description) return null;
 
+    // 读取补问标记：只有显式 true 才算补问步骤（其余值一律当 false，避免脏数据误触发暂停）
+    const askUser = s.ask_user === true;
+
     // tool 只在两个注册工具名里取值，其余（含非法值）一律回落 null
-    const tool =
+    let tool: string | null =
       s.tool === "get_weather" || s.tool === "web_search" ? s.tool : null;
+
+    // 不变量兜底：补问步骤必须 tool=null（纯补问，不查数据）。
+    // 即使模型不遵守「ask_user 步骤 tool 必须为 null」的约定、带了个工具名过来，
+    // 这里也强制清掉，保证执行器遇到补问步骤时走「停下来等用户」而不是走「调工具」。
+    if (askUser) tool = null;
 
     steps.push({
       id,
@@ -193,6 +207,8 @@ export function parsePlan(rawText: string): Plan | null {
       reason: typeof s.reason === "string" ? s.reason : "",
       status: "pending", // 规划产出时统一 pending，执行阶段再流转
       result: undefined,
+      // 补问标记透传给执行器，供其识别「该步该停」；普通步骤不写（undefined）
+      askUser: askUser ? true : undefined,
     });
   }
 

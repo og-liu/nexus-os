@@ -10,8 +10,22 @@
 // 单独拆成一个文件而不是塞进 loop.ts，是因为 planner、loop、plan-store、route 四者
 // 都要引用这些类型，放在一个「无任何依赖」的纯类型文件里能避免循环 import。
 
-/** 单个步骤的生命周期状态 */
-export type StepStatus = "pending" | "running" | "done" | "failed" | "skipped";
+/**
+ * 单个步骤的生命周期状态。
+ * - pending：规划产出后的初始态，尚未执行
+ * - running：正在执行中
+ * - done：执行成功
+ * - failed：重试耗尽仍失败，已跳过
+ * - skipped：预留位，暂未使用
+ * - paused：补问步骤已向用户抛问、等待回复（计划暂停在此，续跑后翻为 done）
+ */
+export type StepStatus =
+  | "pending"
+  | "running"
+  | "done"
+  | "failed"
+  | "skipped"
+  | "paused";
 
 /** 计划中的一个步骤（一次用户请求被拆成若干个这样的步骤） */
 export interface PlanStep {
@@ -33,6 +47,17 @@ export interface PlanStep {
   status: StepStatus;
   /** 本步骤执行完成后沉淀的文本结果，供后续步骤与「汇总阶段」参考 */
   result?: string;
+  /**
+   * 是否为「向用户索取信息 / 等待用户回复」的补问步骤（可选，默认 undefined 即 false）。
+   *
+   * 为什么需要这个字段：规划器拆解时，如果发现用户请求缺了关键信息（例如要查天气却没说城市），
+   * 会把「向用户补问」也拆成一步。执行器（loop.ts）遇到这种步骤时，不应该像普通步骤那样
+   * 「产出结果 → 继续下一步」，而应该**停下来**，把问题抛给用户、把计划存成暂停态，
+   * 等用户下一轮回完后再从断点继续。这个布尔标记就是让执行器识别「这步该停」的开关。
+   *
+   * 与之配套的约束（见 planner.ts）：ask_user 步骤的 tool 必须为 null（纯补问，不查数据）。
+   */
+  askUser?: boolean;
 }
 
 /** 一次用户请求拆解出的完整计划 */
