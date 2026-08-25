@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import {
   Plus,
   Send,
+  Square,
   ArrowLeft,
   Bot,
   Zap,
@@ -124,6 +125,8 @@ interface Message {
   created_at?: number;
   /** 这轮任务规划的执行进度（收到 plan_created 后挂上，随 step_*、plan_* 事件逐步刷新） */
   plan?: PlanProgress;
+  /** 是否已被用户主动停止：停止后保留已产出的半截内容，渲染「已停止」角标并收敛转圈 */
+  stopped?: boolean;
 }
 
 interface SessionMeta {
@@ -269,6 +272,7 @@ function rowToMessage(m: {
   tool_calls?: string | null;
   reasoning?: string | null;
   usage?: string | null;
+  status?: string | null;
   created_at?: number;
 }): Message {
   let images: string[] | undefined;
@@ -303,6 +307,9 @@ function rowToMessage(m: {
     toolCalls,
     reasoning: m.reasoning ?? undefined,
     usage,
+    // 后端 status（running/done/stopped/failed）：只有 stopped 需要前端标记，用于渲染「已停止」角标。
+    // 这样「停止后刷新」从历史读回的半截消息，也能正确显示停止态而不是被当成普通消息或转圈。
+    stopped: m.status === "stopped",
     created_at: m.created_at,
   };
 }
@@ -567,6 +574,10 @@ export default function AgentPage() {
   const baseTextRef = useRef("");
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const sendingRef = useRef(false);
+  // 请求取消控制器：用户点停止按钮时 abort，后端据此中断正在跑的 agent 循环
+  const abortRef = useRef<AbortController | null>(null);
+  // 是否用户主动停止（区分「主动停止保留半截」与「空闲超时报错」两种不同处理）
+  const userStoppedRef = useRef(false);
   // 消息滚动容器（分页加载、贴底跟随都基于它）
   const scrollRef = useRef<HTMLDivElement>(null);
   // 是否正在加载更早的消息（防止滚动时重复触发）
@@ -882,11 +893,21 @@ export default function AgentPage() {
 
   // ---------- 发送 ----------
 
+  // 停止当前这轮生成：标记为用户主动停止并 abort 当前请求。
+  // abort 后 fetch 的 reader 会 reject AbortError，handleSend 的 catch 里据 userStoppedRef
+  // 把消息标为 stopped（保留半截内容），而不是误报成「请求超时」。
+  const stopGenerating = () => {
+    userStoppedRef.current = true;
+    abortRef.current?.abort();
+  };
+
   const handleSend = async () => {
     const text = inputValue.trim();
     if (!text && pendingImages.length === 0) return;
     if (sendingRef.current) return;
     sendingRef.current = true;
+    // 新一轮发送：清掉上一轮可能残留的「主动停止」标记，避免影响这轮正常的异常判断
+    userStoppedRef.current = false;
 
     const images = pendingImages.length > 0 ? [...pendingImages] : undefined;
     setInputValue("");
@@ -914,6 +935,8 @@ export default function AgentPage() {
 
     // 空闲超时：60 秒没有新数据就中止，避免卡死锁着发送键
     const controller = new AbortController();
+    // 存到组件级 ref，停止按钮才能拿到这个 controller 并 abort 掉这轮请求
+    abortRef.current = controller;
     let idleTimer: ReturnType<typeof setTimeout> | null = null;
     const resetIdle = () => {
       if (idleTimer) clearTimeout(idleTimer);
@@ -970,7 +993,8 @@ export default function AgentPage() {
                 | "step_done"
                 | "step_failed"
                 | "plan_paused"
-                | "plan_done";
+                | "plan_done"
+                | "stopped";
               content?: string;
               message?: string;
               sessionId?: string;
@@ -1198,6 +1222,14 @@ export default function AgentPage() {
                     : m,
                 ),
               );
+            } else if (obj.type === "stopped") {
+              // 后端确认这轮已被停止（数据已定格为 stopped）。主动停止时前端 abort 已断连、
+              // 通常收不到这条事件；保留此分支是为了兼容「后端侧主动停止」等场景，统一标 stopped。
+              setMessages((prev) =>
+                prev.map((m) =>
+                  m.id === assistantMsgId ? { ...m, stopped: true } : m,
+                ),
+              );
             } else if (obj.type === "error") {
               setMessages((prev) =>
                 prev.map((m) =>
@@ -1232,14 +1264,48 @@ export default function AgentPage() {
       await loadSessions();
     } catch (err) {
       if ((err as Error)?.name === "AbortError") {
-        setMessages((prev) =>
-          prev.map((m) =>
-            m.id === assistantMsgId
-              ? { ...m, content: "请求超时，可能网络或服务端卡住了，请重试" }
-              : m,
-          ),
-        );
-        showToast("请求超时，请重试", "error");
+        if (userStoppedRef.current) {
+          // 用户主动停止：保留已产出的半截内容，标记 stopped，并收敛正在转圈的工具调用/步骤。
+          // 不覆盖正文、不提示「超时」——停止是用户预期行为，只需把界面安定下来。
+          setMessages((prev) =>
+            prev.map((m) =>
+              m.id === assistantMsgId
+                ? {
+                    ...m,
+                    stopped: true,
+                    // 正在转圈的工具调用收敛为 error（附「已停止」），图标从转圈变叉
+                    toolCalls: m.toolCalls?.map((tc) =>
+                      tc.status === "running"
+                        ? { ...tc, status: "error" as const, error: "已停止" }
+                        : tc,
+                    ),
+                    // 计划里正在执行的步骤退回 pending，进度面板不再有转圈
+                    plan: m.plan
+                      ? {
+                          ...m.plan,
+                          paused: false,
+                          steps: m.plan.steps.map((s) =>
+                            s.status === "running"
+                              ? { ...s, status: "pending" as const }
+                              : s,
+                          ),
+                        }
+                      : m.plan,
+                  }
+                : m,
+            ),
+          );
+        } else {
+          // 空闲超时（60s 无新数据）：属于异常，按原逻辑提示重试
+          setMessages((prev) =>
+            prev.map((m) =>
+              m.id === assistantMsgId
+                ? { ...m, content: "请求超时，可能网络或服务端卡住了，请重试" }
+                : m,
+            ),
+          );
+          showToast("请求超时，请重试", "error");
+        }
       } else {
         setMessages((prev) =>
           prev.map((m) =>
@@ -1252,6 +1318,7 @@ export default function AgentPage() {
       }
     } finally {
       if (idleTimer) clearTimeout(idleTimer);
+      abortRef.current = null;
       sendingRef.current = false;
       setIsLoading(false);
     }
@@ -1476,9 +1543,17 @@ export default function AgentPage() {
                               {msg.content}
                             </ReactMarkdown>
                           </div>
-                        ) : msg.toolCalls?.some((tc) => tc.status === "running") ? null : (
+                        ) : msg.stopped ? null : msg.toolCalls?.some(
+                            (tc) => tc.status === "running",
+                          ) ? null : (
                           <Loader2 className="h-4 w-4 animate-spin text-[#A0A8B4]" />
                         )}
+                        {msg.stopped ? (
+                          <div className="mt-2 flex items-center gap-1.5 text-[11px] text-[#A0A8B4]">
+                            <Square className="h-3 w-3 shrink-0" />
+                            <span>已停止</span>
+                          </div>
+                        ) : null}
                         {msg.usage ? (
                           <div className="mt-2 flex items-center gap-1.5 border-t border-[#F0F0F0] pt-1.5 text-[11px] text-[#A0A8B4]">
                             <Zap className="h-3 w-3 shrink-0" />
@@ -1736,12 +1811,16 @@ export default function AgentPage() {
                 />
 
                 <button
-                  aria-label="发送"
-                  onClick={handleSend}
-                  disabled={!canSend}
+                  aria-label={isLoading ? "停止" : "发送"}
+                  onClick={isLoading ? stopGenerating : handleSend}
+                  disabled={isLoading ? false : !canSend}
                   className="flex h-11 w-11 shrink-0 items-center justify-center rounded-[2px] bg-[#000000] text-white transition-opacity hover:opacity-85 disabled:opacity-30"
                 >
-                  <Send className="h-4 w-4" />
+                  {isLoading ? (
+                    <Square className="h-4 w-4" />
+                  ) : (
+                    <Send className="h-4 w-4" />
+                  )}
                 </button>
               </div>
               <p className="mt-2 hidden text-[11px] text-[#A0A8B4] lg:block">
