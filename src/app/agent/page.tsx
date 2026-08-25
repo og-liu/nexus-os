@@ -17,6 +17,8 @@ import {
   Brain,
   ChevronDown,
   Check,
+  CheckCircle2,
+  XCircle,
 } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
@@ -61,12 +63,23 @@ interface SpeechRecognitionLike {
 
 // ---------- 类型 ----------
 
+// 工具调用状态
+interface ToolCallEvent {
+  callId: string;
+  toolName: string;
+  args: Record<string, unknown>;
+  status: "running" | "success" | "error";
+  result?: unknown;
+  error?: string;
+}
+
 interface Message {
   id: string;
   role: "user" | "assistant";
   content: string;
   images?: string[];
   reasoning?: string;
+  toolCalls?: ToolCallEvent[];
   created_at?: number;
 }
 
@@ -213,6 +226,138 @@ function rowToMessage(m: {
   };
 }
 
+// ---------- 工具调用展示组件（紧凑折叠式） ----------
+
+function ToolCallsBlock({ toolCalls }: { toolCalls: ToolCallEvent[] }) {
+  const [open, setOpen] = useState(false);
+  const running = toolCalls.some((tc) => tc.status === "running");
+  const hasError = toolCalls.some(
+    (tc) => tc.status === "error" || (tc.result as Record<string, unknown> | undefined)?.error,
+  );
+
+  // 按工具类型分组
+  const weatherCalls = toolCalls.filter((tc) => tc.toolName === "get_weather");
+  const searchCalls = toolCalls.filter((tc) => tc.toolName === "web_search");
+
+  const icon = running ? (
+    <Loader2 className="h-3 w-3 animate-spin" />
+  ) : hasError ? (
+    <XCircle className="h-3 w-3 text-[#FF9500]" />
+  ) : (
+    <CheckCircle2 className="h-3 w-3 text-[#34C759]" />
+  );
+
+  // 生成摘要文字
+  let summary = "";
+  if (weatherCalls.length > 0) {
+    const cities = weatherCalls.map((tc) => String(tc.args.city ?? "")).filter(Boolean);
+    const label =
+      cities.length > 3
+        ? `${cities.slice(0, 3).join("、")}等${cities.length}个城市`
+        : cities.join("、");
+    summary += `🌤 查询天气 ${running && weatherCalls.some((tc) => tc.status === "running") ? `「${cities[cities.length - 1] ?? ""}」…` : label ? `· ${label}` : ""}`;
+  }
+  if (searchCalls.length > 0) {
+    if (summary) summary += "  ";
+    const queries = searchCalls.map((tc) => String(tc.args.query ?? "")).filter(Boolean);
+    const lastQuery = queries[queries.length - 1] ?? "";
+    const searchRunning = searchCalls.some((tc) => tc.status === "running");
+    if (searchRunning) {
+      summary += `🔍 正在搜索「${lastQuery}」…`;
+    } else {
+      const totalResults = searchCalls.reduce((sum, tc) => {
+        const r = tc.result as Record<string, unknown> | undefined;
+        return sum + (typeof r?.total === "number" ? r.total : 0);
+      }, 0);
+      summary += `🔍 搜索${searchCalls.length > 1 ? ` ${searchCalls.length} 次` : ""}${totalResults > 0 ? ` · ${totalResults} 条结果` : ""}`;
+    }
+  }
+
+  return (
+    <div className="mb-2">
+      <button
+        onClick={() => setOpen((v) => !v)}
+        className="flex items-center gap-1.5 text-xs text-[#8A8A8A] transition-colors hover:text-[#1F1F1F]"
+      >
+        {icon}
+        <span>{summary}</span>
+        <ChevronDown className={cn("h-3 w-3 transition-transform", !open && "-rotate-90")} />
+      </button>
+      {open ? (
+        <div className="mt-1 flex flex-col gap-1 pl-4">
+          {/* 天气详情 */}
+          {weatherCalls.map((tc) => {
+            const r = tc.result as Record<string, unknown> | undefined;
+            const isFailed = tc.status === "error" || r?.error;
+            return (
+              <div key={tc.callId} className="flex items-center gap-1.5 text-xs leading-relaxed text-[#6B6B6B]">
+                {tc.status === "running" ? (
+                  <Loader2 className="h-2.5 w-2.5 shrink-0 animate-spin text-[#A0A8B4]" />
+                ) : isFailed ? (
+                  <XCircle className="h-2.5 w-2.5 shrink-0 text-[#FF9500]" />
+                ) : (
+                  <CheckCircle2 className="h-2.5 w-2.5 shrink-0 text-[#34C759]" />
+                )}
+                <span className="shrink-0 text-[#1F1F1F]">{String(tc.args.city ?? "")}</span>
+                <span className="text-[#A0A8B4]">·</span>
+                <span className="truncate">
+                  {isFailed
+                    ? tc.error ?? String(r?.error ?? "查询失败")
+                    : `${r?.condition ?? ""} ${r?.temp ?? "?"}°C`}
+                </span>
+              </div>
+            );
+          })}
+          {/* 搜索详情 */}
+          {searchCalls.map((tc) => {
+            const r = tc.result as Record<string, unknown> | undefined;
+            const isFailed = tc.status === "error" || r?.error;
+            const results = (r?.results as Array<Record<string, unknown>> | undefined) ?? [];
+            return (
+              <div key={tc.callId} className="py-0.5">
+                <div className="flex items-center gap-1.5 text-xs text-[#6B6B6B]">
+                  {tc.status === "running" ? (
+                    <Loader2 className="h-2.5 w-2.5 shrink-0 animate-spin text-[#A0A8B4]" />
+                  ) : isFailed ? (
+                    <XCircle className="h-2.5 w-2.5 shrink-0 text-[#FF9500]" />
+                  ) : (
+                    <CheckCircle2 className="h-2.5 w-2.5 shrink-0 text-[#34C759]" />
+                  )}
+                  <span className="text-[#1F1F1F]">{String(tc.args.query ?? "")}</span>
+                  {!tc.status || isFailed ? null : (
+                    <span className="text-[#A0A8B4]">· {results.length} 条</span>
+                  )}
+                </div>
+                {results.length > 0 && (
+                  <div className="mt-0.5 flex flex-col gap-0.5 pl-4">
+                    {results.slice(0, 4).map((item, i) => (
+                      <a
+                        key={i}
+                        href={String(item.url ?? "#")}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="flex items-start gap-1 text-[11px] leading-relaxed text-[#6B6B6B] hover:text-[#007AFF]"
+                      >
+                        <span className="shrink-0 text-[#A0A8B4]">{i + 1}.</span>
+                        <span className="truncate">{String(item.title ?? "")}</span>
+                      </a>
+                    ))}
+                    {results.length > 4 && (
+                      <span className="pl-4 text-[11px] text-[#A0A8B4]">
+                        等 {results.length} 条结果
+                      </span>
+                    )}
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
 // ---------- 页面 ----------
 
 export default function AgentPage() {
@@ -279,6 +424,7 @@ export default function AgentPage() {
   };
 
   const selectModel = (m: string) => {
+    if (isLoading) return;
     setModelId(m);
     setModelMenuOpen(false);
     if (activeChatId) saveModel(activeChatId, m);
@@ -577,6 +723,12 @@ export default function AgentPage() {
       userMsg,
       { id: assistantMsgId, role: "assistant", content: "" },
     ]);
+    // 思考过程默认展开：新消息一开始就处于展开态，思考流式增长时用户直接可见
+    setOpenReasoning((prev) => {
+      const next = new Set(prev);
+      next.add(assistantMsgId);
+      return next;
+    });
     setIsLoading(true);
 
     let finalSessionId = activeChatId;
@@ -627,11 +779,16 @@ export default function AgentPage() {
           const payload = trimmed.slice(5).trim();
           try {
             const obj = JSON.parse(payload) as {
-              type: "delta" | "reasoning" | "error" | "done";
+              type: "delta" | "reasoning" | "error" | "done" | "tool_call" | "tool_result" | "tool_error";
               content?: string;
               message?: string;
               sessionId?: string;
               title?: string;
+              toolName?: string;
+              args?: Record<string, unknown>;
+              callId?: string;
+              result?: unknown;
+              error?: string;
             };
             if (obj.type === "reasoning" && obj.content) {
               setMessages((prev) =>
@@ -646,6 +803,58 @@ export default function AgentPage() {
                 prev.map((m) =>
                   m.id === assistantMsgId
                     ? { ...m, content: m.content + obj.content }
+                    : m,
+                ),
+              );
+            } else if (obj.type === "tool_call" && obj.callId && obj.toolName) {
+              // 模型决定调用工具
+              setMessages((prev) =>
+                prev.map((m) =>
+                  m.id === assistantMsgId
+                    ? {
+                        ...m,
+                        toolCalls: [
+                          ...(m.toolCalls ?? []),
+                          {
+                            callId: obj.callId!,
+                            toolName: obj.toolName!,
+                            args: obj.args ?? {},
+                            status: "running" as const,
+                          },
+                        ],
+                      }
+                    : m,
+                ),
+              );
+            } else if (obj.type === "tool_result" && obj.callId) {
+              // 工具执行成功
+              setMessages((prev) =>
+                prev.map((m) =>
+                  m.id === assistantMsgId
+                    ? {
+                        ...m,
+                        toolCalls: (m.toolCalls ?? []).map((tc) =>
+                          tc.callId === obj.callId
+                            ? { ...tc, status: "success" as const, result: obj.result }
+                            : tc,
+                        ),
+                      }
+                    : m,
+                ),
+              );
+            } else if (obj.type === "tool_error" && obj.callId) {
+              // 工具执行失败
+              setMessages((prev) =>
+                prev.map((m) =>
+                  m.id === assistantMsgId
+                    ? {
+                        ...m,
+                        toolCalls: (m.toolCalls ?? []).map((tc) =>
+                          tc.callId === obj.callId
+                            ? { ...tc, status: "error" as const, error: obj.error }
+                            : tc,
+                        ),
+                      }
                     : m,
                 ),
               );
@@ -910,13 +1119,16 @@ export default function AgentPage() {
                             )}
                           </div>
                         ) : null}
+                        {msg.toolCalls && msg.toolCalls.length > 0 ? (
+                          <ToolCallsBlock toolCalls={msg.toolCalls} />
+                        ) : null}
                         {msg.content ? (
                           <div className="markdown-body">
                             <ReactMarkdown remarkPlugins={[remarkGfm]}>
                               {msg.content}
                             </ReactMarkdown>
                           </div>
-                        ) : (
+                        ) : msg.toolCalls?.some((tc) => tc.status === "running") ? null : (
                           <Loader2 className="h-4 w-4 animate-spin text-[#A0A8B4]" />
                         )}
                       </div>
@@ -959,11 +1171,13 @@ export default function AgentPage() {
               <div className="mb-2 flex flex-wrap items-center gap-2">
                 <div className="relative">
                   <button
-                    onClick={() => setModelMenuOpen((v) => !v)}
+                    onClick={() => !isLoading && setModelMenuOpen((v) => !v)}
+                    disabled={isLoading}
                     aria-label="选择模型"
                     className={cn(
                       "flex items-center gap-1.5 rounded-[2px] border px-2.5 py-1 text-xs font-medium transition-colors",
-                      modelMenuOpen
+                      isLoading && "cursor-not-allowed opacity-40",
+                      !isLoading && modelMenuOpen
                         ? "border-[#000000] bg-white text-[#000000]"
                         : "border-[#E5E5E5] bg-white text-[#555555] hover:border-[#000000] hover:text-[#000000]",
                     )}
@@ -1027,11 +1241,13 @@ export default function AgentPage() {
                 {supportsThinking && (
                   <>
                     <button
-                      onClick={toggleThinking}
+                      onClick={() => !isLoading && toggleThinking()}
+                      disabled={isLoading}
                       aria-label="深度思考"
                       className={cn(
                         "flex items-center gap-1.5 rounded-[2px] border px-2.5 py-1 text-xs font-medium transition-colors",
-                        thinkingEnabled
+                        isLoading && "cursor-not-allowed opacity-40",
+                        !isLoading && thinkingEnabled
                           ? "border-[#000000] bg-[#000000] text-white"
                           : "border-[#E5E5E5] bg-white text-[#666666] hover:border-[#000000] hover:text-[#000000]",
                       )}
@@ -1040,7 +1256,10 @@ export default function AgentPage() {
                       深度思考
                     </button>
                     {thinkingEnabled && (
-                      <div className="flex items-center gap-0.5 rounded-[2px] border border-[#E5E5E5] bg-white p-0.5">
+                      <div className={cn(
+                        "flex items-center gap-0.5 rounded-[2px] border border-[#E5E5E5] bg-white p-0.5",
+                        isLoading && "opacity-40",
+                      )}>
                         {(
                           [
                             ["low", "低"],
@@ -1050,9 +1269,11 @@ export default function AgentPage() {
                         ).map(([value, label]) => (
                           <button
                             key={value}
-                            onClick={() => setEffort(value)}
+                            onClick={() => !isLoading && setEffort(value)}
+                            disabled={isLoading}
                             className={cn(
                               "rounded-[2px] px-2 py-0.5 text-xs transition-colors",
+                              isLoading && "cursor-not-allowed",
                               thinkingEffort === value
                                 ? "bg-[#000000] text-white"
                                 : "text-[#666666] hover:text-[#000000]",
@@ -1094,14 +1315,21 @@ export default function AgentPage() {
                 {/* 图片上传 */}
                 <button
                   aria-label="上传图片"
+                  disabled={isLoading}
                   onClick={() => {
+                    if (isLoading) return;
                     if (!supportsVision) {
                       showToast("当前模型不支持看图，请切换到视觉版", "warn");
                       return;
                     }
                     fileInputRef.current?.click();
                   }}
-                  className="flex h-11 w-11 shrink-0 items-center justify-center rounded-[2px] text-[#666666] transition-colors hover:bg-[#ECECEC] hover:text-[#000000]"
+                  className={cn(
+                    "flex h-11 w-11 shrink-0 items-center justify-center rounded-[2px] transition-colors",
+                    isLoading
+                      ? "cursor-not-allowed text-[#CCCCCC]"
+                      : "text-[#666666] hover:bg-[#ECECEC] hover:text-[#000000]",
+                  )}
                 >
                   <ImageIcon className="h-5 w-5" />
                 </button>
@@ -1117,12 +1345,15 @@ export default function AgentPage() {
                 {/* 语音输入 */}
                 <button
                   aria-label={isListening ? "停止语音输入" : "语音输入"}
-                  onClick={toggleVoice}
+                  onClick={() => !isLoading && toggleVoice()}
+                  disabled={isLoading}
                   className={cn(
                     "flex h-11 w-11 shrink-0 items-center justify-center rounded-[2px] transition-colors",
-                    isListening
-                      ? "animate-pulse bg-[#000000] text-white"
-                      : "text-[#666666] hover:bg-[#ECECEC] hover:text-[#000000]",
+                    isLoading
+                      ? "cursor-not-allowed text-[#CCCCCC]"
+                      : isListening
+                        ? "animate-pulse bg-[#000000] text-white"
+                        : "text-[#666666] hover:bg-[#ECECEC] hover:text-[#000000]",
                   )}
                 >
                   <Mic className="h-5 w-5" />

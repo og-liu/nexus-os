@@ -4,13 +4,13 @@ import fs from "node:fs";
 import path from "node:path";
 import { getDb, type MessageRow } from "@/lib/db";
 import {
-  streamChat,
   ProviderError,
   type ChatMessage,
   type ChatContentPart,
   type ThinkingOptions,
 } from "@/lib/providers";
 import { isValidModelId, DEFAULT_MODEL_ID, getModelMeta } from "@/lib/models";
+import { agentLoop } from "@/lib/agent/loop";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -20,6 +20,21 @@ const MAX_CONTEXT_TURNS = 20;
 
 // 用户图片落盘目录（public/ 下，Next 自动 serve，历史回显直接 <img src="/uploads/x.png">）
 const UPLOAD_DIR = path.join(process.cwd(), "public", "uploads");
+
+const SYSTEM_PROMPT =
+  "你是 Nexus OS 的智能助手 Agent。用简洁、自然的语言回答用户，条理清晰，中文为主。\n" +
+  "全程用中文思考：你的内部思考过程（reasoning）也用中文表达，不要用英文。\n\n" +
+  "## 工具使用规则\n" +
+  "1. 当需要调用工具时，直接调用，不要在文字里假装调用。\n" +
+  "2. 工具结果返回后，综合信息给出回答，不要直接复制粘贴原始结果。\n" +
+  "3. 如果工具返回了错误或空结果，尝试其他方式或如实告诉用户。\n\n" +
+  "## 搜索工具使用规范\n" +
+  "1. 搜索前先用常识判断，确定自己不知道再搜，不要为搜而搜。\n" +
+  "2. 搜索结果里有足够信息时，综合整理后回答。\n" +
+  "3. 回答中引用搜索结果时，在相关句末标注来源，格式为 [序号]，" +
+  "并在回答末尾列出参考链接，格式：[序号] 标题 - URL。\n" +
+  "4. 连续 2 次搜索都没有满意结果，直接告诉用户查不到，并说明试了什么关键词。\n" +
+  "5. 天气类问题用 get_weather 工具，不要用搜索。";
 
 /** 从 data URL 推断图片扩展名（保存文件用） */
 function extFromDataUrl(dataUrl: string): string {
@@ -71,7 +86,6 @@ function buildContent(
 ): string | ChatContentPart[] {
   if (images.length === 0) return text;
   const parts: ChatContentPart[] = [];
-  // 纯图没写字时，补一句默认引导，让模型知道要干嘛
   parts.push({ type: "text", text: text.trim() || "请看这张图片，描述你看到的内容。" });
   for (const url of images) {
     parts.push({ type: "image_url", image_url: { url } });
@@ -110,7 +124,7 @@ export async function POST(req: NextRequest) {
     return new Response("消息不能为空", { status: 400 });
   }
 
-  // 防御：不支持看图的模型带图时丢弃图片（前端已拦截，这里兜底）
+  // 防御：不支持看图的模型带图时丢弃图片
   const images = supportsVision ? incomingImages : [];
 
   const db = getDb();
@@ -125,13 +139,12 @@ export async function POST(req: NextRequest) {
     ).run(sid, "新会话", now, now);
   }
 
-  // 是否为该会话第一条消息（据此决定是否生成标题）
   const countRow = db
     .prepare(`SELECT COUNT(*) AS c FROM messages WHERE session_id = ?`)
     .get(sid) as { c: number };
   const isFirst = countRow.c === 0;
 
-  // 图片落盘（库只存路径，图片本体不进 SQLite）
+  // 图片落盘
   const savedPaths = images.map(saveImage).filter((p): p is string => !!p);
 
   // 落库用户消息
@@ -146,7 +159,7 @@ export async function POST(req: NextRequest) {
     now,
   );
 
-  // 取出历史消息，滑动窗口按轮数裁，组装上下文
+  // 取出历史消息
   const historyRows = db
     .prepare(
       `SELECT * FROM (
@@ -155,7 +168,6 @@ export async function POST(req: NextRequest) {
     )
     .all(sid, MAX_CONTEXT_TURNS * 2) as MessageRow[];
 
-  // 历史消息：user 消息带图时，把图片路径读回 data URL 再喂给模型（多轮看图）
   const history: ChatMessage[] = historyRows.map((m) => {
     const role = m.role as "user" | "assistant";
     if (role === "user" && m.images) {
@@ -168,16 +180,10 @@ export async function POST(req: NextRequest) {
           return { role, content: buildContent(m.content, dataUrls) };
         }
       } catch {
-        // 图片字段损坏时回落纯文本
+        // ignore
       }
     }
     return { role, content: m.content };
-  });
-
-  // 本条用户消息追加进历史末尾（图片直接用手头的 data URL）
-  history.push({
-    role: "user",
-    content: buildContent(content, images),
   });
 
   db.prepare(`UPDATE sessions SET updated_at = ? WHERE id = ?`).run(now, sid);
@@ -191,12 +197,47 @@ export async function POST(req: NextRequest) {
 
       let assistantContent = "";
       try {
-        assistantContent = await streamChat(model, history, thinking, (kind, text) => {
-          send({
-            type: kind === "reasoning" ? "reasoning" : "delta",
-            content: text,
-          });
-        });
+        assistantContent = await agentLoop(
+          model,
+          SYSTEM_PROMPT,
+          history,
+          buildContent(content, images),
+          thinking,
+          (event) => {
+            switch (event.type) {
+              case "tool_call":
+                send({
+                  type: "tool_call",
+                  toolName: event.toolName,
+                  args: event.args,
+                  callId: event.callId,
+                });
+                break;
+              case "tool_result":
+                send({
+                  type: "tool_result",
+                  toolName: event.toolName,
+                  result: event.result,
+                  callId: event.callId,
+                });
+                break;
+              case "tool_error":
+                send({
+                  type: "tool_error",
+                  toolName: event.toolName,
+                  error: event.error,
+                  callId: event.callId,
+                });
+                break;
+              case "delta":
+                send({ type: "delta", content: event.content });
+                break;
+              case "reasoning":
+                send({ type: "reasoning", content: event.content });
+                break;
+            }
+          },
+        );
       } catch (e) {
         const message =
           e instanceof ProviderError ? e.message : "调用失败，请稍后重试";
@@ -211,7 +252,6 @@ export async function POST(req: NextRequest) {
         ).run(randomUUID(), sid, "assistant", assistantContent, null, Date.now());
       }
 
-      // 标题自动生成（v1：取首条用户消息截断；后续可升级为智能摘要）
       let title = "新会话";
       if (isFirst) {
         const base = content || (savedPaths.length > 0 ? "图片消息" : "新会话");
