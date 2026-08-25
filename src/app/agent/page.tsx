@@ -993,6 +993,27 @@ export default function AgentPage() {
     // 新一轮：清掉上一轮可能残留的「主动停止」标记，避免影响这轮正常的异常判断
     userStoppedRef.current = false;
 
+    // 会话身份先行：新会话的第一条消息，先显式创建会话拿到 id，再发消息。
+    // 之前 sessionId 靠 SSE 的 done 事件回传——用户一旦中途停止、连接被 abort，
+    // done 永远收不到 → 前端不知道自己处在哪个会话 → 下一条消息又以「无会话」身份
+    // 发出，后端只能再建一个新会话（表现为「新会话停止两次，刷新后侧边栏冒出两个
+    // 新会话」）。现在发起前就定下身份：停止、刷新都不丢，侧边栏也当场出现新条目。
+    let sessionForThisTurn = activeChatId;
+    if (!sessionForThisTurn && !resume) {
+      try {
+        const res = await fetch("/api/sessions", { method: "POST" });
+        const data = (await res.json()) as { session?: { id?: string } };
+        if (data.session?.id) {
+          sessionForThisTurn = data.session.id;
+          setActiveChatId(sessionForThisTurn);
+          window.localStorage.setItem(LAST_SESSION_KEY, sessionForThisTurn);
+          void loadSessions();
+        }
+      } catch {
+        // 创建失败不阻塞发送：后端仍有「无会话则懒创建」的兜底路径
+      }
+    }
+
     // 本地先 push 消息：正常聊天是「用户消息 + 助手占位」；断点恢复没有用户消息，只 push 助手占位
     const assistantMsgId = `tmp-a-${Date.now()}`;
     stickToBottomRef.current = true; // 发新消息时强制跟随到最底
@@ -1018,7 +1039,9 @@ export default function AgentPage() {
     // 思考过程默认收起：不自动加入展开集合，用户点击「思考过程」时才展开，避免占篇幅
     setIsLoading(true);
 
-    let finalSessionId = activeChatId;
+    // 本轮的会话身份：新会话已在上文「身份先行」处创建好；旧会话沿用当前 id。
+    // 后续停止/异常收尾都基于这个变量，不再依赖流的 done 事件回传。
+    let finalSessionId = sessionForThisTurn;
     let finalTitle = activeChat?.title ?? "新会话";
 
     // 空闲超时：60 秒没有新数据就中止，避免卡死锁着发送键
@@ -1038,7 +1061,7 @@ export default function AgentPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           content,
-          sessionId: activeChatId,
+          sessionId: sessionForThisTurn,
           model: modelId,
           thinking: { enabled: thinkingEnabled, effort: thinkingEffort },
           images,

@@ -238,3 +238,51 @@ export function updatePlanStatus(
      WHERE session_id = ? AND status IN ${UNFINISHED_STATUSES}`,
   ).run(status, now, sessionId);
 }
+
+/**
+ * 归档一个会话里「被中断的整轮对话」（把配对轮次整体翻成 cancelled）。
+ *
+ * 为什么要「整轮」：一次对话 = user 提问 + assistant 回答，是配对的整体。
+ * 若只把 assistant 的半截回复归档、留下孤立的 user 提问，喂给模型的历史里会出现
+ * 「一条没有被回应过的用户需求」——模型会把它当成当前待办，在用户发新话题时把
+ * 旧任务捞起来接着做（表现为「第二轮对话答的还是第一轮的问题」）。所以归档必须
+ * 连人带话一起收：
+ *   1) 该会话所有 stopped 的 assistant 消息 → cancelled（覆盖停止→续跑→又停止的整条链）；
+ *   2) 最后一条 stopped assistant 之前、离它最近的那条 user 消息 → cancelled
+ *      （即这轮任务的提问本身；续跑轮没有新 user 消息，往前找到的正是链路源头）。
+ *
+ * 归档后这轮对话从模型上下文里整体消失（history 构建会过滤 cancelled，见
+ * chat/route.ts），但界面上仍保留「已放弃」痕迹（消息还在，只是不再影响新回答）。
+ * 幂等：会话里没有 stopped 消息时什么都不改。
+ */
+export function archiveStoppedTurn(
+  db: Database.Database,
+  sessionId: string,
+): void {
+  // 先取最后一条 stopped assistant 的时间戳（此刻 stopped 状态还没被改，才能定位到）
+  const lastStopped = db
+    .prepare(
+      `SELECT MAX(created_at) AS ts FROM messages
+       WHERE session_id = ? AND role = 'assistant' AND status = 'stopped'`,
+    )
+    .get(sessionId) as { ts: number | null } | undefined;
+  if (!lastStopped || lastStopped.ts == null) return;
+
+  // 收尾 user 提问：user 消息的 status 平时恒为 NULL，借用 cancelled 标记
+  // 「这一轮已被放弃」。对前端渲染无影响（user 气泡不看状态），但 history
+  // 过滤会把它一并排除，模型就再也看不到这条旧需求。
+  db.prepare(
+    `UPDATE messages SET status = 'cancelled' WHERE id = (
+       SELECT id FROM messages
+       WHERE session_id = ? AND role = 'user' AND created_at <= ?
+       ORDER BY created_at DESC LIMIT 1
+     )`,
+  ).run(sessionId, lastStopped.ts);
+
+  // 所有 stopped 的 assistant 消息整体翻 cancelled（不止最后一条：
+  // 「停止→继续执行→又停止」的链会有多条 stopped 半截，都要收）
+  db.prepare(
+    `UPDATE messages SET status = 'cancelled'
+     WHERE session_id = ? AND role = 'assistant' AND status = 'stopped'`,
+  ).run(sessionId);
+}
