@@ -143,6 +143,9 @@ export async function ingestFeedXml(
     const link = typeof item.link === "string" ? item.link.trim() : "";
     if (!link) continue; // 没链接没法溯源也没法去重，跳过
 
+    // ⚠️ 并发安全的隐含前提：从这里到下面 createItem(INSERT) 之间不许插入任何 await。
+    // Node 单线程下连续的同步代码不会被其他任务打断，所以即使定时任务和手动刷新
+    // 撞在一起，也不会出现「两边都查不到 → 重复入库」；中间一旦夹了 await 就失去这层保护。
     const exists = conn
       .prepare("SELECT id FROM knowledge_items WHERE source_url = ?")
       .get(link);
@@ -185,9 +188,22 @@ export async function ingestFeedXml(
 /** 网络抓取函数的形状——测试时注入假实现用 */
 export type FeedFetcher = (url: string) => Promise<string>;
 
-/** 默认实现：真实网络请求，15 秒超时防止死源拖垮整轮刷新 */
+/**
+ * 默认实现：真实网络请求，15 秒超时防止死源拖垮整轮刷新。
+ *
+ * 为什么带浏览器 User-Agent：Node fetch 的默认 UA 是 "node"，
+ * 很多站点/CDN（Cloudflare 防护最典型）见到陌生 UA 直接 403，
+ * 表现为「源明明没错却一直抓失败」。我们只是每小时一次的低频个人抓取，
+ * 借用浏览器 UA 是 RSS 阅读器的通行做法，能省掉大量无谓的排查。
+ */
+const BROWSER_UA =
+  "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36";
+
 export const defaultFetcher: FeedFetcher = async (url) => {
-  const res = await fetch(url, { signal: AbortSignal.timeout(15_000) });
+  const res = await fetch(url, {
+    signal: AbortSignal.timeout(15_000),
+    headers: { "User-Agent": BROWSER_UA },
+  });
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
   return res.text();
 };
@@ -204,18 +220,20 @@ export async function refreshFeed(
 ): Promise<{ added: number; skipped: number }> {
   try {
     const xml = await fetcher(feed.url);
-    const result = await ingestFeedXml(conn, feed, xml);
 
-    // 首次抓取成功且用户没给源起名：用 RSS 频道自带的标题回填显示名
+    // 回填必须发生在入库之前：ingest 给文章写 source 时读的是 feed.title，
+    // 如果先入库再回填，第一批文章的来源只能退化为 URL，要等下一轮才正常。
+    // 首次抓取成功且用户没给源起名：用 RSS 频道自带的标题回填显示名。
     if (!feed.title) {
       const channelTitle = extractChannelTitle(xml);
       if (channelTitle) {
-        conn.prepare("UPDATE feeds SET title = ? WHERE id = ?").run(
-          channelTitle.slice(0, 100),
-          feed.id,
-        );
+        const named = channelTitle.slice(0, 100);
+        conn.prepare("UPDATE feeds SET title = ? WHERE id = ?").run(named, feed.id);
+        feed.title = named; // 内存对象也要同步改——只改库不改内存，本次入库拿到的还是旧值
       }
     }
+
+    const result = await ingestFeedXml(conn, feed, xml);
 
     conn
       .prepare("UPDATE feeds SET last_fetched_at = ?, last_error = NULL WHERE id = ?")

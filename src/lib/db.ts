@@ -142,6 +142,10 @@ export function initSchema(conn: Database.Database): void {
 
     CREATE INDEX IF NOT EXISTS idx_knowledge_items_status
       ON knowledge_items (status, updated_at);
+    -- RSS 抓取每篇文章入库前都要按 source_url 查重（feeds/store.ts），
+    -- 没索引就是每次全表扫描；IF NOT EXISTS 天然幂等，老库启动即自动补建
+    CREATE INDEX IF NOT EXISTS idx_knowledge_items_source_url
+      ON knowledge_items (source_url);
     CREATE INDEX IF NOT EXISTS idx_knowledge_tags_tag
       ON knowledge_item_tags (tag);
 

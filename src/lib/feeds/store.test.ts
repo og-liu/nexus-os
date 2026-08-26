@@ -166,6 +166,19 @@ describe("refreshFeed 刷新薄壳（注入假 fetcher）", () => {
     expect(after.last_error).toBeNull();
   });
 
+  it("无名源首抓：回填先于入库，首批文章来源就是频道标题而非 URL", async () => {
+    const conn = createInMemoryDb();
+    const feed = addFeed(conn, { url: "https://a.com/rss.xml" }); // 故意不给名字
+
+    await refreshFeed(conn, feed, async () => RSS_XML);
+
+    const first = conn
+      .prepare("SELECT source FROM knowledge_items WHERE source_url = ?")
+      .get("https://example.com/post-1") as { source: string };
+    // 修复前这里是 URL——因为回填发生在入库之后，首批文章只能拿到空名字
+    expect(first.source).toBe("阮一峰的网络日志");
+  });
+
   it("失败：错误写进 last_error 并上抛", async () => {
     const conn = createInMemoryDb();
     const feed = addFeed(conn, { url: "https://dead.com/rss.xml", title: "死源" });
