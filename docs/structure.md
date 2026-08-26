@@ -44,13 +44,14 @@ src/
 │   ├── tools/page.tsx      # 工具中心页面：客户端交互，59 个工具，搜索 + 分类筛选 + 三档响应式（宽屏内联/窄屏下拉/手机折叠）
 │   ├── files/page.tsx      # 文件管理页面（占位，待开发）
 │   ├── agent/page.tsx      # AI Agent 页面：真实对话（多模型+流式输出+深度思考+图片看图+语音输入+工具调用折叠卡片+任务计划进度面板+停止/断点恢复），左侧会话栏对齐知识页
-│   ├── knowledge/page.tsx  # 知识库页面：7 个 section（知识流/我的文章/收件箱/回收站/订阅源/自测/回顾），纯前端 mock 全交互
+│   ├── knowledge/page.tsx  # 知识库页面：7 个 section；feed/inbox 已接真库（手动采集+拍板流转+toast 反馈），其余 section 仍为 mock 待 K2 替换
 │   ├── automation/page.tsx # 自动化页面（占位，待开发）
 │   ├── settings/page.tsx   # 设置页面：AI 模型配置、工具目录等（框架已搭建，功能待开发）
 │   └── api/                # API 路由（Next.js Route Handlers）
 │       ├── chat/route.ts   # AI 对话：POST 接消息→落库→归档残留任务→组装上下文→走 Loop（规划执行/续跑/断点恢复三路）→SSE 流式输出+增量落盘
 │       ├── plan/route.ts   # 放弃中断计划：POST 把 stopped 计划翻 cancelled + 整轮配对归档
 │       ├── providers/route.ts # 供应商 Key 配置状态：GET 返回 {deepseek:true, openrouter:false} 布尔表（Key 不出服务端），驱动前端模型置灰标注与默认模型动态校正
+│       ├── knowledge/      # 知识库（K1）：集合路由 GET 列表+各状态计数 / POST 手动采集进 inbox；[id] 单条路由 GET / PATCH 状态流转与标签全量替换 / DELETE
 │       └── sessions/       # 会话管理：列表/新建、历史/重命名/删除（历史接口顺带返回可恢复计划）
 │
 ├── components/             # React 组件
@@ -124,7 +125,7 @@ docs/
 |------|------|------|
 | 首页 Dashboard | `/` | ✅ 已完成（问候/时钟/农历/年度进度、每日一句、KPI、快捷工具、最近活动、自动化任务、最新文章、AI Agent、音乐播放器、便签、待办） |
 | AI Agent | `/agent` | ✅ 真实对话已实现（多模型切换、流式输出、深度思考、图片看图、SQLite 会话持久化、工具调用——天气/联网搜索、工具调用/思考过程/token 用量落库还原；意图理解/任务规划待开发） |
-| 知识库 | `/knowledge` | 🟡 K0 数据地基已落地（knowledge_items 四态生命周期 + 标签关联表 + store CRUD 层 13 用例单测；UI 仍为 mock，K1 采集入口待做） |
+| 知识库 | `/knowledge` | 🟡 K1 采集闭环已落地（集合/单条 API 路由 + 手动采集 + inbox 拍板流转，feed/inbox 接真数据；检索筛选、标签接线、notes/trash 接库待 K2） |
 | 工具中心 | `/tools` | ✅ 页面已完成（59 个工具卡片、搜索 + 分类筛选、三档响应式；工具均为 mock 无实际执行） |
 | 文件管理 | `/files` | 🔲 占位 |
 | 自动化 | `/automation` | 🔲 占位 |

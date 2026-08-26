@@ -4,6 +4,28 @@
 
 ---
 
+## 2026-08-26(午后·四) — Knowledge K1：采集入口 + inbox 拍板流转接真数据
+
+### 背景
+K0 数据地基（05ff5ef）就绪后按路线图推进 K1：目标是最小采集闭环——手动粘贴文本/Markdown 进收件箱 → 待拍板列表「保留/放弃」→ 保留条目进知识流。范围克制：仅 feed 与 inbox 接真库，notes/trash/sources 等 section 保持 mock 等后续节点替换。
+
+### 新增
+- **集合路由**（`src/app/api/knowledge/route.ts`）：GET 列表支持 status/q/tag/limit/offset 组合查询，响应一次性带 countsByStatus 各状态计数（前端角标一次取齐，避免列表刷新了计数还是旧值的不同步）；POST 手动采集落库进 inbox（缺省状态由 store 单点维护），无标题时从正文首行截 40 字兜底——只粘一大段也能一键进箱。route 层只管参数解析与 HTTP 语义映射（400 客户端错 / 500 服务端错），数据清洗仍归 store 层，未来 Agent 工具直连 store 时行为与 HTTP 入口完全一致
+- **单条路由**（`src/app/api/knowledge/[id]/route.ts`）：GET 详情；PATCH 字段更新 + 状态流转（保留=kept、放弃=discarded）+ tags 全量替换（改完重读一次保证返回含最新标签的完整行）；DELETE 硬删除。非法 status 在 route 层拦成 400，store 白名单作为内部调用方的最后一道闸
+
+### 页面接线（knowledge/page.tsx）
+- **首屏加载**：useEffect 并行拉收件箱（status=inbox）与知识流（status=kept），Promise.allSettled 保证单个接口故障不拖垮整页；加载中显示占位提示，防止闪「空空如也」误导用户
+- **拍板流转**：保留 PATCH kept 接口确认后才动本地列表——成功后把后端返回的完整行转卡片带「刚刚入库」标记插知识流顶部，让「存进去」肉眼可见；放弃 PATCH discarded 后移出收件箱。失败时列表保持原样，不误导用户以为拍板成功
+- **防连击与反馈**：savingId 在途锁统一禁用采集/拍板按钮；新增轻量 toast（底部黑条 2.4s 自动消失）替代静默失败
+- **mock 联动清理**：回收站演示条目不再混入已接真库的收件箱（toast 明确告知而非静默失败）；删文章不再按标题从真知识流删同名条目（会误伤真实数据）；「笔记加入知识流」挂起到 K2 notes 接库；feed/inbox 条目 id 从 Date.now() 改为后端 UUID，DetailRef 相应拆成 string/number 联合类型
+
+### 已知边界（留给 K2）
+- feed 详情正文按空行分段渲染，Markdown 符号原样显示——渲染器 K2 接入
+- 标签编辑仍是本地态（刷新即失），setTags API 已备好待接线
+- 「放弃=discarded」不再进回收站：discarded（从未保留过）与 trashed（先进站再删）本就是两个语义，原 mock 把两者混为一谈；回收站完整流程等 trash 接库时统一设计
+
+---
+
 ## 2026-08-26(午后·三) — Knowledge 开工：K0 数据地基（建表 + CRUD 数据层）
 
 ### 背景
