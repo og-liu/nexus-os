@@ -45,7 +45,7 @@ Nexus OS 是一个面向个人用户打造的智能工作空间，将日常工�
 
 ```bash
 # 1. 切换到正确的 Node.js 版本（如果你使用 nvm）
-nvm use 20
+nvm use 22
 
 # 2. 安装 pnpm（如果尚未安装）
 npm install -g pnpm
