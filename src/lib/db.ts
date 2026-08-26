@@ -47,14 +47,14 @@ const dbPath = path.join(process.cwd(), "data", "nexus.db");
 
 let db: Database.Database | null = null;
 
-export function getDb(): Database.Database {
-  if (db) return db;
-
-  fs.mkdirSync(path.dirname(dbPath), { recursive: true });
-  db = new Database(dbPath);
-  db.pragma("journal_mode = WAL");
-  db.pragma("foreign_keys = ON");
-  db.exec(`
+/**
+ * 在给定连接上建表 + 跑迁移。抽出来是为了让生产库（文件）和测试库（内存）
+ * 共用同一份 schema 定义，避免两边结构漂移。幂等，可重复调用。
+ */
+export function initSchema(conn: Database.Database): void {
+  conn.pragma("journal_mode = WAL");
+  conn.pragma("foreign_keys = ON");
+  conn.exec(`
     CREATE TABLE IF NOT EXISTS sessions (
       id TEXT PRIMARY KEY,
       title TEXT NOT NULL DEFAULT '新会话',
@@ -96,23 +96,41 @@ export function getDb(): Database.Database {
       ON task_plans (session_id, created_at);
   `);
 
-  // 迁移：给已存在的旧库 messages 表补 tool_calls / reasoning / usage 列（工具调用、思考过程、token 用量持久化）
+  // 迁移：给已存在的旧库 messages 表补 tool_calls / reasoning / usage / status 列
   // CREATE TABLE IF NOT EXISTS 不会给已有表加分，这里用 PRAGMA 检测后 ALTER 补列，幂等安全
-  const cols = db.prepare(`PRAGMA table_info(messages)`).all() as Array<{
+  const cols = conn.prepare(`PRAGMA table_info(messages)`).all() as Array<{
     name: string;
   }>;
   if (!cols.some((c) => c.name === "tool_calls")) {
-    db.exec(`ALTER TABLE messages ADD COLUMN tool_calls TEXT`);
+    conn.exec(`ALTER TABLE messages ADD COLUMN tool_calls TEXT`);
   }
   if (!cols.some((c) => c.name === "reasoning")) {
-    db.exec(`ALTER TABLE messages ADD COLUMN reasoning TEXT`);
+    conn.exec(`ALTER TABLE messages ADD COLUMN reasoning TEXT`);
   }
   if (!cols.some((c) => c.name === "usage")) {
-    db.exec(`ALTER TABLE messages ADD COLUMN usage TEXT`);
+    conn.exec(`ALTER TABLE messages ADD COLUMN usage TEXT`);
   }
   if (!cols.some((c) => c.name === "status")) {
-    db.exec(`ALTER TABLE messages ADD COLUMN status TEXT`);
+    conn.exec(`ALTER TABLE messages ADD COLUMN status TEXT`);
   }
+}
+
+/**
+ * 创建一个纯内存 SQLite 连接并初始化好 schema，专供单元测试使用。
+ * 测试跑完连接即回收，不碰磁盘上的真实 data/nexus.db。
+ */
+export function createInMemoryDb(): Database.Database {
+  const conn = new Database(":memory:");
+  initSchema(conn);
+  return conn;
+}
+
+export function getDb(): Database.Database {
+  if (db) return db;
+
+  fs.mkdirSync(path.dirname(dbPath), { recursive: true });
+  db = new Database(dbPath);
+  initSchema(db);
 
   return db;
 }
