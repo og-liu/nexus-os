@@ -144,6 +144,20 @@ export function initSchema(conn: Database.Database): void {
       ON knowledge_items (status, updated_at);
     CREATE INDEX IF NOT EXISTS idx_knowledge_tags_tag
       ON knowledge_item_tags (tag);
+
+    -- RSS 订阅源表（K5 自动化采集）：记录「从哪抓」。
+    -- url 加 UNIQUE：同一个订阅源添加两次没有意义，数据库层直接拦住；
+    -- 文章级去重不在这里做（feeds/store.ts 里按 source_url 应用层查重，
+    -- 比唯一约束宽容——手动采集可能合法地存过重复链接）。
+    CREATE TABLE IF NOT EXISTS feeds (
+      id TEXT PRIMARY KEY,
+      url TEXT NOT NULL UNIQUE,
+      title TEXT NOT NULL DEFAULT '',
+      enabled INTEGER NOT NULL DEFAULT 1,
+      last_fetched_at INTEGER,
+      last_error TEXT,
+      created_at INTEGER NOT NULL
+    );
   `);
 
   // 迁移：给已存在的旧库 messages 表补 tool_calls / reasoning / usage / status 列
