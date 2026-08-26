@@ -1146,7 +1146,10 @@ export default function AgentPage() {
       });
 
       if (!res.ok || !res.body) {
-        throw new Error(`请求失败：${res.status}`);
+        // 读出服务端返回的拒绝原因（如并发防护 409 的「有任务正在执行」文案）。
+        // 只抛状态码数字的话，用户看到「请求失败：409」不知道自己该做什么。
+        const reason = await res.text().catch(() => "");
+        throw new Error(reason || `请求失败：${res.status}`);
       }
 
       const reader = res.body.getReader();

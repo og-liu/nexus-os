@@ -35,6 +35,11 @@ import {
   archiveStoppedTurn,
   PLAN_STATUS,
 } from "@/lib/agent/plan-store";
+import {
+  healOrphanRunningState,
+  tryLockTurn,
+  unlockTurn,
+} from "@/lib/agent/turn-lock";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -184,6 +189,19 @@ export async function POST(req: NextRequest) {
     .get(sid) as { c: number };
   const isFirst = countRow.c === 0;
 
+  // ── 崩溃残留自愈 + 同会话并发防护（顺序不能反）──────────────────
+  // 先自愈再抢锁：healOrphanRunningState 内部以「本进程是否有活跃轮次」为判据。
+  // 若另一个窗口正持有此会话的锁在跑，这里不会误伤活数据，随后的 tryLockTurn
+  // 会拒绝本次请求；若没有人在跑而 DB 里还有 running，那必是崩溃残留，就地翻成
+  // stopped——此后 getPausedPlan / getRecoverablePlan 读到的都是干净状态，
+  // 下游的 resume 校验、「换话题归档」等分支无需感知残留数据的存在。
+  healOrphanRunningState(db, sid);
+  if (!tryLockTurn(sid)) {
+    return new Response("当前会话有任务正在执行，请稍候再发送", {
+      status: 409,
+    });
+  }
+
   // 图片落盘
   const savedPaths = images.map(saveImage).filter((p): p is string => !!p);
 
@@ -270,13 +288,20 @@ export async function POST(req: NextRequest) {
   // assistant 的 done / failed 正常保留（failed 是完整的出错回答，多轮对话需要连贯）。
   // 注意：SQL 里 `status != 'x'` 对 NULL 会返回 NULL（被 WHERE 判为 false），
   // 所以必须显式写 `status IS NULL OR status NOT IN (...)` 才能让普通 user 消息通过。
+  //
+  // 排序必须带 rowid 作第二排序键：user 消息与 assistant 占位行在同一个请求里
+  // 用同一个 Date.now() 落库，created_at 完全相同（同毫秒）。SQLite 对排序键
+  // 相等的行不保证稳定次序，内层 DESC 与外层 ASC 两次排序可能给出相反的相对
+  // 顺序——表现为「回复跑到提问前面」。rowid 是插入序号，天然单调递增：
+  // 同毫秒时后插入的 assistant rowid 更大，用它做 tiebreaker 即可还原真实先后。
+  // （子查询显式带出 rid 别名，外层才能引用派生结果里的这一列。）
   const historyRows = db
     .prepare(
       `SELECT * FROM (
-         SELECT * FROM messages
+         SELECT rowid AS rid, * FROM messages
          WHERE session_id = ? AND (status IS NULL OR status NOT IN ('running', 'stopped', 'cancelled'))
-         ORDER BY created_at DESC LIMIT ?
-       ) ORDER BY created_at ASC`,
+         ORDER BY created_at DESC, rid DESC LIMIT ?
+       ) ORDER BY created_at ASC, rid ASC`,
     )
     .all(sid, MAX_CONTEXT_TURNS * 2) as MessageRow[];
 
@@ -525,6 +550,9 @@ export async function POST(req: NextRequest) {
           updatePlanStatus(db, sid, PLAN_STATUS.FAILED);
           send({ type: "error", message });
         }
+        // 本轮结束（无论中断还是报错），释放会话执行锁，放行下一轮。
+        // 锁若不释放，该会话后续所有请求都会被 409 挡住——这是比并发写库更糟的事故。
+        unlockTurn(sid);
         controller.close();
         return;
       }
@@ -549,6 +577,9 @@ export async function POST(req: NextRequest) {
       }
 
       send({ type: "done", sessionId: sid, title, usage: assistantUsage });
+      // 正常完成的收尾：释放会话执行锁（与上方 catch 出口对称，两个 close
+      // 是本流式处理的全部出口，覆盖 done / stopped / failed 三种终态）。
+      unlockTurn(sid);
       controller.close();
     },
   });

@@ -1,6 +1,7 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { getDb } from "@/lib/db";
 import { getRecoverablePlan } from "@/lib/agent/plan-store";
+import { healOrphanRunningState } from "@/lib/agent/turn-lock";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -32,16 +33,24 @@ export async function GET(
   const beforeParam = req.nextUrl.searchParams.get("before");
   const before = beforeParam != null ? parseInt(beforeParam, 10) : null;
 
+  // 排序带 rowid 作第二排序键：同毫秒落库的 user/assistant 消息 created_at
+  // 完全相同，仅按 created_at 排序时两次查询的相对次序可能不稳定（回复跑到
+  // 提问前面）。rowid 是插入序号，天然单调递增，用它做 tiebreaker 即可稳定
+  // 还原真实先后。取回后 .reverse() 翻成正序给前端，tiebreaker 随之一起翻转，
+  // 顺序依然正确。
+  // （已知边界：翻页游标只传 created_at，若上一页恰好截断在同一毫秒的两条消息
+  // 之间，下一页 `created_at < ?` 会把同毫秒的另一条一并跳过。概率极低且修复
+  // 需要前后端联动升级复合游标，暂记为已知限制。）
   const rows =
     before == null || Number.isNaN(before)
       ? db
           .prepare(
-            `SELECT * FROM messages WHERE session_id = ? ORDER BY created_at DESC LIMIT ?`,
+            `SELECT * FROM messages WHERE session_id = ? ORDER BY created_at DESC, rowid DESC LIMIT ?`,
           )
           .all(id, limit + 1)
       : db
           .prepare(
-            `SELECT * FROM messages WHERE session_id = ? AND created_at < ? ORDER BY created_at DESC LIMIT ?`,
+            `SELECT * FROM messages WHERE session_id = ? AND created_at < ? ORDER BY created_at DESC, rowid DESC LIMIT ?`,
           )
           .all(id, before, limit + 1);
 
@@ -52,6 +61,12 @@ export async function GET(
   // 断点恢复：顺带返回该会话「可恢复的未完成计划」（running / stopped）。
   // 前端据此在最后一次中断的那条 assistant 消息上重画进度面板 + 「继续 / 放弃」入口。
   // 只在首页（before 为空）返回；翻更早的历史页时不需要，也避免重复携带。
+  //
+  // 读取前先做崩溃残留自愈：若进程重启过，DB 里的 running 计划 / running 占位
+  // 消息都是上个进程的孤儿数据（本进程锁集合为空即证明没人真在跑）。不修的话，
+  // 前端会把假死的「生成中」气泡和永远点不通的「继续」按钮一起渲染出来。
+  // 自愈后残留统一变 stopped，前端正确显示「已中断 + 继续/放弃」，resume 链路可接管。
+  if (before == null) healOrphanRunningState(db, id);
   const plan = before == null ? getRecoverablePlan(db, id) : null;
 
   return NextResponse.json({ session, messages, hasMore, plan });
