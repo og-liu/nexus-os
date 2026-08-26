@@ -18,6 +18,7 @@ K5 上线后做了一次全量代码复审（含翻 rss-parser 源码验证 Atom
 
 ### 踩坑
 - 同一文件多处 `edit_file` 并行提交出现写回竞态：refreshFeed 时序修改被同文件的另一处并发编辑覆盖丢失，新测试当场抓住。教训：**同一文件的多处修改要么串行执行、要么合并成一次 edit**
+- **K5 遗留事故（用户自测时暴露）**：只装了 `@types/node-cron` 类型包、漏装 node-cron 本体——tsc 有类型所以绿、单测没 import 过 scheduler 所以也绿，dev server 一启动加载 instrumentation 才炸 MODULE_NOT_FOUND。修复 `d3f4d52`：补装 node-cron@4.6.0（v4 自带官方 TS 类型、schedule API 与 v3 兼容），卸掉 @types/node-cron@3。教训：**类型包≠运行时包；从未被执行的模块是 tsc 和单测共同的盲区，交付自测应含启动冒烟**
 
 ---
 
