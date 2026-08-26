@@ -414,12 +414,19 @@ export async function POST(req: NextRequest) {
               send({ type: "tool_error", toolName: event.toolName, error: event.error, callId: event.callId });
               break;
             case "delta":
-              assistantContent += event.content;
-              send({ type: "delta", content: event.content });
+              // phase=working 是内部工序笔记（中间步骤产出）：照常透传给前端（过程可观测），
+              // 但不累积进 assistantContent——落库与断点恢复用的正文必须只有最终回答，
+              // 否则「步骤笔记 + 最终回答」又会一起进历史，重复内容换个地方复活。
+              // 缺省（无 phase）按最终回答处理，兼容不打标的旧事件路径。
+              if (event.phase !== "working") {
+                assistantContent += event.content;
+              }
+              send({ type: "delta", content: event.content, phase: event.phase });
               break;
             case "reasoning":
+              // 思考过程无论哪个阶段都是真实消耗，全程累积落库（reasoning 面板本来就是折叠的过程视图）
               assistantReasoning += event.content;
-              send({ type: "reasoning", content: event.content });
+              send({ type: "reasoning", content: event.content, phase: event.phase });
               break;
             // ── 规划-执行新增事件：透传给前端 + 持久化计划 ──────────
             case "plan_created":

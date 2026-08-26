@@ -47,8 +47,13 @@ export type LoopEvent =
   | { type: "tool_call"; toolName: string; args: Record<string, unknown>; callId: string }
   | { type: "tool_result"; toolName: string; result: unknown; callId: string }
   | { type: "tool_error"; toolName: string; error: string; callId: string }
-  | { type: "delta"; content: string }
-  | { type: "reasoning"; content: string }
+  // phase 标记这条流式内容的归属阶段：
+  //   working = 内部工序产出（步骤的工作笔记），前端不应渲染进正文主气泡；
+  //   final   = 最终回答，前端渲染进主气泡。
+  // 缺省（无 phase）视为 final——兼容简单直答路径（answerWithoutPlan）等未打标的旧事件，
+  // 也保证「没打标的一律当最终回答」这个安全默认值。
+  | { type: "delta"; content: string; phase?: "working" | "final" }
+  | { type: "reasoning"; content: string; phase?: "working" | "final" }
   // ── 规划-执行新增事件 ──────────────────────────────────────────
   // 计划创建（steps 是完整 PlanStep 数组，含 status，初值 pending；前端展示进度用）
   | { type: "plan_created"; goal: string; steps: Plan["steps"] }
@@ -315,7 +320,10 @@ function buildStepInstruction(step: PlanStep, index: number, total: number): str
     "要求：",
     "1. 只专注完成这一个步骤，不要越界去做后续步骤的事。",
     "2. 需要查资料、查事实时调用可用工具（get_weather / web_search）；纯推理步骤直接推理即可。",
-    "3. 完成后用自然语言汇报这一步的结果；若这一步没有实质产出（例如只是补问用户信息），也请说明。",
+    "3. 你现在的输出是内部工作笔记：仅供后续步骤和最终整理阶段引用，不会直接展示给用户。",
+    "4. 因此请输出结构化的要点笔记（事实、数据、结论、来源），不要写成面向用户的成文汇报；",
+    "   不要寒暄、开场白、总结陈词，也不要「以下是……」之类的过渡语——成文交给收尾阶段统一完成，",
+    "   你在这里写完整文章只会和收尾阶段的回答重复。",
   ].join("\n");
 }
 
@@ -341,13 +349,16 @@ function buildAskInstruction(step: PlanStep): string {
   ].join("\n");
 }
 
-/** 汇总阶段投喂给模型的指令：让模型把各步中间结果串成最终回答 */
+/** 汇总阶段投喂给模型的指令：让模型把各步工作笔记串成最终回答。
+ *  这是整轮对话中「唯一一次」面向用户的成文输出——前面所有步骤都只产内部笔记（见
+ *  buildStepInstruction 第 3、4 条），成文职责完全收敛到这里，从机制上杜绝「同一内容写两遍」。 */
 const SUMMARY_INSTRUCTION = [
   "以上所有步骤已经执行完毕。",
-  "现在请把各步骤的中间结果综合起来，给用户一个完整、自然、条理清晰的最终回答。",
+  "现在请把各步骤的工作笔记综合起来，给用户一个完整、自然、条理清晰的最终回答。",
   "",
   "要求：",
-  "1. 面向用户直接回答，不要复述「步骤 1 / 步骤 2」的执行过程。",
+  "1. 这是本轮对话中唯一一次面向用户的输出，请直接给出完整的成品回答；不要复述「步骤 1 / 步骤 2」的执行过程，",
+  "   也不要保留工作笔记的要点罗列格式——用户看到的应该是一篇连贯的正式回答。",
   "2. 覆盖刚才所有步骤的关键结论；某一步失败或没有产出，请如实说明。",
   "3. 除非还有关键信息缺失且必须用工具获取，否则不要再调用工具。",
 ].join("\n");
@@ -539,11 +550,26 @@ async function executeOneStep(
   thinking: ThinkingOptions,
   instruction: string,
   onEvent: (event: LoopEvent) => void,
+  /** 本步产出的流式内容该打什么标：working=内部工序笔记（不进正文气泡）、final=最终回答。
+   *  为什么由调用方决定而不是写死：同一个 executeOneStep 既被步骤执行用（working）也被
+   *  收尾汇总用（final），只有调用现场才知道自己处在哪个阶段。 */
+  emitPhase: "working" | "final",
 ): Promise<StepOutcome> {
   // 记录该步开始前 conversation 的长度，作为「失败重试时回滚」的锚点：
   // 一次失败的尝试可能往 conversation 里塞了一堆中间消息（tool_calls / tool 结果），
   // 重试时把这些污染清掉，让模型在干净的上下文里重新尝试。
   const snapshotIndex = ctx.conversation.length;
+
+  // 按 emitPhase 给流式事件打标。只处理 delta / reasoning 两类文本流；工具类事件
+  // （tool_call / tool_result / tool_error）不打标——工具卡片在哪个阶段都照常展示，
+  // 它本身就是「过程可观测」的一部分，不存在污染正文的问题。
+  const emit = (event: LoopEvent): void => {
+    if (emitPhase === "final" || (event.type !== "delta" && event.type !== "reasoning")) {
+      onEvent(event);
+      return;
+    }
+    onEvent({ ...event, phase: "working" });
+  };
 
   let lastError = "未知错误";
 
@@ -563,7 +589,7 @@ async function executeOneStep(
     for (let round = 0; round < STEP_MAX_ROUNDS; round++) {
       let result: LLMResult;
       try {
-        result = await callLLM(modelId, ctx.conversation, thinking, onEvent, ctx.signal);
+        result = await callLLM(modelId, ctx.conversation, thinking, emit, ctx.signal);
       } catch (e) {
         // 用户取消：signal 已中止，立即上抛终止整轮，不走重试
         if (isAbortError(e) || ctx.signal?.aborted) throw e;
@@ -595,7 +621,7 @@ async function executeOneStep(
       });
 
       // 执行全部工具，回填结果
-      const execOutcome = await executeToolCalls(ctx, result.toolCalls, onEvent);
+      const execOutcome = await executeToolCalls(ctx, result.toolCalls, emit);
       // 所有工具都失败 → 该次尝试失败（交给重试，模型换个工具/参数再来）
       if (execOutcome.failed > 0 && execOutcome.succeeded === 0) {
         lastError = "本步骤发起的工具调用全部失败";
@@ -744,8 +770,11 @@ async function runPlanSteps(
     });
 
     const instruction = isAsk ? buildAskInstruction(step) : buildStepInstruction(step, i, totalSteps);
-    // 执行一步（内部自带失败重试）
-    const outcome = await executeOneStep(ctx, modelId, thinking, instruction, onEvent);
+    // 执行一步（内部自带失败重试）。所有计划步骤（含补问步骤）都是「内部工序」，
+    // 流式产出统一打 working 标——正文气泡只留给收尾汇总的最终回答。
+    // 补问问句虽然最终要给用户看，但它走 plan_paused 事件 + loopResult.content 落库展示，
+    // 不依赖这步的流式 delta，所以同样按内部工序处理。
+    const outcome = await executeOneStep(ctx, modelId, thinking, instruction, onEvent, "working");
 
     // ── 补问步骤：无论模型是否产出问句都要「停住」──────────────
     // 这一步的目标不是「得出结果」，而是「把问题抛给用户等回复」。所以拿到问句文本后
@@ -799,7 +828,8 @@ async function finishPlan(
 ): Promise<LoopResult> {
   // 汇总也复用「执行一步」——因为它本质是「最后一个推理步骤」，只是指令变成「综合回答」。
   // executeOneStep 内部已经通过 callLLM 流式吐出 delta，所以最终回答会实时推给前端。
-  const summary = await executeOneStep(ctx, modelId, thinking, SUMMARY_INSTRUCTION, onEvent);
+  // 这里传 "final"：汇总阶段的流式内容就是最终回答本身，前端据此渲染进正文主气泡。
+  const summary = await executeOneStep(ctx, modelId, thinking, SUMMARY_INSTRUCTION, onEvent, "final");
 
   let finalContent: string;
   if (summary.ok) {
@@ -807,7 +837,7 @@ async function finishPlan(
   } else {
     // 汇总也失败了（极少见）：给一个兜底话术，保证用户至少能看到一句交代
     finalContent = "抱歉，我在汇总结果时遇到了问题，请稍后重试或换个方式提问。";
-    onEvent({ type: "delta", content: finalContent });
+    onEvent({ type: "delta", content: finalContent, phase: "final" });
   }
 
   // completed 统一按「status === done」计数：续跑场景下既包含恢复前已完成的步骤，

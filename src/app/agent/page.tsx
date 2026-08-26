@@ -1186,6 +1186,10 @@ export default function AgentPage() {
                 | "plan_done"
                 | "stopped";
               content?: string;
+              // 流式内容的归属阶段（与后端 LoopEvent 对齐）：
+              //   working = 内部工序笔记（中间步骤产出），不进正文气泡；
+              //   final   = 最终回答，进正文气泡；缺省视为 final（兼容旧事件）。
+              phase?: "working" | "final";
               message?: string;
               sessionId?: string;
               title?: string;
@@ -1218,13 +1222,19 @@ export default function AgentPage() {
                 ),
               );
             } else if (obj.type === "delta" && obj.content) {
-              setMessages((prev) =>
-                prev.map((m) =>
-                  m.id === assistantMsgId
-                    ? { ...m, content: m.content + obj.content }
-                    : m,
-                ),
-              );
+              // phase=working 是中间步骤的「工作笔记」：不追加进正文主气泡——
+              // 主气泡只承载最终回答（phase=final 或缺省）。执行过程已由进度面板
+              // （step_start/done/failed）和工具卡片覆盖，笔记内容无需重复展示，
+              // 否则又回到「过程文字 + 最终回答」混在一条消息里的老问题。
+              if (obj.phase !== "working") {
+                setMessages((prev) =>
+                  prev.map((m) =>
+                    m.id === assistantMsgId
+                      ? { ...m, content: m.content + obj.content }
+                      : m,
+                  ),
+                );
+              }
             } else if (obj.type === "tool_call" && obj.callId && obj.toolName) {
               // 模型决定调用工具
               setMessages((prev) =>
