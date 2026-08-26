@@ -94,6 +94,42 @@ export function initSchema(conn: Database.Database): void {
 
     CREATE INDEX IF NOT EXISTS idx_task_plans_session
       ON task_plans (session_id, created_at);
+
+    -- ── 知识库模块（产品主阵地）─────────────────────────────────
+    -- 知识条目主表。已定决策（2026-08-26）：内容格式 = Markdown 存 TEXT 列——
+    -- 存储保持纯文本「单一事实源」，渲染交给前端解析，避免富文本 HTML 把格式焊死在库里；
+    -- 组织方式 = 标签起步（见下方关联表），双链 [[wiki]] 后置到迭代二。
+    --
+    -- status 是知识条目的生命周期（对应产品原型「待你拍板 → 知识流」的采集流）：
+    --   inbox     —— 已采集、待人工拍板（采集页底部的红点列表）
+    --   kept      —— 已保留，进入知识流（产品的主内容面）
+    --   discarded —— 拍板时放弃（左滑），保留记录但不再出现在默认视图
+    --   trashed   —— kept 之后被删除，进回收站（可恢复，与 discarded 的区别是「曾经保留过」）
+    CREATE TABLE IF NOT EXISTS knowledge_items (
+      id TEXT PRIMARY KEY,
+      title TEXT NOT NULL DEFAULT '',
+      content TEXT NOT NULL DEFAULT '',
+      source TEXT,
+      source_url TEXT,
+      status TEXT NOT NULL DEFAULT 'inbox',
+      created_at INTEGER NOT NULL,
+      updated_at INTEGER NOT NULL
+    );
+
+    -- 标签关联表：多对多（一条知识多个标签，一个标签挂多条知识）。
+    -- 为什么用独立关联表而不是 JSON 数组列：标签筛选是高频查询，
+    -- 关联表能走索引精确匹配，JSON 列只能全表扫；复合主键天然防重。
+    CREATE TABLE IF NOT EXISTS knowledge_item_tags (
+      item_id TEXT NOT NULL,
+      tag TEXT NOT NULL,
+      PRIMARY KEY (item_id, tag),
+      FOREIGN KEY (item_id) REFERENCES knowledge_items(id) ON DELETE CASCADE
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_knowledge_items_status
+      ON knowledge_items (status, updated_at);
+    CREATE INDEX IF NOT EXISTS idx_knowledge_tags_tag
+      ON knowledge_item_tags (tag);
   `);
 
   // 迁移：给已存在的旧库 messages 表补 tool_calls / reasoning / usage / status 列
