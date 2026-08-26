@@ -4,6 +4,36 @@
 
 ---
 
+## 2026-08-26(傍晚·九) — Automation K5：RSS 自动化采集（订阅管理 + 定时抓取 + 自动化页）
+
+产品流水线第一段自动化落地：订阅源定时抓取 → 新文章自动进待拍板队列，机器搬运、人拍板。
+
+### 数据层
+- 新增 `feeds` 表：url **UNIQUE**（同源重复添加数据库层直接拦）；`enabled` 启停开关；`last_fetched_at` / `last_error` 状态列——**死源不会自己举手**，报错必须留痕界面上才看得见
+- 文章去重走 `knowledge_items.source_url` 应用层查重而非唯一约束：手动采集可能合法地存过重复链接，应用层查重更宽容，不会因历史数据撞车翻车
+
+### 抓取内核与分层（延续 K3 风格）
+- `src/lib/feeds/store.ts`：CRUD + **`ingestFeedXml` 内核吃 XML 字符串**（不发网络请求，单测直接喂内联 RSS）+ `refreshFeed` / `refreshAllFeeds` 网络薄壳（fetcher 参数注入，测试传假实现）
+- 正文清洗：剥 HTML 标签（统一替换为单个空格保英文词距）、清 script/style、还原常见实体、截断 5000 字符——库里存纯文本单一事实源
+- 入库语义对齐产品总纲：`status=inbox` 进待拍板，`source=订阅名`，入库后复用 K4 写入钩子异步补语义指纹（失败只警告不阻塞）
+- 单源失败只写自己的 `last_error`，不拖垮整轮刷新——一篇文章挂了不该让流水线停摆
+- 无名源首次抓取成功后用频道自带标题回填显示名
+
+### 定时调度
+- 选型 **进程内 node-cron**（每小时整点）：代码即配置，dev/start 都能跑；系统 crontab 要配操作系统且搬 Vercel 就废；懒触发「不打开网页就永远不抓」不可接受
+- `globalThis` 单例守卫防 dev 热重载重复注册闹钟（模块级变量会随热重载丢失）
+- `src/instrumentation.ts`：Next.js 官方启动钩子，`NEXT_RUNTIME === "nodejs"` 分流后挂载定时器
+
+### API 与界面
+- `GET/POST /api/feeds`（添加成功立即首抓，不用等下一个整点）、`PATCH/DELETE /api/feeds/[id]`（启停/退订，退订保留已采集文章）、`POST /api/feeds/[id]/refresh` 手动刷新
+- `/automation` 占位页重写为订阅管理：添加表单、启停开关、退订二次确认、手动刷新、状态点+错误红字展示
+
+### 测试
+- 新增 9 用例（共 **57/57 全绿**）：CRUD/重复 URL 拒绝/退订保留文章/入库语义断言/链接去重/无名源回填/失败留痕/批量刷新隔离
+- 踩坑记录：rss-parser 的 `parseString` 不传回调返回的是 **Promise**，当同步用 items 永远是空；`content:encoded` 必须在 customFields 显式声明才会被解析
+
+---
+
 ## 2026-08-26(傍晚·八) — Knowledge K4：向量检索（语义指纹 + 混合检索 RRF 融合）
 
 搜索的灵魂升级：从「字面对上号」到「意思相近也能找到」。搜「大模型」现在能召回通篇写「LLM」的文章。

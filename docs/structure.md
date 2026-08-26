@@ -9,6 +9,7 @@
 ```
 Nexus OS/
 ├── src/                    # 源代码主目录
+│   ├── instrumentation.ts  # Next.js 服务端启动钩子：register() 挂载 RSS 定时刷新器（NEXT_RUNTIME=nodejs 分流，Edge 下跳过）
 ├── public/                 # 静态资源（图片、SVG 等），Next.js 直接通过 / 路径访问
 ├── docs/                   # 项目文档（面向 AI 的详尽文档，用于维护和理解项目）
 ├── node_modules/           # 依赖包（pnpm 管理）
@@ -45,13 +46,14 @@ src/
 │   ├── files/page.tsx      # 文件管理页面（占位，待开发）
 │   ├── agent/page.tsx      # AI Agent 页面：真实对话（多模型+流式输出+深度思考+图片看图+语音输入+工具调用折叠卡片+任务计划进度面板+停止/断点恢复），左侧会话栏对齐知识页
 │   ├── knowledge/page.tsx  # 知识库页面：7 个 section；feed/inbox 已接真库（手动采集+拍板流转+toast 反馈），其余 section 仍为 mock 待 K2 替换
-│   ├── automation/page.tsx # 自动化页面（占位，待开发）
+│   ├── automation/page.tsx # 自动化页面：RSS 订阅管理（添加表单/启停/退订二次确认/手动刷新/错误红字展示），K5 已接真库
 │   ├── settings/page.tsx   # 设置页面：AI 模型配置、工具目录等（框架已搭建，功能待开发）
 │   └── api/                # API 路由（Next.js Route Handlers）
 │       ├── chat/route.ts   # AI 对话：POST 接消息→落库→归档残留任务→组装上下文→走 Loop（规划执行/续跑/断点恢复三路）→SSE 流式输出+增量落盘
 │       ├── plan/route.ts   # 放弃中断计划：POST 把 stopped 计划翻 cancelled + 整轮配对归档
 │       ├── providers/route.ts # 供应商 Key 配置状态：GET 返回 {deepseek:true, openrouter:false} 布尔表（Key 不出服务端），驱动前端模型置灰标注与默认模型动态校正
 │       ├── knowledge/      # 知识库（K1~K4）：集合路由 GET 列表(检索/kind筛选/排除回收站)+计数 / POST 采集与笔记创建(写入钩子补语义指纹)；[id] 单条 GET / PATCH 字段流转+action:trash|restore(内容变更重算指纹) / DELETE 软删?purge=true硬删；backfill POST 幂等回填向量；tags 路由 GET/PATCH/DELETE
+│       ├── feeds/          # RSS 订阅源 API（K5）：集合路由 GET 列表 / POST 添加(添加即首抓, url http(s) 校验)；[id] PATCH 启停 / DELETE 退订(保留已采集文章)；[id]/refresh POST 手动抓单个源
 │       └── sessions/       # 会话管理：列表/新建、历史/重命名/删除（历史接口顺带返回可恢复计划）
 │
 ├── components/             # React 组件
@@ -82,10 +84,14 @@ src/
 └── lib/
     ├── utils.ts            # 工具函数：cn() — 合并 clsx + tailwind-merge 的类名处理
     ├── models.ts           # 模型注册表：模型元信息（id/供应商/能力），前端选择器与后端白名单共用
-    ├── db.ts               # SQLite 访问：getDb() 连接 + initSchema()（生产/测试共用）+ createInMemoryDb()（内存测试库）；sessions/messages/task_plans/knowledge_items/knowledge_item_tags 表，messages 含 tool_calls/reasoning/usage/status 字段，内置幂等迁移自动补列
+    ├── db.ts               # SQLite 访问：getDb() 连接 + initSchema()（生产/测试共用）+ createInMemoryDb()（内存测试库）；sessions/messages/task_plans/knowledge_items/knowledge_item_tags/feeds 表，messages 含 tool_calls/reasoning/usage/status 字段，内置幂等迁移自动补列
     ├── knowledge/          # 知识库数据层（K0 数据地基）
     │   ├── store.ts        # 知识条目 CRUD：createItem/getItem/listItems(状态+标签+关键词过滤)/updateItem/setTags/deleteItem/countsByStatus；依赖注入风格（首参为连接，测试喂内存库）；状态白名单校验；LIKE 检索通配符转义；rowid 第二排序键
-    │   └── store.test.ts   # Vitest 单测：创建回读/过滤组合/LIKE 转义/分页/状态流转/级联删除/计数（13 用例）
+    │   │   └── store.test.ts   # Vitest 单测：创建回读/过滤组合/LIKE 转义/分页/状态流转/级联删除/计数（13 用例）
+    ├── feeds/              # RSS 订阅源数据层（K5 自动化采集）
+    │   ├── store.ts        # 订阅源 CRUD + ingestFeedXml 抓取内核(吃 XML 字符串可测, source_url 应用层去重, HTML 清洗, status=inbox 入待拍板+复用写入钩子补指纹)；refreshFeed/refreshAllFeeds 网络薄壳(fetcher 注入, 单源失败写 last_error 不拖垮批量)
+    │   ├── store.test.ts   # Vitest 单测：CRUD/重复 URL 拒绝/退订保留文章/入库语义/链接去重/无名源回填/失败留痕/批量隔离（9 用例）
+    │   └── scheduler.ts    # 进程内定时器：node-cron 每小时整点 refreshAllFeeds；globalThis 单例守卫防 dev 热重载重复注册
     ├── agent/              # Agent 编排核心（规划-执行 + 工具调用）
     │   ├── loop.ts         # Agent Loop：规划→逐步执行(每步小型 ReAct+失败重试)→汇总；callLLM 真流式；agentLoop/resumeLoop(补问续跑)/resumeStoppedLoop(断点恢复) 三入口
     │   ├── planner.ts      # 任务规划器：LLM 拆解步骤清单（≤8步），纯 JSON 输出 + 鲁棒解析（剥代码块/截大括号/去尾逗号）
@@ -124,9 +130,9 @@ docs/
 | 页面 | 路由 | 状态 |
 |------|------|------|
 | 首页 Dashboard | `/` | ✅ 已完成（问候/时钟/农历/年度进度、每日一句、KPI、快捷工具、最近活动、自动化任务、最新文章、AI Agent、音乐播放器、便签、待办） |
-| AI Agent | `/agent` | 🟢 K3 完成：真实对话+Agent Loop+工具体系齐备（get_weather / web_search / 知识库双工具 search_knowledge+read_knowledge，kept 语义红线），多模型切换、真流式、深度思考、图片看图、会话落库；48 测试全绿；下一步=K5 RSS 自动化采集 |
-| 知识库 | `/knowledge` | ✅ K0~K4 全部完成：数据地基→采集拍板闭环→知识流页面→notes/trash 接库（同表 kind+回收站软删）→Agent 衔接→K4 向量检索（bge-m3 嵌入+RRF 混合检索+回填端点）；下一步=K5 RSS 自动化采集 |
+| AI Agent | `/agent` | 🟢 K3 完成：真实对话+Agent Loop+工具体系齐备（get_weather / web_search / 知识库双工具 search_knowledge+read_knowledge，kept 语义红线），多模型切换、真流式、深度思考、图片看图、会话落库；48 测试全绿 |
+| 知识库 | `/knowledge` | ✅ K0~K4 全部完成：数据地基→采集拍板闭环→知识流页面→notes/trash 接库（同表 kind+回收站软删）→Agent 衔接→K4 向量检索（bge-m3 嵌入+RRF 混合检索+回填端点） |
 | 工具中心 | `/tools` | ✅ 页面已完成（59 个工具卡片、搜索 + 分类筛选、三档响应式；工具均为 mock 无实际执行） |
 | 文件管理 | `/files` | 🔲 占位 |
-| 自动化 | `/automation` | 🔲 占位 |
+| 自动化 | `/automation` | 🟢 K5 完成：RSS 订阅管理界面 + feeds 表 + 抓取内核(去重/清洗/inbox 入队/自动指纹) + node-cron 每小时定时刷新；57 测试全绿 |
 | 设置 | `/settings` | 🟡 框架已搭建（AI 模型配置 + 工具目录卡片） |
