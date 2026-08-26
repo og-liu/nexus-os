@@ -1018,10 +1018,22 @@ export default function AgentPage() {
     const assistantMsgId = `tmp-a-${Date.now()}`;
     stickToBottomRef.current = true; // 发新消息时强制跟随到最底
     if (resume) {
-      setMessages((prev) => [
-        ...prev,
-        { id: assistantMsgId, role: "assistant" as const, content: "" },
-      ]);
+      // 断点恢复接管旧面板：把旧消息上挂着「继续/放弃」按钮的进度快照摘掉。
+      // 计划已被这一轮续跑接管，旧快照若保留，界面上会同时出现两份进度面板，
+      // 用户还能对着已过时的旧面板误点第二次「继续」、或误点「放弃」把正在跑的
+      // 计划状态翻掉。摘掉后与刷新页面的表现一致（续跑中的计划不恢复任何面板），
+      // 保证一个计划永远只有一个活跃面板；旧气泡仅保留「已停止」角标作为痕迹。
+      setMessages((prev) => {
+        const next = [...prev];
+        for (let i = next.length - 1; i >= 0; i--) {
+          if (next[i].role === "assistant" && next[i].stopped && next[i].plan) {
+            next[i] = { ...next[i], plan: undefined };
+            break;
+          }
+        }
+        next.push({ id: assistantMsgId, role: "assistant" as const, content: "" });
+        return next;
+      });
     } else {
       // 发新消息 = 上一轮任务被取代：把仍在「已停止」态的任务即时归档成「已放弃」，
       // 并摘掉它的进度面板（「继续/放弃」按钮随之消失）。与后端在收到新消息时把旧
