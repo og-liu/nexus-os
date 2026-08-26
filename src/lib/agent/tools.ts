@@ -228,20 +228,27 @@ export async function runKnowledgeSearch(
       ? Math.min(Math.floor(limitRaw), 10)
       : 5;
 
-  // 动态 import：跟 webSearchTool 一个道理，避免 tools.ts 被别的模块
-  // 引用时就在加载期拉起数据库初始化，用到才加载
-  const { listItems } = await import("@/lib/knowledge/store");
-  const { items, total } = listItems(conn, {
-    q,
-    status: "kept", // 语义红线：只搜已保留内容
-    kind,
-    limit,
-  });
+  const { searchHybrid } = await import("@/lib/knowledge/store");
+
+  // 查询词的语义指纹：K4 起 search 升级为混合检索（关键词+语义双路）。
+  // 嵌入服务不可用时优雅降级为纯关键词路——搜索永远可用，
+  // 只是「意思相近字面不同」的召回能力暂时缺席
+  let qVector: Float32Array | null = null;
+  let mode = "keyword";
+  try {
+    const { embedText } = await import("@/lib/embeddings");
+    qVector = await embedText(q);
+    mode = "hybrid";
+  } catch {
+    // 保持 qVector=null，searchHybrid 内部会跳过语义路
+  }
+
+  const { items } = searchHybrid(conn, { q, qVector, kind, limit });
 
   return {
     query: q,
-    total,
-    returned: items.length,
+    mode: mode === "hybrid" ? "hybrid(关键词+语义)" : "keyword(嵌入服务不可用已降级)",
+    total: items.length,
     results: items.map((it) => ({
       id: it.id,
       title: it.title || "(无标题)",

@@ -121,6 +121,11 @@ export function initSchema(conn: Database.Database): void {
       status TEXT NOT NULL DEFAULT 'inbox',
       kind TEXT NOT NULL DEFAULT 'captured',
       deleted_at INTEGER,
+      -- K4 向量检索：语义指纹（归一化后的 Float32 二进制）与算指纹用的模型名。
+      -- 存模型名的原因：将来换嵌入模型时，旧向量和新向量不在同一个空间里，
+      -- 不能混着比——靠这一列识别哪些条目需要重算
+      embedding BLOB,
+      embedding_model TEXT,
       created_at INTEGER NOT NULL,
       updated_at INTEGER NOT NULL
     );
@@ -172,6 +177,12 @@ export function initSchema(conn: Database.Database): void {
   }
   if (!itemCols.some((c) => c.name === "deleted_at")) {
     conn.exec(`ALTER TABLE knowledge_items ADD COLUMN deleted_at INTEGER`);
+  }
+  if (!itemCols.some((c) => c.name === "embedding")) {
+    conn.exec(`ALTER TABLE knowledge_items ADD COLUMN embedding BLOB`);
+  }
+  if (!itemCols.some((c) => c.name === "embedding_model")) {
+    conn.exec(`ALTER TABLE knowledge_items ADD COLUMN embedding_model TEXT`);
   }
 }
 

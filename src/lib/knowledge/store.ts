@@ -11,6 +11,12 @@
 
 import { randomUUID } from "node:crypto";
 import type Database from "better-sqlite3";
+import {
+  EMBEDDING_MODEL,
+  blobToVector,
+  cosineSimilarity,
+  vectorToBlob,
+} from "@/lib/embeddings";
 
 /** 知识条目的生命周期状态（语义见 db.ts 建表注释） */
 export type KnowledgeStatus = "inbox" | "kept" | "discarded" | "trashed";
@@ -65,6 +71,10 @@ interface ItemSqlRow {
   status: string;
   kind: string;
   deleted_at: number | null;
+  /** K4：语义指纹二进制与模型名——只在混合检索内部使用，
+   *  不进 KnowledgeItemRow 对外暴露（列表/详情没必要拖 4KB 二进制） */
+  embedding: Buffer | null;
+  embedding_model: string | null;
   created_at: number;
   updated_at: number;
 }
@@ -453,4 +463,157 @@ export function countsByStatus(
     }
   }
   return result;
+}
+// ─── K4 向量检索：语义指纹存取 + 混合检索（关键词路 × 语义路 RRF 融合）───
+
+/**
+ * 写入/更新某条目的语义指纹。
+ * 指纹的生成（调嵌入 API）不在这里做——store 保持「纯数据层」：
+ * 只管存取和计算，不碰任何外部服务。生成是 route 层编排的事。
+ */
+export function setEmbedding(
+  conn: Database.Database,
+  id: string,
+  vector: Float32Array,
+  model: string = EMBEDDING_MODEL,
+): void {
+  const info = conn
+    .prepare(
+      `UPDATE knowledge_items SET embedding = ?, embedding_model = ? WHERE id = ?`,
+    )
+    .run(vectorToBlob(vector), model, id);
+  if (info.changes === 0) throw new Error(`条目不存在: ${id}`);
+}
+
+/**
+ * 找出所有需要补算指纹的已保留条目：没有指纹的，或指纹是用别的模型算的。
+ * 「模型不符也要重算」是关键设计：不同模型的向量不在同一空间，
+ * 新旧混比等于拿厘米和英寸做加法。回填脚本靠它做到可重复执行（幂等）。
+ */
+export function listItemsNeedingEmbedding(
+  conn: Database.Database,
+  model: string = EMBEDDING_MODEL,
+): KnowledgeItemRow[] {
+  const rows = conn
+    .prepare(
+      `SELECT * FROM knowledge_items
+       WHERE status = 'kept'
+         AND (embedding IS NULL OR embedding_model != ?)`,
+    )
+    .all(model) as ItemSqlRow[];
+  return attachTags(conn, rows);
+}
+
+/** 清掉指纹（内容被改但重算失败时会用到，让回填脚本能重新认领它） */
+export function clearEmbedding(conn: Database.Database, id: string): void {
+  conn
+    .prepare(
+      `UPDATE knowledge_items SET embedding = NULL, embedding_model = NULL WHERE id = ?`,
+    )
+    .run(id);
+}
+
+export interface HybridSearchOptions {
+  /** 用户查询词 */
+  q: string;
+  /** 查询词的语义向量。调用方负责生成；传 null/undefined 时退化为纯关键词检索
+   *  （嵌入服务挂了不该拖垮整个搜索）*/
+  qVector?: Float32Array | null;
+  kind?: KnowledgeKind;
+  limit?: number;
+}
+
+/**
+ * 混合检索内核：关键词路 + 语义路，两路排名用 RRF（倒数排名融合）合并。
+ *
+ * 为什么两路都要：关键词路抓「字面精确命中」（型号名、专有名词它最强），
+ * 语义路抓「意思相近但字面不同」（搜大模型能找到写 LLM 的文章），
+ * 单独哪一路都会漏。RRF 公式出奇的简单有效：
+ *   每条目得分 = Σ 它在每路排名 r 的 1/(60+r)
+ * 排得越靠前加分越多；两路都上榜的条目自然浮到最顶。
+ * k=60 是业界验证过的大量场景下的稳健默认值（出自原论文）。
+ *
+ * 为什么不上向量数据库：个人知识库量级（千条内）下，全表向量
+ * 在内存里暴力点积是毫秒级开销，「向量数据库」是百万级数据的工具。
+ * 先用对的简单方案，规模真到了再升级——不过早优化。
+ */
+export function searchHybrid(
+  conn: Database.Database,
+  opts: HybridSearchOptions,
+): { items: KnowledgeItemRow[]; total: number } {
+  const q = opts.q.trim();
+  if (!q) return { items: [], total: 0 };
+  const limit = Math.min(Math.max(opts.limit ?? 5, 1), 20);
+  const POOL = 20; // 每路候选池大小：取宽一点给融合留余地，最后再截断
+
+  // 过滤条件两路共用：只搜 kept（与 Agent 工具的语义红线一致），kind 可选收窄
+  const conds = [`status = 'kept'`];
+  const params: Array<string | number> = [];
+  if (opts.kind) {
+    assertKind(opts.kind);
+    conds.push(`kind = ?`);
+    params.push(opts.kind);
+  }
+  const where = conds.join(` AND `);
+
+  // ── 路1 关键词（LIKE 字面匹配），按更新时间排（LIKE 无相关度可言）
+  const kwRows = conn
+    .prepare(
+      `SELECT id FROM knowledge_items WHERE ${where}
+       AND (title LIKE ? ESCAPE '\\' OR content LIKE ? ESCAPE '\\')
+       ORDER BY updated_at DESC LIMIT ?`,
+    )
+    .all(
+      ...params,
+      `%${q.replace(/[\\%_]/g, (c) => `\\${c}`)}%`,
+      `%${q.replace(/[\\%_]/g, (c) => `\\${c}`)}%`,
+      POOL,
+    ) as Array<{ id: string }>;
+
+  // RRF 记分板：id → 累计分
+  const scores = new Map<string, number>();
+  kwRows.forEach((r, i) => {
+    scores.set(r.id, (scores.get(r.id) ?? 0) + 1 / (60 + i + 1));
+  });
+
+  // ── 路2 语义（向量点积排序）。查询向量缺失就整路跳过（优雅降级）
+  let semanticHits = 0;
+  if (opts.qVector) {
+    const vecRows = conn
+      .prepare(
+        `SELECT id, embedding FROM knowledge_items
+         WHERE ${where} AND embedding IS NOT NULL AND embedding_model = ?`,
+      )
+      .all(...params, EMBEDDING_MODEL) as Array<{
+      id: string;
+      embedding: Buffer;
+    }>;
+
+    const ranked = vecRows
+      .map((r) => ({
+        id: r.id,
+        sim: cosineSimilarity(opts.qVector!, blobToVector(r.embedding)),
+      }))
+      // 相关性门槛：低于它的基本是噪声，别占候选池名额
+      .filter((r) => r.sim > 0.35)
+      .sort((a, b) => b.sim - a.sim)
+      .slice(0, POOL);
+
+    semanticHits = ranked.length;
+    ranked.forEach((r, i) => {
+      scores.set(r.id, (scores.get(r.id) ?? 0) + 1 / (60 + i + 1));
+    });
+  }
+
+  // ── 融合排序，取前 limit 条补全标签返回
+  const merged = [...scores.entries()]
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, limit)
+    .map(([id]) => id);
+
+  const items = merged
+    .map((id) => getItem(conn, id))
+    .filter((x): x is KnowledgeItemRow => x !== null);
+
+  return { items, total: items.length };
 }

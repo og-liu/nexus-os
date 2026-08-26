@@ -18,6 +18,7 @@ import {
   type KnowledgeKind,
   type KnowledgeStatus,
 } from "@/lib/knowledge/store";
+import { syncEmbedding } from "@/lib/knowledge/embedding-sync";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic"; // 每次请求都读最新库，不做任何缓存
@@ -125,6 +126,11 @@ export async function POST(req: NextRequest) {
       // store 保持通用能力，未来 Agent 工具复用 store 时自行选择语义
       status: isNote ? "kept" : undefined,
     });
+    // 写入钩子：顺手生成语义指纹（K4）。
+    // 用 void 不等待——嵌入要几百毫秒，不该拖慢保存响应；
+    // 本地常驻进程里 fire-and-forget 是安全的，失败内部只记日志，
+    // 缺指纹的条目会被回填脚本认领
+    void syncEmbedding(getDb(), item.id, item.title, item.content);
     return NextResponse.json(item, { status: 201 });
   } catch (e) {
     console.error("[knowledge:create]", e);

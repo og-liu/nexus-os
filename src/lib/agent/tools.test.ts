@@ -113,8 +113,8 @@ describe("search_knowledge 内核", () => {
     const capped = (await runKnowledgeSearch(conn, {
       q: "关键词",
       limit: 99,
-    })) as { returned: number };
-    expect(capped.returned).toBe(10);
+    })) as { total: number };
+    expect(capped.total).toBe(10);
   });
 });
 

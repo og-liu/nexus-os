@@ -9,6 +9,7 @@
 
 import { NextResponse, type NextRequest } from "next/server";
 import { getDb } from "@/lib/db";
+import { syncEmbedding } from "@/lib/knowledge/embedding-sync";
 import {
   deleteItem,
   getItem,
@@ -98,6 +99,11 @@ export async function PATCH(req: NextRequest, ctx: Ctx) {
     if (Array.isArray(body.tags)) {
       setTags(db, id, body.tags.map(String));
       updated = getItem(db, id); // 重读一次，保证返回的是含最新标签的完整行
+    }
+    // 写入钩子：标题或正文变了才重算语义指纹（标签变化不影响指纹）。
+    // void 不等待——理由同创建接口；失败只记日志，回填脚本会认领
+    if (updated && (patch.title !== undefined || patch.content !== undefined)) {
+      void syncEmbedding(db, id, updated.title, updated.content);
     }
     return NextResponse.json(updated);
   } catch (e) {

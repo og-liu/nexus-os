@@ -18,6 +18,9 @@ import {
   trashItem,
   restoreItem,
   purgeExpiredTrash,
+  setEmbedding,
+  listItemsNeedingEmbedding,
+  searchHybrid,
 } from "./store";
 
 let conn: Database.Database;
@@ -311,5 +314,105 @@ describe("knowledge store · 笔记与回收站（K3 前置）", () => {
     expect(() =>
       updateItem(conn, item.id, { status: "kept" }),
     ).toThrow(/restoreItem/);
+  });
+});
+
+// ─── K4：混合检索 searchHybrid ────────────────────────────────
+
+describe("knowledge store · 混合检索 searchHybrid（K4）", () => {
+  /** 构造第 hot 位为 1 的单位向量（已归一化）：测试里用不同 hot 位模拟
+   *  「意思远近」——同位=完全相同的意思，不同位=正交即毫不相关 */
+  function unitVec(hot: number): Float32Array {
+    const v = new Float32Array(1024);
+    v[hot] = 1;
+    return v;
+  }
+
+  it("语义路：字面零重叠也能靠向量命中", () => {
+    const item = createItem(conn, {
+      title: "深度学习入门",
+      content: "讲神经网络和梯度下降",
+      status: "kept",
+    });
+    setEmbedding(conn, item.id, unitVec(0));
+
+    // 查询词与内容没有任何字面交集；查询向量与条目向量同向 → sim=1
+    const { items } = searchHybrid(conn, { q: "机器学习", qVector: unitVec(0) });
+
+    expect(items).toHaveLength(1);
+    expect(items[0].id).toBe(item.id);
+  });
+
+  it("双路融合：关键词+语义双命中的条目排最前", () => {
+    // BOTH：两路都上榜（含关键词 + 向量同向）
+    const both = createItem(conn, {
+      title: "机器学习全景",
+      content: "正文提到机器学习",
+      status: "kept",
+    });
+    setEmbedding(conn, both.id, unitVec(0));
+    // KW_ONLY：只有关键词路（向量正交被相似度门槛过滤）
+    const kwOnly = createItem(conn, {
+      title: "旧笔记",
+      content: "机器学习的早期记录",
+      status: "kept",
+    });
+    setEmbedding(conn, kwOnly.id, unitVec(7));
+    // SEM_ONLY：只有语义路（不含查询词）
+    const semOnly = createItem(conn, {
+      title: "AI 随笔",
+      content: "关于智能系统的思考",
+      status: "kept",
+    });
+    setEmbedding(conn, semOnly.id, unitVec(0));
+
+    const { items } = searchHybrid(conn, { q: "机器学习", qVector: unitVec(0) });
+
+    expect(items.map((i) => i.id)).toEqual([both.id, kwOnly.id, semOnly.id]);
+  });
+
+  it("kept 红线在混合检索下依然生效：回收站条目向量再近也不出现", () => {
+    const trashed = createItem(conn, {
+      title: "被删的文章",
+      content: "提到机器学习",
+      status: "kept",
+    });
+    setEmbedding(conn, trashed.id, unitVec(0));
+    trashItem(conn, trashed.id); // kept → trashed
+
+    const { items } = searchHybrid(conn, { q: "机器学习", qVector: unitVec(0) });
+
+    expect(items).toHaveLength(0);
+  });
+
+  it("无查询向量时优雅降级为纯关键词路", () => {
+    createItem(conn, {
+      title: "笔记A",
+      content: "包含特殊词汇",
+      status: "kept",
+    });
+
+    const { items } = searchHybrid(conn, { q: "特殊词汇", qVector: null });
+
+    expect(items).toHaveLength(1);
+  });
+
+  it("setEmbedding 的模型标记：换模型后旧指纹会被回填认领重算", () => {
+    const item = createItem(conn, {
+      title: "迁移测试",
+      content: "内容",
+      status: "kept",
+    });
+    setEmbedding(conn, item.id, unitVec(0), "old-model/v1");
+
+    // 当前模型（EMBEDDING_MODEL）≠ old-model/v1 → 判定为需要重算
+    const pending = listItemsNeedingEmbedding(conn);
+    expect(pending.map((i) => i.id)).toContain(item.id);
+
+    // 用当前模型补算后不再出现在待办里（幂等收敛）
+    setEmbedding(conn, item.id, unitVec(1));
+    expect(listItemsNeedingEmbedding(conn).map((i) => i.id)).not.toContain(
+      item.id,
+    );
   });
 });
