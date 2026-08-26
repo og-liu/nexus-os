@@ -354,33 +354,37 @@ export async function POST(req: NextRequest) {
         const handleEvent = (event: LoopEvent) => {
           switch (event.type) {
             case "tool_call":
-              send({
-                type: "tool_call",
+              // 边收边累积：abort 时已发起的工具调用也存进半截消息
+              if (!assistantToolCalls) assistantToolCalls = [];
+              assistantToolCalls.push({
                 toolName: event.toolName,
                 args: event.args,
                 callId: event.callId,
+                status: "success",
+                result: undefined,
               });
+              send({ type: "tool_call", toolName: event.toolName, args: event.args, callId: event.callId });
               break;
             case "tool_result":
-              send({
-                type: "tool_result",
-                toolName: event.toolName,
-                result: event.result,
-                callId: event.callId,
-              });
+              if (assistantToolCalls) {
+                const tc = assistantToolCalls.find((t) => t.callId === event.callId);
+                if (tc) tc.result = event.result;
+              }
+              send({ type: "tool_result", toolName: event.toolName, result: event.result, callId: event.callId });
               break;
             case "tool_error":
-              send({
-                type: "tool_error",
-                toolName: event.toolName,
-                error: event.error,
-                callId: event.callId,
-              });
+              if (assistantToolCalls) {
+                const tc = assistantToolCalls.find((t) => t.callId === event.callId);
+                if (tc) { tc.status = "error"; tc.error = event.error; }
+              }
+              send({ type: "tool_error", toolName: event.toolName, error: event.error, callId: event.callId });
               break;
             case "delta":
+              assistantContent += event.content;
               send({ type: "delta", content: event.content });
               break;
             case "reasoning":
+              assistantReasoning += event.content;
               send({ type: "reasoning", content: event.content });
               break;
             // ── 规划-执行新增事件：透传给前端 + 持久化计划 ──────────

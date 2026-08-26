@@ -1,5 +1,9 @@
 import { defineConfig } from "vitest/config";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
+
+// ESM 下没有 __dirname，用 import.meta.url 还原
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 // Vitest 配置：复用 tsconfig 的 @/ 路径别名，让测试里能直接 import "@/lib/db"。
 // 测试文件与源码同目录、以 .test.ts(x) 结尾，便于就近维护。
