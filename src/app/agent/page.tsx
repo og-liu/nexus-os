@@ -199,6 +199,27 @@ function saveModel(id: string, model: string) {
   }
 }
 
+/**
+ * 解析「此刻该用哪个模型」：
+ *   1. 记住的模型合法且其供应商已配 Key → 尊重用户的选择，沿用；
+ *   2. 否则取第一个配了 Key 的模型（不再硬编码回落到 DeepSeek）；
+ *   3. 可用性未知（接口还没返回）或一个 Key 都没配 → 回落 DEFAULT_MODEL_ID，
+ *      就算真选到没 Key 的模型，后端还有同款兜底闸门，消息不会发出去才炸。
+ *
+ * configured 表来自 /api/providers，形如 { deepseek: true, openrouter: false }。
+ */
+function resolveModel(
+  saved: string | null | undefined,
+  configured: Record<string, boolean> | null,
+): string {
+  const meta = saved ? getModelMeta(saved) : undefined;
+  if (meta && configured?.[meta.provider] !== false) return saved as string;
+  const hit = configured
+    ? MODELS.find((m) => configured[m.provider])
+    : undefined;
+  return hit?.id ?? DEFAULT_MODEL_ID;
+}
+
 type ThinkingEffort = "low" | "high" | "max";
 
 /** 思考档位 → 按钮文案 */
@@ -593,6 +614,13 @@ export default function AgentPage() {
   );
   const [openReasoning, setOpenReasoning] = useState<Set<string>>(new Set());
   const [modelId, setModelId] = useState<string>(DEFAULT_MODEL_ID);
+  // 各供应商「是否已配置 Key」的布尔表（/api/providers 返回）。
+  // null 表示还没拉到：此时一切照旧，拉到后再对当前选中的模型做一次校正。
+  const [providerConfigured, setProviderConfigured] =
+    useState<Record<string, boolean> | null>(null);
+  // 同一份状态的 ref 镜像：selectChat 等 useCallback([]) 回调里读它取最新值，
+  // 不必把它塞进依赖数组导致回调身份变化、挂载时的会话恢复逻辑重跑
+  const providerConfiguredRef = useRef<Record<string, boolean> | null>(null);
   const [modelMenuOpen, setModelMenuOpen] = useState(false);
   const supportsThinking = getModelMeta(modelId)?.supportsThinking ?? false;
   const supportsVision = getModelMeta(modelId)?.supportsVision ?? false;
@@ -685,7 +713,10 @@ export default function AgentPage() {
     setActiveChatId(id);
     window.localStorage.setItem(LAST_SESSION_KEY, id);
     setMobileView("chat");
-    const mid = loadModel(id);
+    // 会话记住的模型先过一道 Key 可用性闸门：那个模型当时能用、现在未必
+    // （Key 可能已从 .env.local 移除），不可用就自动换到第一个可用的，
+    // 避免一进旧会话就撞上「未配置 DEEPSEEK_API_KEY」
+    const mid = pickAvailableModel(loadModel(id));
     const saved = loadThinking(mid);
     setThinkingEnabled(saved.enabled);
     setThinkingEffort(saved.effort);
@@ -796,8 +827,11 @@ export default function AgentPage() {
     setHasMore(false);
     window.localStorage.removeItem(LAST_SESSION_KEY);
     setOpenReasoning(new Set());
-    // 切回默认模型，并恢复它自己的深度思考偏好
-    const mid = DEFAULT_MODEL_ID;
+    // 不再硬编码切回 DeepSeek：沿用你正在用的模型（若其供应商的 Key 已失效
+    // 则自动换到第一个可用的），并恢复该模型自己的深度思考偏好。
+    // 以前每次新建会话都被拽回默认模型——只配了 OpenRouter 的用户每开一个
+    // 新会话就得重新手选一次 Ox Alpha，非常反直觉。
+    const mid = pickAvailableModel(modelId);
     const saved = loadThinking(mid);
     setThinkingEnabled(saved.enabled);
     setThinkingEffort(saved.effort);
@@ -852,6 +886,35 @@ export default function AgentPage() {
       }
     });
   }, [loadSessions, selectChat]);
+
+  // 启动时拉一次各供应商 Key 配置状态：
+  //   1. 存进 state（驱动选择器置灰标注）+ ref（供回调读最新值）；
+  //   2. 对「当前选中的模型」做一次校正——如果正停在一个没配 Key 的模型上
+  //      （包括初始默认的 DeepSeek），当场切到第一个可用的，不等用户踩坑。
+  useEffect(() => {
+    let cancelled = false;
+    fetch("/api/providers")
+      .then((r) => r.json())
+      .then((data) => {
+        if (cancelled) return;
+        const table = (data ?? {}) as Record<string, boolean>;
+        providerConfiguredRef.current = table;
+        setProviderConfigured(table);
+        setModelId((cur) => resolveModel(cur, table));
+      })
+      .catch(() => {
+        // 拉失败不影响使用：置空表走旧行为，发消息时后端仍有兜底闸门
+        if (!cancelled) setProviderConfigured({});
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  // 给「按记忆恢复模型」的场景过一道可用性闸门（切会话 / 新建会话时用）。
+  // 读 ref 而非 state，保证 useCallback([]) 里的旧闭包也能拿到最新可用性。
+  const pickAvailableModel = (saved: string): string =>
+    resolveModel(saved, providerConfiguredRef.current);
 
   // 消息变化时的滚动处理：
   // - 刚在顶部插入了更早的消息（预加载）→ 保持视口位置不跳动
@@ -1801,13 +1864,20 @@ export default function AgentPage() {
                         </p>
                         {MODELS.map((m) => {
                           const active = m.id === modelId;
+                          // 该模型的供应商还没配 Key：置灰禁选并标明原因，
+                          // 免得选中之后、消息发出去才收到报错
+                          const unavailable =
+                            providerConfigured?.[m.provider] === false;
                           return (
                             <button
                               key={m.id}
-                              onClick={() => selectModel(m.id)}
+                              onClick={() => !unavailable && selectModel(m.id)}
+                              disabled={unavailable}
                               className={cn(
                                 "flex w-full items-start justify-between gap-2 rounded-[3px] px-2 py-2 text-left transition-colors",
                                 active ? "bg-[#F2F2F2]" : "hover:bg-[#F7F7F7]",
+                                unavailable &&
+                                  "cursor-not-allowed opacity-45 hover:bg-transparent",
                               )}
                             >
                               <span className="flex min-w-0 flex-col gap-0.5">
@@ -1823,6 +1893,11 @@ export default function AgentPage() {
                                   {m.tag && (
                                     <span className="rounded-[2px] bg-[#EFEFEF] px-1 text-[10px] leading-4 text-[#888888]">
                                       {m.tag}
+                                    </span>
+                                  )}
+                                  {unavailable && (
+                                    <span className="rounded-[2px] bg-[#F5F5F5] px-1 text-[10px] leading-4 text-[#AAAAAA]">
+                                      未配置 Key
                                     </span>
                                   )}
                                 </span>

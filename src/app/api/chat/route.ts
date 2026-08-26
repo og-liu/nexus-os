@@ -5,6 +5,8 @@ import path from "node:path";
 import { getDb, type MessageRow, type MessageStatus } from "@/lib/db";
 import {
   ProviderError,
+  isModelConfigured,
+  getFirstAvailableModelId,
   type ChatMessage,
   type ChatContentPart,
   type ThinkingOptions,
@@ -12,7 +14,6 @@ import {
 } from "@/lib/providers";
 import {
   isValidModelId,
-  DEFAULT_MODEL_ID,
   getModelMeta,
   getThinkingEfforts,
   getDefaultThinkingEffort,
@@ -137,7 +138,15 @@ export async function POST(req: NextRequest) {
     : [];
 
   const requestedModel = body?.model ?? "";
-  const model = isValidModelId(requestedModel) ? requestedModel : DEFAULT_MODEL_ID;
+  // 双闸校验：先过白名单（是不是注册表内的模型 id），再过 Key 可用性
+  // （对应供应商配没配钥匙）。任一不过就自动切到第一个可用的模型——而不是
+  // 让整轮跑到 LLM 调用时才报「未配置 DEEPSEEK_API_KEY」：用户明明配的是
+  // 别家模型，看到这种报错只会一头雾水。
+  const requested = isValidModelId(requestedModel) ? requestedModel : null;
+  const model =
+    requested !== null && isModelConfigured(requested)
+      ? requested
+      : getFirstAvailableModelId();
   const supportsVision = getModelMeta(model)?.supportsVision ?? false;
   const effortRaw = body?.thinking?.effort;
   const supportsThinking = getModelMeta(model)?.supportsThinking ?? false;
