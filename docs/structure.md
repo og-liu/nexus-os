@@ -51,7 +51,7 @@ src/
 │       ├── chat/route.ts   # AI 对话：POST 接消息→落库→归档残留任务→组装上下文→走 Loop（规划执行/续跑/断点恢复三路）→SSE 流式输出+增量落盘
 │       ├── plan/route.ts   # 放弃中断计划：POST 把 stopped 计划翻 cancelled + 整轮配对归档
 │       ├── providers/route.ts # 供应商 Key 配置状态：GET 返回 {deepseek:true, openrouter:false} 布尔表（Key 不出服务端），驱动前端模型置灰标注与默认模型动态校正
-│       ├── knowledge/      # 知识库（K1+K2+K3前置）：集合路由 GET 列表(检索/kind筛选/排除回收站)+计数 / POST 采集与笔记创建；[id] 单条 GET / PATCH 字段流转+action:trash|restore / DELETE 软删?purge=true硬删；tags 路由 GET 计数列表 / PATCH 全局重命名 / DELETE 全局删除
+│       ├── knowledge/      # 知识库（K1~K4）：集合路由 GET 列表(检索/kind筛选/排除回收站)+计数 / POST 采集与笔记创建(写入钩子补语义指纹)；[id] 单条 GET / PATCH 字段流转+action:trash|restore(内容变更重算指纹) / DELETE 软删?purge=true硬删；backfill POST 幂等回填向量；tags 路由 GET/PATCH/DELETE
 │       └── sessions/       # 会话管理：列表/新建、历史/重命名/删除（历史接口顺带返回可恢复计划）
 │
 ├── components/             # React 组件
@@ -124,8 +124,8 @@ docs/
 | 页面 | 路由 | 状态 |
 |------|------|------|
 | 首页 Dashboard | `/` | ✅ 已完成（问候/时钟/农历/年度进度、每日一句、KPI、快捷工具、最近活动、自动化任务、最新文章、AI Agent、音乐播放器、便签、待办） |
-| AI Agent | `/agent` | 🟢 K3 完成：真实对话+Agent Loop+工具体系齐备（get_weather / web_search / 知识库双工具 search_knowledge+read_knowledge，kept 语义红线），多模型切换、真流式、深度思考、图片看图、会话落库；43 测试全绿；下一步=K4 向量检索替换 search 内核 |
-| 知识库 | `/knowledge` | ✅ K0~K3 全部完成：数据地基→采集拍板闭环→知识流页面（检索+标签筛选+Markdown）→notes/trash 接库（同表 kind 区分+回收站软删7天懒清理）→Agent 衔接（知识库工具注册给 Loop）；下一步=K4 向量检索 |
+| AI Agent | `/agent` | 🟢 K3 完成：真实对话+Agent Loop+工具体系齐备（get_weather / web_search / 知识库双工具 search_knowledge+read_knowledge，kept 语义红线），多模型切换、真流式、深度思考、图片看图、会话落库；48 测试全绿；下一步=K5 RSS 自动化采集 |
+| 知识库 | `/knowledge` | ✅ K0~K4 全部完成：数据地基→采集拍板闭环→知识流页面→notes/trash 接库（同表 kind+回收站软删）→Agent 衔接→K4 向量检索（bge-m3 嵌入+RRF 混合检索+回填端点）；下一步=K5 RSS 自动化采集 |
 | 工具中心 | `/tools` | ✅ 页面已完成（59 个工具卡片、搜索 + 分类筛选、三档响应式；工具均为 mock 无实际执行） |
 | 文件管理 | `/files` | 🔲 占位 |
 | 自动化 | `/automation` | 🔲 占位 |

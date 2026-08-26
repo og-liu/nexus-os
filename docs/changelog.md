@@ -4,6 +4,28 @@
 
 ---
 
+## 2026-08-26(傍晚·八) — Knowledge K4：向量检索（语义指纹 + 混合检索 RRF 融合）
+
+搜索的灵魂升级：从「字面对上号」到「意思相近也能找到」。搜「大模型」现在能召回通篇写「LLM」的文章。
+
+### 嵌入服务
+- 硅基流动 `BAAI/bge-m3`：免费、OpenAI 兼容 `/v1/embeddings`、1024 维、中文强；Key 走 `.env.local` 的 `SILICONFLOW_API_KEY`（服务端专属，严禁进客户端 bundle）
+- 向量 **L2 归一化**后存取：余弦相似度退化为普通点积，更快且长短文本公平可比
+
+### 数据层
+- `knowledge_items` 加 `embedding BLOB` + `embedding_model TEXT`（幂等迁移）；1024 维仅 4KB/条
+- **为什么存模型名**：不同模型的向量不在同一空间，换模型=旧指纹全作废重算；靠这列识别过期指纹，回填因此幂等
+- **`searchHybrid` 混合检索内核**：LIKE 关键词路 + 向量点积路，**RRF**（`1/(60+rank)`）融合两路排名——关键词抓专有名词精确命中，语义路抓意思相近，单靠哪一路都会漏
+- **刻意不上向量数据库**：千条级数据内存暴力点积毫秒级，向量库是百万级数据的工具。不过早优化
+
+### 编排与接入
+- store 保持纯数据层不碰网络；「调 API→落库」独立成 embedding-sync 层。失败绝不阻塞保存：缺指纹由回填认领，关键词路永远兜底
+- 创建/更新钩子 void 异步补指纹（内容变化才重算，标签不影响）
+- `POST /api/knowledge/backfill` 幂等回填存量：`curl -X POST http://localhost:3000/api/knowledge/backfill`
+- Agent 工具 `search_knowledge` 内核切换混合检索，接口形状不变；嵌入不可用自动降级纯关键词并如实标注 mode
+
+---
+
 ## 2026-08-26(傍晚·七) — Knowledge K3：Agent 衔接（知识库检索工具注册）
 
 Agent 长出「向内查自己家」的能力：`search_knowledge`（按关键词搜库，返回摘要列表）+ `read_knowledge`（按 id 读单条全文）注册进工具表，Loop 代码零改动——这就是 K0 把 schema 和 execute 分开、注册表化设计换来的扩展性。
