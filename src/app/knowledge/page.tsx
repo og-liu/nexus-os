@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   BookOpen,
   PenLine,
@@ -29,7 +29,7 @@ import { PageHeader } from "@/components/page-header";
 // ---------- 类型 ----------
 
 interface FeedItem {
-  id: number;
+  id: string; // K1 起接真库，id 是 store 生成的 UUID（不再是 Date.now() 假 id）
   title: string;
   summary: string;
   content: string;
@@ -49,7 +49,7 @@ interface Note {
 }
 
 interface InboxItem {
-  id: number;
+  id: string; // 真数据 UUID，与后端 store 的 id 对齐
   title: string;
   source: string;
   summary: string;
@@ -72,7 +72,9 @@ interface Source {
 }
 
 type Section = "feed" | "notes" | "inbox" | "trash" | "sources" | "quiz" | "review";
-type DetailRef = { type: "feed" | "note"; id: number } | null;
+// feed 条目的 id 是 UUID（string），note 仍是本地数字 id——两种视图模型并存，
+// 等 notes 接真库后统一成 string
+type DetailRef = { type: "feed"; id: string } | { type: "note"; id: number } | null;
 
 // ---------- 自测 / 回顾 Mock ----------
 
@@ -129,72 +131,67 @@ const choiceQuestions: ChoiceQuestion[] = [
 
 // ---------- Mock 数据 ----------
 
-const initialFeed: FeedItem[] = [
-  {
-    id: 1,
-    title: "RAG 是什么：先查库再回答",
-    summary:
-      "先把你的问题在知识库里检索一遍，命中了就直接用库里的内容回答，省 token 还不容易跑偏；没命中才去联网。",
-    content:
-      "RAG 的全称是 Retrieval-Augmented Generation，检索增强生成。它解决的是大模型的两个老毛病：一是模型不知道你本地的私货，二是让它硬记太贵也容易过时。\n\n核心思路很朴素：回答之前，先拿你的问题去知识库里检索一遍。命中的内容作为上下文一起塞给模型，让它照着你的料回答。这样答案有出处、可追溯，也省 token——不用把整个库都塞进 prompt。\n\n流程可以拆成三步：问题向量化 → 在库里找最相关的几段 → 把这几段和问题一起交给模型生成答案。检索质量决定了回答质量，所以切片粒度、向量模型、重排这三件事比换大模型更值得花时间。\n\n对个人知识库来说，RAG 是最实用的第一步：先把「我存的东西」变成「AI 能查的东西」，问答、写作辅助才有地基。",
-    tags: ["RAG", "核心概念"],
-    time: "今天 09:20",
-    source: "公众号采集",
-  },
-  {
-    id: 2,
-    title: "智能体的四件套：模型 · 工具 · 记忆 · 规划",
-    summary:
-      "拆开讲 Agent 的组成：模型出脑力、工具出手脚、记忆管存取、规划管分步，四件配齐才算完整智能体。",
-    content:
-      "一个完整的 Agent 可以拆成四件套。\n\n模型是脑力，负责理解意图、生成判断，但不给它工具它就只能动嘴。工具是手脚：搜索、读写文件、调 API，Agent 的实际执行全靠工具调用。记忆管存取：短期记忆是这次对话的上下文，长期记忆是跨会话沉淀的状态和偏好，没有记忆的 Agent 每次都是失忆重来。\n\n规划管分步：把「帮我整理这周的文章」拆成筛选、归类、提炼、落盘四步，自己决定先做什么后做什么。规划能力是 Agent 和普通对话机器人的分水岭。\n\n四件套凑齐，才从「能聊」进化到「能干活」。缺哪件，补哪件。",
-    tags: ["Agent", "架构"],
-    time: "今天 08:45",
-    source: "公众号采集",
-  },
-  {
-    id: 3,
-    title: "技术晨报 · 08-23",
-    summary: "前端 + AI 圈要闻速览，AI 自动聚合生成，3 分钟读完今天值得知道的事。",
-    content:
-      "【前端】React 19 稳定特性盘点：Server Actions、useOptimistic 已可生产使用；Vite 7 发布，Rolldown 全面接管打包。\n\n【AI】Claude 新版本工具调用准确率提升；OpenAI 开放实时语音 API；国内开源模型在代码基准上追平闭源第一梯队。\n\n【观点】「Agent 是范式不是产品」——把 Agent 当能力长在业务里，比做一个独立 Agent 应用更有生命力。\n\n【一句话】本周值得动手：给项目加个 AI 辅助 code review 流程。",
-    tags: ["晨报", "前端", "AI"],
-    time: "今天 07:00",
-    source: "技术晨报",
-  },
-  {
-    id: 4,
-    title: "Skill 与工具调用怎么分工",
-    summary:
-      "Skill 是沉淀下来的流程封装，工具调用是运行时的能力组合，前者管复用、后者管灵活，两层配合而不是互相替代。",
-    content:
-      "Skill 和工具调用经常被混着说，其实分工很清楚。\n\n工具调用是运行时的事：模型每一步决定调什么工具、传什么参数，灵活但每次都要现场想。Skill 是沉淀下来的流程：把「怎么做某类事」的步骤和经验封装成可复用的能力，遇到同类任务直接套用。\n\n打个前端比方：工具调用像你在控制台里手敲 DOM 操作，Skill 像你封装好的组件库。组件库不能覆盖所有场景，但常用场景它快得多、稳得多。\n\n好的 Agent 系统是两层配合：常规任务走 Skill 拿稳定性，新问题退回工具调用拿灵活性，做的过程里再沉淀新 Skill。",
-    tags: ["Skill", "工具调用"],
-    time: "昨天 21:10",
-    source: "手动采集",
-  },
-  {
-    id: 5,
-    title: "Vibe Coding 靠不靠谱",
-    summary: "结论是提效但别放手——描述清楚意图、盯住生成代码，人还是最后一道关。",
-    content:
-      "Vibe Coding 指的是用自然语言描述意图、让 AI 生成代码的开发方式。实测结论：提效明显，但放手不行。\n\n靠谱的部分：脚手架、样板代码、一次性脚本，AI 几分钟出的活儿顶手写半小时，改起来也快。\n\n不靠谱的部分：核心业务逻辑、边界条件、并发安全，AI 会自信地写出错的东西。你不 review，债务就悄悄欠下了。\n\n实践建议：意图描述要具体（「写一个带分页和搜索的用户列表」好过「写个列表页」）；生成代码必须过眼；复杂逻辑拆小步生成。人还是最后一道关。",
-    tags: ["Vibe Coding"],
-    time: "昨天 18:30",
-    source: "手动采集",
-  },
-  {
-    id: 6,
-    title: "React Server Components 实践备忘",
-    summary:
-      "RSC 的心智模型：组件默认跑在服务端，加 'use client' 才下放到浏览器，边界划清楚就不绕。",
-    content:
-      "RSC 的心智模型一句话：组件默认跑在服务端，标了 'use client' 的才下放到浏览器跑。\n\n服务端组件可以直接访问数据库和文件系统、不打包进 bundle、渲染结果序列化后发给浏览器。客户端组件才能用 state、effect、事件监听。\n\n实践要点：边界尽量下推——能不改交互的组件都留在服务端；把交互集中在叶子节点（按钮、输入框），容器保持服务端渲染。props 跨边界传数据时注意可序列化，函数传不过去。\n\n一句话：'use client' 是一道边界声明，不是性能优化指令。",
-    tags: ["React", "RSC"],
-    time: "2 天前",
-    source: "手动采集",
-  },
-];
+// ---------- 真数据视图模型（K1：feed 与 inbox 接库，其余 section 仍是 mock） ----------
+
+// 后端 store 返回的条目形状（GET /api/knowledge 响应里的 items 元素）
+interface KnowledgeRow {
+  id: string;
+  title: string;
+  content: string;
+  source: string | null;
+  status: "inbox" | "kept" | "discarded" | "trashed";
+  tags: string[];
+  created_at: number;
+  updated_at: number;
+}
+
+/** 毫秒时间戳 → 「刚刚 / n 分钟前 / n 小时前 / n 天前 / 具体日期」。
+ *  为什么渲染时现算而不入库存文案：时间是相对的，「3 分钟前」存进库一转眼就过期；
+ *  视图层的职责就是每次渲染拿当前时刻换算，永远新鲜。 */
+function formatRelTime(ms: number): string {
+  const diff = Date.now() - ms;
+  const MIN = 60_000;
+  const HOUR = 3_600_000;
+  const DAY = 86_400_000;
+  if (diff < MIN) return "刚刚";
+  if (diff < HOUR) return `${Math.floor(diff / MIN)} 分钟前`;
+  if (diff < DAY) return `${Math.floor(diff / HOUR)} 小时前`;
+  if (diff < 7 * DAY) return `${Math.floor(diff / DAY)} 天前`;
+  const d = new Date(ms);
+  return `${d.getMonth() + 1} 月 ${d.getDate()} 日`;
+}
+
+/** 列表摘要：取正文第一段截前 80 字。真数据没有独立摘要字段，列表页从 content 现截；
+ *  K3 之后 Agent 可以补 AI 摘要字段，届时这里优先读摘要、回落到截断 */
+function makeSummary(content: string): string {
+  const first = content.split("\n")[0].trim();
+  return first.length > 80 ? `${first.slice(0, 80)}…` : first || "（无正文）";
+}
+
+// store 行 → 知识流卡片（kept 列表）
+function toFeedItem(row: KnowledgeRow): FeedItem {
+  return {
+    id: row.id,
+    title: row.title,
+    summary: makeSummary(row.content),
+    content: row.content,
+    tags: row.tags,
+    time: formatRelTime(row.created_at),
+    source: row.source ?? "手动采集",
+    fresh: false, // 只有拍板保留瞬间插入的条目才标 fresh，从库加载的不算
+  };
+}
+
+// store 行 → 收件箱拍板卡
+function toInboxItem(row: KnowledgeRow): InboxItem {
+  return {
+    id: row.id,
+    title: row.title,
+    source: row.source ?? "手动采集",
+    summary: makeSummary(row.content),
+  };
+}
+
 
 const initialNotes: Note[] = [
   {
@@ -217,26 +214,6 @@ const initialNotes: Note[] = [
   },
 ];
 
-const initialInbox: InboxItem[] = [
-  {
-    id: 1,
-    title: "LLM 上下文窗口到底能吃多少",
-    source: "某公众号 · 今日采集",
-    summary: "讲 context window 与 token 预算，长上下文不等于随便塞。",
-  },
-  {
-    id: 2,
-    title: "为什么你的 RAG 检索不准",
-    source: "技术博客 · 今日采集",
-    summary: "切片粒度、向量模型、重排三件套，排查检索质量的清单。",
-  },
-  {
-    id: 3,
-    title: "前端工程师转型 AI 的三条路径",
-    source: "公众号 · 昨天采集",
-    summary: "应用层调 API、工程层做基础设施、产品层做交互创新，各要补什么。",
-  },
-];
 
 const initialTrash: TrashItem[] = [
   {
@@ -323,12 +300,62 @@ export default function KnowledgePage() {
   const [searchQuery, setSearchQuery] = useState("");
   const [captureInput, setCaptureInput] = useState("");
 
-  const [feed, setFeed] = useState<FeedItem[]>(initialFeed);
+  // K1 起 feed / inbox 从真库加载（初值空数组，useEffect 里拉取）；
+  // notes / trash / sources 仍是 mock，等 K2+ 逐步替换
+  const [feed, setFeed] = useState<FeedItem[]>([]);
   const [notes, setNotes] = useState<Note[]>(initialNotes);
-  const [inbox, setInbox] = useState<InboxItem[]>(initialInbox);
+  const [inbox, setInbox] = useState<InboxItem[]>([]);
   const [trash, setTrash] = useState<TrashItem[]>(initialTrash);
   const [sources, setSources] = useState<Source[]>(initialSources);
   const [allTags, setAllTags] = useState<string[]>(initialAllTags);
+
+  // ----- 真数据接线状态 -----
+  // 首屏加载中：列表区显示骨架提示，避免闪「空空如也」误导用户
+  const [loadingKnowledge, setLoadingKnowledge] = useState(true);
+  // 正在提交拍板/采集的条目 id：按钮置灰防重复点击，避免同一条目 PATCH 两次
+  const [savingId, setSavingId] = useState<string | null>(null);
+  // 轻量提示条：采集/流转成功或失败时的反馈。不用 alert——打断感太强，
+  // 一个底部浮出、几秒自动消失的小黑条足够
+  const [toast, setToast] = useState<string | null>(null);
+  const toastTimer = useRef<number | null>(null);
+
+  /** 弹一条自动消失的提示；连续弹时先清掉上一个定时器，防止新提示被旧定时器提前关掉 */
+  const showToast = (msg: string) => {
+    setToast(msg);
+    if (toastTimer.current != null) window.clearTimeout(toastTimer.current);
+    toastTimer.current = window.setTimeout(() => setToast(null), 2400);
+  };
+
+  // 首屏并行拉收件箱（inbox）和知识流（kept）。
+  // 用 allSettled 而不是 all：一个接口挂了另一个照常显示，不至于整页报废
+  useEffect(() => {
+    let alive = true; // 组件卸载后不再 setState
+    (async () => {
+      const [inboxRes, feedRes] = await Promise.allSettled([
+        fetch("/api/knowledge?status=inbox&limit=100"),
+        fetch("/api/knowledge?status=kept&limit=100"),
+      ]);
+      if (!alive) return;
+      let failed = false;
+      if (inboxRes.status === "fulfilled" && inboxRes.value.ok) {
+        const data = await inboxRes.value.json();
+        setInbox((data.items as KnowledgeRow[]).map(toInboxItem));
+      } else {
+        failed = true;
+      }
+      if (feedRes.status === "fulfilled" && feedRes.value.ok) {
+        const data = await feedRes.value.json();
+        setFeed((data.items as KnowledgeRow[]).map(toFeedItem));
+      } else {
+        failed = true;
+      }
+      if (failed) showToast("知识库加载失败，请稍后刷新重试");
+      setLoadingKnowledge(false);
+    })();
+    return () => {
+      alive = false;
+    };
+  }, []);
 
   // 文章编辑
   const [editingNoteId, setEditingNoteId] = useState<number | null>(null);
@@ -366,80 +393,99 @@ export default function KnowledgePage() {
 
   // ----- 收件箱拍板 -----
 
-  const keepItem = (item: InboxItem) => {
-    setInbox((prev) => prev.filter((i) => i.id !== item.id));
-    setFeed((prev) => [
-      {
-        id: Date.now(),
-        title: item.title,
-        summary: item.summary.replace(/^AI 摘要：/, ""),
-        content: `「${item.title}」的正文内容。\n\nAgent 接入后，这里会展示采集到的原文（或抓取失败时的摘要全文）。当前为布局演示段落，用于确认详情页的阅读排版：字号、行高、段距、标签行和底部操作的摆放。\n\n保留动作会把条目插入知识流顶部，并带上「刚刚入库」标记，方便确认拍板链路是通的。`,
-        tags: [],
-        time: "刚刚入库",
-        source: item.source.split(" · ")[0],
-        fresh: true,
-      },
-      ...prev,
-    ]);
+  // 拍板「保留」：PATCH status=kept，接口确认后才动本地列表——
+  // 流转失败时收件箱保持原样，用户不会误以为拍板成功。
+  // 成功后把后端返回的完整行转成卡片插到知识流顶部，带「刚刚入库」标记，
+  // 让「存进去」这件事肉眼可见
+  const keepItem = async (item: InboxItem) => {
+    if (savingId) return; // 已有拍板在途，忽略新点击（防连击重复提交）
+    setSavingId(item.id);
+    try {
+      const res = await fetch(`/api/knowledge/${item.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ status: "kept" }),
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const row = (await res.json()) as KnowledgeRow;
+      setInbox((prev) => prev.filter((i) => i.id !== item.id));
+      setFeed((prev) => [{ ...toFeedItem(row), fresh: true }, ...prev]);
+      showToast("已保留进知识流");
+    } catch {
+      showToast("操作失败，请重试");
+    } finally {
+      setSavingId(null);
+    }
   };
 
-  const dropItem = (item: InboxItem) => {
-    setInbox((prev) => prev.filter((i) => i.id !== item.id));
-    setTrash((prev) => [
-      {
-        id: Date.now(),
-        title: item.title,
-        source: item.source,
-        summary: item.summary,
-        origin: "采集",
-        daysLeft: 7,
-      },
-      ...prev,
-    ]);
+  // 拍板「放弃」：PATCH status=discarded。
+  // 注意语义区分：discarded 是「从未保留过」，trashed 才是回收站的「先进站再删」；
+  // 原 mock 把放弃塞进回收站是演示期的混淆行为，K1 按数据层正确状态机走
+  const dropItem = async (item: InboxItem) => {
+    if (savingId) return;
+    setSavingId(item.id);
+    try {
+      const res = await fetch(`/api/knowledge/${item.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ status: "discarded" }),
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      setInbox((prev) => prev.filter((i) => i.id !== item.id));
+      showToast("已放弃");
+    } catch {
+      showToast("操作失败，请重试");
+    } finally {
+      setSavingId(null);
+    }
   };
 
-  const handleCapture = () => {
+  // 手动采集：POST 落库进 inbox。必须先等接口返回真实 id 再插入本地列表——
+  // 不能乐观插入（本地造假 id），否则后续拍板的 PATCH 会拿着假 id 打空炮
+  const handleCapture = async () => {
     const text = captureInput.trim();
-    if (!text) return;
-    setCaptureInput("");
-    setInbox((prev) => [
-      {
-        id: Date.now(),
-        title: text.length > 30 ? `${text.slice(0, 30)}…` : text,
-        source: "手动采集 · 刚刚",
-        summary: "Agent 接入后将自动生成这条内容的摘要与标签建议。",
-      },
-      ...prev,
-    ]);
+    if (!text || savingId === "capturing") return;
+    setSavingId("capturing"); // "capturing" 是采集动作的占位标记（此刻还没有真实条目 id）
+    try {
+      const res = await fetch("/api/knowledge", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ content: text }),
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const row = (await res.json()) as KnowledgeRow;
+      setCaptureInput("");
+      setInbox((prev) => [toInboxItem(row), ...prev]);
+      showToast("已丢进收件箱，等你拍板");
+    } catch {
+      showToast("采集失败，请重试");
+    } finally {
+      setSavingId(null);
+    }
   };
 
   // ----- 回收站 -----
 
   const restoreTrash = (item: TrashItem) => {
-    setTrash((prev) => prev.filter((t) => t.id !== item.id));
     if (item.origin === "采集") {
-      setInbox((prev) => [
-        {
-          id: Date.now(),
-          title: item.title,
-          source: item.source,
-          summary: item.summary,
-        },
-        ...prev,
-      ]);
-    } else {
-      setNotes((prev) => [
-        {
-          id: Date.now(),
-          title: item.title,
-          content: item.summary,
-          tags: [],
-          updatedAt: "刚刚",
-          inFeed: false,
-        },
-        ...prev,
-      ]);
+      // K1 起「放弃的采集」走 discarded 状态、不再进回收站；回收站里残留的
+      // 采集条目是历史演示数据，没有真实库记录，捞回动作无从落地——
+      // 明确告知，而不是造一条假数据混进已接真库的收件箱
+      showToast("该条为界面演示数据，不支持捞回");
+      return;
     }
+    setTrash((prev) => prev.filter((t) => t.id !== item.id));
+    setNotes((prev) => [
+      {
+        id: Date.now(),
+        title: item.title,
+        content: item.summary,
+        tags: [],
+        updatedAt: "刚刚",
+        inFeed: false,
+      },
+      ...prev,
+    ]);
   };
 
   const askDeleteTrash = (item: TrashItem) => {
@@ -492,7 +538,8 @@ export default function KnowledgePage() {
       okText: "删除",
       onOk: () => {
         setNotes((prev) => prev.filter((n) => n.id !== note.id));
-        setFeed((prev) => prev.filter((f) => f.title !== note.title));
+        // 原 mock 会按标题从知识流里删同名条目——feed 已接真库，按 title 匹配
+        // 可能误删同名的真实条目；笔记与库的联动等 K2 notes 接库后统一处理
         setTrash((prev) => [
           {
             id: Date.now(),
@@ -511,28 +558,15 @@ export default function KnowledgePage() {
 
   const toggleNoteInFeed = (note: Note) => {
     if (note.inFeed) {
+      // 只翻本地演示状态：按标题从真知识流删条目会误伤同名真实数据
       setNotes((prev) =>
         prev.map((n) => (n.id === note.id ? { ...n, inFeed: false } : n)),
       );
-      setFeed((prev) => prev.filter((f) => f.title !== note.title));
       return;
     }
-    setNotes((prev) =>
-      prev.map((n) => (n.id === note.id ? { ...n, inFeed: true } : n)),
-    );
-    setFeed((prev) => [
-      {
-        id: Date.now(),
-        title: note.title,
-        summary: note.content.split("\n")[0].slice(0, 80) || "（正文为空）",
-        content: note.content,
-        tags: note.tags,
-        time: "刚刚入库",
-        source: "我的文章",
-        fresh: true,
-      },
-      ...prev,
-    ]);
+    // 「笔记加入知识流」需要把笔记写进库才有意义——K2 notes 接库后开放，
+    // 现在往已接真库的 feed 塞 mock 卡片，刷新即消失还会污染列表
+    showToast("笔记入库将在后续版本开放，敬请期待");
   };
 
   // ----- 标签闭环 -----
@@ -854,7 +888,11 @@ export default function KnowledgePage() {
                 className="h-10 w-full rounded-[2px] border border-[#E5E5E5] bg-white pl-9 pr-3 text-sm text-[#000000] placeholder:text-[#999999] outline-none focus:border-[#000000]"
               />
             </div>
-            {filteredFeed.length === 0 ? (
+            {loadingKnowledge ? (
+              <div className="rounded-[2px] border border-dashed border-[#D9D9D9] bg-white p-12 text-center">
+                <p className="text-sm text-[#A0A8B4]">知识流加载中…</p>
+              </div>
+            ) : filteredFeed.length === 0 ? (
               <div className="rounded-[2px] border border-dashed border-[#D9D9D9] bg-white p-12 text-center">
                 <p className="text-sm text-[#A0A8B4]">没有匹配的知识条目</p>
               </div>
@@ -970,7 +1008,7 @@ export default function KnowledgePage() {
               </div>
               <button
                 onClick={handleCapture}
-                disabled={!captureInput.trim()}
+                disabled={!captureInput.trim() || savingId === "capturing"}
                 className="h-10 shrink-0 rounded-[2px] bg-[#000000] px-4 text-sm font-medium text-white transition-opacity hover:opacity-85 disabled:opacity-30"
               >
                 丢进来
@@ -980,7 +1018,11 @@ export default function KnowledgePage() {
               <Sparkles className="h-3.5 w-3.5" />
               AI 已按你的口味初筛；保留进知识流，放弃进回收站（7 天后彻底删除）
             </p>
-            {inbox.length === 0 ? (
+            {loadingKnowledge ? (
+              <div className="rounded-[2px] border border-dashed border-[#D9D9D9] bg-white p-12 text-center">
+                <p className="text-sm text-[#A0A8B4]">收件箱加载中…</p>
+              </div>
+            ) : inbox.length === 0 ? (
               <div className="rounded-[2px] border border-dashed border-[#D9D9D9] bg-white p-12 text-center">
                 <p className="text-sm text-[#A0A8B4]">收件箱空空如也，去采集吧</p>
               </div>
@@ -1002,14 +1044,16 @@ export default function KnowledgePage() {
                   <div className="mt-3 flex items-center justify-end gap-2">
                     <button
                       onClick={() => dropItem(item)}
-                      className="flex h-8 items-center gap-1.5 rounded-[2px] border border-[#D9D9D9] bg-white px-3 text-xs font-medium text-[#4A4A4A] transition-colors hover:border-[#000000] hover:text-black"
+                      disabled={savingId != null}
+                      className="flex h-8 items-center gap-1.5 rounded-[2px] border border-[#D9D9D9] bg-white px-3 text-xs font-medium text-[#4A4A4A] transition-colors hover:border-[#000000] hover:text-black disabled:cursor-not-allowed disabled:opacity-40"
                     >
                       <X className="h-3.5 w-3.5" />
-                      放弃
+                      {savingId === item.id ? "处理中…" : "放弃"}
                     </button>
                     <button
                       onClick={() => keepItem(item)}
-                      className="flex h-8 items-center gap-1.5 rounded-[2px] bg-[#000000] px-3 text-xs font-medium text-white transition-opacity hover:opacity-85"
+                      disabled={savingId != null}
+                      className="flex h-8 items-center gap-1.5 rounded-[2px] bg-[#000000] px-3 text-xs font-medium text-white transition-opacity hover:opacity-85 disabled:cursor-not-allowed disabled:opacity-40"
                     >
                       <Check className="h-3.5 w-3.5" />
                       保留
@@ -1628,6 +1672,15 @@ export default function KnowledgePage() {
                 </div>
               </>
             )}
+          </div>
+        </div>
+      )}
+
+      {/* ===== 轻量提示条（toast）：底部居中浮出，几秒自动消失 ===== */}
+      {toast && (
+        <div className="pointer-events-none fixed bottom-6 left-1/2 z-50 -translate-x-1/2">
+          <div className="rounded-[2px] bg-[#000000] px-4 py-2 text-xs font-medium text-white shadow-[0_2px_8px_rgba(0,0,0,0.18)]">
+            {toast}
           </div>
         </div>
       )}
