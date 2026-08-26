@@ -262,6 +262,69 @@ export function setTags(
   })();
 }
 
+/**
+ * 全局重命名标签：所有条目上的这个标签一起改名（对应 UI「管理标签」）。
+ *
+ * 为什么不用一条 UPDATE 直接改：新名字可能已经存在于某些条目上（比如把
+ * 「ai」统一成「AI」，而有的条目俩标签都有），直接 UPDATE 会撞复合主键报错。
+ * 这里两步走：先把新名挂到所有带旧名的条目上（OR IGNORE 跳过已存在的），
+ * 再整体删掉旧名——语义等于「合并」，正好符合整理标签时的直觉。
+ */
+export function renameTag(
+  conn: Database.Database,
+  from: string,
+  to: string,
+): boolean {
+  const oldName = from.trim();
+  const newName = to.trim();
+  if (!oldName || !newName || oldName === newName) return false;
+
+  conn.transaction(() => {
+    // 先复制：把旧标签的全部关联转投到新名下，已有同组合自动跳过
+    conn
+      .prepare(
+        `INSERT OR IGNORE INTO knowledge_item_tags (item_id, tag)
+         SELECT item_id, ? FROM knowledge_item_tags WHERE tag = ?`,
+      )
+      .run(newName, oldName);
+    // 再清旧：此时新名已完整接管，旧名可以整体退场
+    conn.prepare(`DELETE FROM knowledge_item_tags WHERE tag = ?`).run(oldName);
+    // 只刷新真正受影响的条目（此刻持有新名标签的），不碰无关数据
+    conn
+      .prepare(
+        `UPDATE knowledge_items SET updated_at = ? WHERE id IN
+         (SELECT item_id FROM knowledge_item_tags WHERE tag = ?)`,
+      )
+      .run(Date.now(), newName);
+  })();
+  return true;
+}
+
+/** 全局删除标签：从所有条目上摘掉这个标签（对应 UI「管理标签」的删除按钮） */
+export function removeTag(conn: Database.Database, tag: string): boolean {
+  const name = tag.trim();
+  if (!name) return false;
+  const info = conn
+    .prepare(`DELETE FROM knowledge_item_tags WHERE tag = ?`)
+    .run(name);
+  return info.changes > 0;
+}
+
+/** 全部标签及使用计数：驱动标签选择器候选列表与筛选入口。
+ *  排序按使用次数降序、次键字典序稳定并列——常用标签排前面才符合直觉 */
+export interface TagCount {
+  tag: string;
+  count: number;
+}
+
+export function listTags(conn: Database.Database): TagCount[] {
+  return conn
+    .prepare(
+      `SELECT tag, COUNT(*) AS count FROM knowledge_item_tags GROUP BY tag ORDER BY count DESC, tag`,
+    )
+    .all() as TagCount[];
+}
+
 /** 硬删除：tags 随外键 CASCADE 自动清理，无需手动收尾 */
 export function deleteItem(conn: Database.Database, id: string): boolean {
   const info = conn

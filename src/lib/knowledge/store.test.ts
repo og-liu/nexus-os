@@ -12,6 +12,9 @@ import {
   setTags,
   deleteItem,
   countsByStatus,
+  renameTag,
+  removeTag,
+  listTags,
 } from "./store";
 
 let conn: Database.Database;
@@ -171,5 +174,51 @@ describe("knowledge store · deleteItem / countsByStatus", () => {
     expect(counts.kept).toBe(2);
     expect(counts.discarded).toBe(1);
     expect(counts.trashed).toBe(0);
+  });
+});
+
+describe("knowledge store · 全局标签管理（K2）", () => {
+  it("renameTag 所有条目一起改名，且与已有新名合并去重", () => {
+    // 条目 A 只有旧名；条目 B 旧名新名都有（模拟整理时的重名场景）
+    const a = createItem(conn, { content: "a", tags: ["ai"] });
+    const b = createItem(conn, { content: "b", tags: ["ai", "AI"] });
+
+    const changed = renameTag(conn, "ai", "AI");
+    expect(changed).toBe(true);
+
+    // A 的 ai → AI；B 上两个标签合并成一个 AI，不撞复合主键不留重复
+    expect(getItem(conn, a.id)!.tags).toEqual(["AI"]);
+    expect(getItem(conn, b.id)!.tags).toEqual(["AI"]);
+    // 全库只剩一个 AI 标签行
+    expect(listTags(conn)).toEqual([{ tag: "AI", count: 2 }]);
+  });
+
+  it("renameTag 空名 / 同名直接拒绝，返回 false 不动数据", () => {
+    const item = createItem(conn, { content: "x", tags: ["t1"] });
+    expect(renameTag(conn, "", "t2")).toBe(false);
+    expect(renameTag(conn, "t1", " t1 ")).toBe(false); // trim 后同名
+    expect(getItem(conn, item.id)!.tags).toEqual(["t1"]);
+  });
+
+  it("removeTag 从所有条目摘掉该标签，正文不受影响", () => {
+    const a = createItem(conn, { content: "a", tags: ["old", "keep"] });
+    const b = createItem(conn, { content: "b", tags: ["old"] });
+
+    expect(removeTag(conn, "old")).toBe(true);
+
+    expect(getItem(conn, a.id)!.tags).toEqual(["keep"]);
+    expect(getItem(conn, b.id)!.tags).toEqual([]);
+    // 删不存在的标签：没有行被删，返回 false
+    expect(removeTag(conn, "not-exist")).toBe(false);
+  });
+
+  it("listTags 返回使用计数并按次数降序排列", () => {
+    createItem(conn, { content: "1", tags: ["热门", "冷门"] });
+    createItem(conn, { content: "2", tags: ["热门"] });
+
+    expect(listTags(conn)).toEqual([
+      { tag: "热门", count: 2 },
+      { tag: "冷门", count: 1 },
+    ]);
   });
 });

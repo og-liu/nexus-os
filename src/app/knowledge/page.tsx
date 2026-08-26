@@ -23,6 +23,8 @@ import {
   XCircle,
   RotateCw,
 } from "lucide-react";
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 import { cn } from "@/lib/utils";
 import { PageHeader } from "@/components/page-header";
 
@@ -192,6 +194,65 @@ function toInboxItem(row: KnowledgeRow): InboxItem {
   };
 }
 
+// ---------- Markdown 渲染（K2：详情页正文） ----------
+// 黑白灰极简排版：标题靠字重与字号分层，代码块深灰底，引用左侧细边框。
+// 用 components 显式映射而不是全局 CSS 类（如 typography 插件）——
+// 样式即代码一眼可见，也不用为几个元素引一个插件。
+const markdownComponents = {
+  h1: (p: React.ComponentProps<"h1">) => (
+    <h1 className="mb-3 mt-6 text-xl font-semibold text-black first:mt-0" {...p} />
+  ),
+  h2: (p: React.ComponentProps<"h2">) => (
+    <h2 className="mb-2.5 mt-6 text-lg font-semibold text-black first:mt-0" {...p} />
+  ),
+  h3: (p: React.ComponentProps<"h3">) => (
+    <h3 className="mb-2 mt-5 text-base font-semibold text-black first:mt-0" {...p} />
+  ),
+  p: (p: React.ComponentProps<"p">) => (
+    <p className="my-3 leading-7 text-[#2A2A2A] first:mt-0 last:mb-0" {...p} />
+  ),
+  a: (p: React.ComponentProps<"a">) => (
+    <a className="text-black underline underline-offset-2" target="_blank" rel="noreferrer" {...p} />
+  ),
+  ul: (p: React.ComponentProps<"ul">) => (
+    <ul className="my-3 list-disc space-y-1 pl-5 text-[#2A2A2A]" {...p} />
+  ),
+  ol: (p: React.ComponentProps<"ol">) => (
+    <ol className="my-3 list-decimal space-y-1 pl-5 text-[#2A2A2A]" {...p} />
+  ),
+  li: (p: React.ComponentProps<"li">) => <li className="leading-7" {...p} />,
+  blockquote: (p: React.ComponentProps<"blockquote">) => (
+    <blockquote className="my-3 border-l-2 border-[#D9D9D9] pl-3 text-[#8A8A8A]" {...p} />
+  ),
+  // 行内代码浅灰底；代码块里的 code 由 pre 包着，交给 pre 统一样式
+  code: ({ className, children, ...rest }: React.ComponentProps<"code">) =>
+    className ? (
+      <code className={className} {...rest}>
+        {children}
+      </code>
+    ) : (
+      <code className="rounded bg-[#F0F0F0] px-1 py-0.5 text-[13px] text-[#000000]" {...rest}>
+        {children}
+      </code>
+    ),
+  pre: (p: React.ComponentProps<"pre">) => (
+    <pre
+      className="my-3 overflow-x-auto rounded-[2px] bg-[#1A1A1A] p-4 text-[13px] leading-6 text-[#ECECEC]"
+      {...p}
+    />
+  ),
+  hr: () => <hr className="my-5 border-[#E5E5E5]" />,
+  table: (p: React.ComponentProps<"table">) => (
+    <table className="my-3 w-full border-collapse text-sm" {...p} />
+  ),
+  th: (p: React.ComponentProps<"th">) => (
+    <th className="border border-[#E5E5E5] px-2 py-1 text-left font-medium" {...p} />
+  ),
+  td: (p: React.ComponentProps<"td">) => (
+    <td className="border border-[#E5E5E5] px-2 py-1 align-top" {...p} />
+  ),
+};
+
 
 const initialNotes: Note[] = [
   {
@@ -231,22 +292,6 @@ const initialSources: Source[] = [
   { id: 2, name: "前端周报", freq: "每周一 08:00", on: true },
   { id: 3, name: "AI 日报", freq: "每天 09:00", on: true },
   { id: 4, name: "个人博客圈", freq: "每天 12:00", on: false },
-];
-
-const initialAllTags = [
-  "RAG",
-  "核心概念",
-  "Agent",
-  "架构",
-  "晨报",
-  "前端",
-  "AI",
-  "Skill",
-  "工具调用",
-  "Vibe Coding",
-  "React",
-  "RSC",
-  "转型",
 ];
 
 // ---------- 小组件 ----------
@@ -307,7 +352,11 @@ export default function KnowledgePage() {
   const [inbox, setInbox] = useState<InboxItem[]>([]);
   const [trash, setTrash] = useState<TrashItem[]>(initialTrash);
   const [sources, setSources] = useState<Source[]>(initialSources);
-  const [allTags, setAllTags] = useState<string[]>(initialAllTags);
+  const [allTags, setAllTags] = useState<string[]>([]); // 全部标签，从 /api/knowledge/tags 拉取
+  // K2 标签筛选：点知识流里的标签 pill 即按该标签过滤（服务端 tag 参数）
+  const [activeTag, setActiveTag] = useState<string | null>(null);
+  // 服务端检索进行中提示（搜索框防抖请求发出后到返回前）
+  const [searching, setSearching] = useState(false);
 
   // ----- 真数据接线状态 -----
   // 首屏加载中：列表区显示骨架提示，避免闪「空空如也」误导用户
@@ -326,36 +375,77 @@ export default function KnowledgePage() {
     toastTimer.current = window.setTimeout(() => setToast(null), 2400);
   };
 
-  // 首屏并行拉收件箱（inbox）和知识流（kept）。
-  // 用 allSettled 而不是 all：一个接口挂了另一个照常显示，不至于整页报废
+  // ----- 数据加载（K2：搜索与标签筛选都走服务端） -----
+
+  /** 拉知识流（kept 列表）：关键词 q 与标签 tag 传给服务端组合过滤——
+   *  LIKE 检索和标签匹配在 store 层拼 WHERE 条件，前端只负责拼参数。
+   *  这取代了 K1 之前「整页拉回来前端 filter」的做法：数据库是唯一真相，
+   *  分页/大数据量时也不会把全表拖到浏览器 */
+  const loadFeed = async (q: string, tag: string | null) => {
+    const params = new URLSearchParams({ status: "kept", limit: "100" });
+    if (q) params.set("q", q);
+    if (tag) params.set("tag", tag);
+    const res = await fetch(`/api/knowledge?${params.toString()}`);
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const data = await res.json();
+    setFeed((data.items as KnowledgeRow[]).map(toFeedItem));
+  };
+
+  /** 拉全部标签及计数，驱动标签选择器候选列表（新打标签后也要刷新它） */
+  const loadAllTags = async () => {
+    const res = await fetch("/api/knowledge/tags");
+    if (!res.ok) return;
+    const data = await res.json();
+    setAllTags((data.tags as Array<{ tag: string; count: number }>).map((t) => t.tag));
+  };
+
+  // 首屏并行拉收件箱、知识流、标签列表三路数据。
+  // 用 allSettled 而不是 all：一个接口挂了其他照常显示，不至于整页报废
   useEffect(() => {
     let alive = true; // 组件卸载后不再 setState
     (async () => {
-      const [inboxRes, feedRes] = await Promise.allSettled([
+      const [inboxRes] = await Promise.allSettled([
         fetch("/api/knowledge?status=inbox&limit=100"),
-        fetch("/api/knowledge?status=kept&limit=100"),
+        loadFeed("", null),
+        loadAllTags(),
       ]);
       if (!alive) return;
-      let failed = false;
-      if (inboxRes.status === "fulfilled" && inboxRes.value.ok) {
-        const data = await inboxRes.value.json();
-        setInbox((data.items as KnowledgeRow[]).map(toInboxItem));
-      } else {
-        failed = true;
+      let failed = inboxRes.status === "rejected";
+      if (inboxRes.status === "fulfilled") {
+        if (!inboxRes.value.ok) failed = true;
+        else {
+          const data = await inboxRes.value.json();
+          setInbox((data.items as KnowledgeRow[]).map(toInboxItem));
+        }
       }
-      if (feedRes.status === "fulfilled" && feedRes.value.ok) {
-        const data = await feedRes.value.json();
-        setFeed((data.items as KnowledgeRow[]).map(toFeedItem));
-      } else {
-        failed = true;
-      }
-      if (failed) showToast("知识库加载失败，请稍后刷新重试");
+      if (failed) showToast("部分数据加载失败，请刷新重试");
       setLoadingKnowledge(false);
     })();
     return () => {
       alive = false;
     };
   }, []);
+
+  // 搜索 + 标签筛选联动：任一变化后停手 350ms 才发一次请求——连续按键只打
+  // 最后一枪，避免每个字符一趟往返。首帧跳过：初值就是空搜索，主加载已拉过
+  const skipNextSearch = useRef(true);
+  useEffect(() => {
+    if (skipNextSearch.current) {
+      skipNextSearch.current = false;
+      return;
+    }
+    const timer = window.setTimeout(async () => {
+      setSearching(true);
+      try {
+        await loadFeed(searchQuery.trim(), activeTag);
+      } catch {
+        showToast("检索失败，请重试");
+      } finally {
+        setSearching(false);
+      }
+    }, 350);
+    return () => window.clearTimeout(timer);
+  }, [searchQuery, activeTag]);
 
   // 文章编辑
   const [editingNoteId, setEditingNoteId] = useState<number | null>(null);
@@ -581,10 +671,29 @@ export default function KnowledgePage() {
   const setTagsOf = (ref: DetailRef, tags: string[]) => {
     if (!ref) return;
     if (ref.type === "feed") {
+      // K2 标签编辑落库：先乐观更新本地（界面零等待），PATCH 到后端确认；
+      // 失败时回滚到改前快照并提示——不打断浏览，也不让假状态留在屏幕上
+      const prevTags = feed.find((f) => f.id === ref.id)?.tags ?? [];
       setFeed((prev) =>
         prev.map((f) => (f.id === ref.id ? { ...f, tags } : f)),
       );
+      fetch(`/api/knowledge/${ref.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ tags }),
+      })
+        .then(async (res) => {
+          if (!res.ok) throw new Error(`HTTP ${res.status}`);
+          await loadAllTags(); // 新打的标签可能刚诞生，刷新全局候选列表
+        })
+        .catch(() => {
+          setFeed((prev) =>
+            prev.map((f) => (f.id === ref.id ? { ...f, tags: prevTags } : f)),
+          );
+          showToast("标签保存失败，已还原");
+        });
     } else {
+      // notes 还是 mock，仅本地态
       setNotes((prev) =>
         prev.map((n) => (n.id === ref.id ? { ...n, tags } : n)),
       );
@@ -627,6 +736,14 @@ export default function KnowledgePage() {
         tags: n.tags.map((t) => (t === oldName ? name : t)),
       })),
     );
+    // 正在按这个标签筛选时同步更新筛选条件，否则横幅显示旧名
+    if (activeTag === oldName) setActiveTag(name);
+    // 全局重命名落库：新名已存在时后端自动合并（store 的两步走策略）
+    fetch("/api/knowledge/tags", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ from: oldName, to: name }),
+    }).catch(() => showToast("重命名保存失败，请刷新页面核对"));
   };
 
   const askRemoveTagGlobal = (tag: string) => {
@@ -642,6 +759,12 @@ export default function KnowledgePage() {
         setNotes((prev) =>
           prev.map((n) => ({ ...n, tags: n.tags.filter((t) => t !== tag) })),
         );
+        // 删掉的正是当前筛选标签时，退出筛选（不然列表还挂在已消失的条件上）
+        if (activeTag === tag) setActiveTag(null);
+        fetch(
+          `/api/knowledge/tags?tag=${encodeURIComponent(tag)}`,
+          { method: "DELETE" },
+        ).catch(() => showToast("删除保存失败，请刷新页面核对"));
       },
     });
   };
@@ -688,14 +811,8 @@ export default function KnowledgePage() {
     detail?.type === "note" ? notes.find((n) => n.id === detail.id) : null;
   const isEditing = currentNote && editingNoteId === currentNote.id;
 
-  const filteredFeed = searchQuery.trim()
-    ? feed.filter(
-        (item) =>
-          item.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
-          item.summary.toLowerCase().includes(searchQuery.toLowerCase()) ||
-          item.tags.some((t) => t.toLowerCase().includes(searchQuery.toLowerCase())),
-      )
-    : feed;
+  // K2 起搜索走服务端（loadFeed 的 q 参数），不再需要前端 filter 一层——
+  // feed 本身就是「当前检索条件下」的结果集
 
   // ----- 详情视图 -----
 
@@ -733,12 +850,14 @@ export default function KnowledgePage() {
               ))}
               <AddTagButton onClick={() => setTagPicker(detail)} />
             </div>
-            <div className="mt-5 space-y-4">
-              {currentFeed.content.split("\n\n").map((para, i) => (
-                <p key={i} className="text-[15px] leading-7 text-[#2A2A2A]">
-                  {para}
-                </p>
-              ))}
+            {/* K2 Markdown 渲染：存储始终是纯文本单一事实源，只在展示层解析 */}
+            <div className="mt-5">
+              <ReactMarkdown
+                remarkPlugins={[remarkGfm]}
+                components={markdownComponents}
+              >
+                {currentFeed.content}
+              </ReactMarkdown>
             </div>
           </article>
         </div>
@@ -882,22 +1001,39 @@ export default function KnowledgePage() {
               <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-[#999999]" />
               <input
                 type="text"
-                placeholder="搜索知识流（标题 / 摘要 / 标签）"
+                placeholder="搜索知识流（标题 / 正文 / 标签）"
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
                 className="h-10 w-full rounded-[2px] border border-[#E5E5E5] bg-white pl-9 pr-3 text-sm text-[#000000] placeholder:text-[#999999] outline-none focus:border-[#000000]"
               />
             </div>
+            {/* K2 标签筛选横幅：点列表里的标签 pill 进入筛选，这里给出退出入口 */}
+            {activeTag && (
+              <div className="flex items-center gap-2 rounded-[2px] border border-[#E5E5E5] bg-white px-3 py-2 text-xs text-[#4A4A4A]">
+                <span>按标签「{activeTag}」筛选</span>
+                <button
+                  onClick={() => setActiveTag(null)}
+                  className="ml-auto flex items-center gap-1 text-[#8A8A8A] transition-colors hover:text-black"
+                >
+                  <X className="h-3 w-3" />
+                  清除筛选
+                </button>
+              </div>
+            )}
+            {/* 服务端检索进行中的轻提示 */}
+            {searching && (
+              <p className="px-1 text-xs text-[#A0A8B4]">检索中…</p>
+            )}
             {loadingKnowledge ? (
               <div className="rounded-[2px] border border-dashed border-[#D9D9D9] bg-white p-12 text-center">
                 <p className="text-sm text-[#A0A8B4]">知识流加载中…</p>
               </div>
-            ) : filteredFeed.length === 0 ? (
+            ) : feed.length === 0 ? (
               <div className="rounded-[2px] border border-dashed border-[#D9D9D9] bg-white p-12 text-center">
                 <p className="text-sm text-[#A0A8B4]">没有匹配的知识条目</p>
               </div>
             ) : (
-              filteredFeed.map((item) => (
+              feed.map((item) => (
                 <article
                   key={item.id}
                   onClick={() => setDetail({ type: "feed", id: item.id })}
@@ -915,14 +1051,28 @@ export default function KnowledgePage() {
                     {item.summary}
                   </p>
                   <div className="mt-2.5 flex flex-wrap items-center gap-1.5">
-                    {item.tags.map((tag) => (
-                      <span
-                        key={tag}
-                        className="whitespace-nowrap rounded-full bg-[#ECECEC] px-2.5 py-0.5 text-xs text-[#4A4A4A]"
-                      >
-                        {tag}
-                      </span>
-                    ))}
+                    {/* 标签即筛选入口：点 pill 直接按该标签过滤知识流。
+                        stopPropagation 防止触发卡片的进详情点击 */}
+                    {item.tags.map((tag) => {
+                      const active = activeTag === tag;
+                      return (
+                        <button
+                          key={tag}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setActiveTag(active ? null : tag);
+                          }}
+                          className={cn(
+                            "whitespace-nowrap rounded-full px-2.5 py-0.5 text-xs transition-colors",
+                            active
+                              ? "bg-[#000000] text-white"
+                              : "bg-[#ECECEC] text-[#4A4A4A] hover:bg-[#D9D9D9]",
+                          )}
+                        >
+                          {tag}
+                        </button>
+                      );
+                    })}
                     <AddTagButton onClick={() => setTagPicker({ type: "feed", id: item.id })} />
                     <span className="ml-auto text-xs text-[#A0A8B4]">
                       {item.source} · {item.time}
