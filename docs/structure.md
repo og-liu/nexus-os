@@ -87,6 +87,7 @@ src/
     │   ├── planner.ts      # 任务规划器：LLM 拆解步骤清单（≤8步），纯 JSON 输出 + 鲁棒解析（剥代码块/截大括号/去尾逗号）
     │   ├── plan.ts         # Plan/PlanStep/StepStatus 类型层（无依赖纯类型，避免循环 import）
     │   ├── plan-store.ts   # 计划持久化：task_plans 表六态状态机（running/done/failed/paused/stopped/cancelled）+ 整轮配对归档 archiveStoppedTurn
+    │   ├── turn-lock.ts    # 会话并发内存锁（tryLockTurn/unlockTurn，同会话一轮 409 防护）+ 崩溃残留自愈 healOrphanRunningState（孤儿 running → stopped）
     │   ├── tools.ts        # 工具注册表：天气 get_weather / 搜索 web_search + buildToolsSchema/getTool
     │   └── archive-stopped-turn.test.ts  # Vitest 单测：归档配对、停止→续跑→又停止链、幂等、计划状态流转（7 用例）
     ├── search/             # 联网搜索抽象层
