@@ -82,7 +82,7 @@ Agent 回复：
 
 - **模型选型** ✅：DeepSeek 为默认底座，模型接入层已开放为多供应商（DeepSeek / OpenRouter，可扩展）
 - **多模型支持** ✅：模型选择器 + models.ts 注册表 + 供应商适配层，支持切换模型，深度思考偏好按模型独立
-- **任务规划** ✅：Plan-and-Execute 已落地——planner 拆步、逐步执行、失败重试、流式汇总；ask_user 补问步骤支撑 HITL 暂停-续跑；stopped 计划支持断点恢复
+- **任务规划** ✅：Plan-and-Execute 已落地——planner 拆步、逐步执行、失败重试、流式汇总；素材与交付分离（中间步骤只产内部笔记不上屏，收尾汇总是唯一成文点；SSE delta/reasoning 带 phase=working/final 标记，过程内容不进正文气泡与落库正文）；ask_user 补问步骤支撑 HITL 暂停-续跑；stopped 计划支持断点恢复
 - **对话界面** 🟡：SSE 流式输出已实现；Markdown 渲染、代码高亮待做
 - **上下文策略** 🟡：滑动窗口按轮裁最近 20 轮 + 状态过滤（running/stopped/cancelled 不进历史）；历史压缩、关键信息提取待做
 - **工具注册机制** ✅：已用 Function Calling 落地——`src/lib/agent/tools.ts` 注册工具，`buildToolsSchema()` 生成工具清单喂给模型，`getTool()` 按名执行
