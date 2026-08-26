@@ -198,6 +198,37 @@ export async function POST(req: NextRequest) {
     );
   }
 
+  // ── 本轮走向判定 + 残留任务归档（必须在「查 history」之前执行！）──────────────
+  // 归档为什么要提前到查 history 之前：archiveStoppedTurn 会把上一轮残留的
+  // 「user 提问 + stopped 半截回复」整轮翻成 cancelled，而被取代的旧 user 需求
+  // 平时 status 是 NULL（user 消息只有被归档时才有状态）。如果先查 history 再归档，
+  // 本轮喂给模型的历史还是归档前的脏数据——那条旧需求仍会进上下文，模型就会把
+  // 新消息理解成旧任务的「催促」，自作主张继续执行旧任务（表现为：停止/放弃后
+  // 换话题，AI 却回答旧话题）。先归档再取历史，本轮模型看到的才全是有效轮次。
+  // 判断该会话是否有「暂停中、等待用户回复」的计划（HITL 补问后）。
+  // 有则本轮走续跑（resumeLoop），把用户这轮的 content 当作补问的答案；无则正常走 agentLoop。
+  const pausedPlan = getPausedPlan(db, sid);
+  // 断点恢复：读取「可恢复的未完成计划」（running / stopped），供 resume 分支与归档判断使用。
+  const recoverablePlan = getRecoverablePlan(db, sid);
+
+  // resume 请求的前置校验：必须存在「已停止（stopped）」的计划才能续跑。若没有（例如用户
+  // 在别的窗口已放弃、或计划已完成），直接拒绝。此处位于 assistant 占位行 INSERT 之前，
+  // 被拒时库里不会残留空壳消息，无需清理。
+  if (resume && (!recoverablePlan || recoverablePlan.status !== "stopped")) {
+    return new Response("没有可恢复的中断任务", { status: 400 });
+  }
+
+  // 正常新消息（非 resume）：若上一轮残留了「已停止」的任务，先整轮归档成 cancelled
+  //（被这轮取代），再进入本轮。归档是配对的整体（archiveStoppedTurn 连 user 提问
+  // 一起收尾）：计划翻 cancelled → 前端 getRecoverablePlan 读不到，不再渲染「继续/放弃」；
+  // 消息整轮翻 cancelled → 刷新后旧任务显示「已放弃」角标，且「提问 + 半截回复」
+  // 都不会进本轮的模型上下文。注意：paused 计划（AI 补问等待回答）不算「被取代」，
+  // 用户这轮的输入大概率是对补问的回答，归档条件只认 stopped。
+  if (!resume && recoverablePlan && recoverablePlan.status === "stopped") {
+    updatePlanStatus(db, sid, PLAN_STATUS.CANCELLED);
+    archiveStoppedTurn(db, sid);
+  }
+
   // 【真停止 / 刷新保留的关键】提前为 assistant 消息 INSERT 一行占位记录（status=running）。
   // 这样在 agentLoop 还没跑完、甚至被中途打断时，这条 assistant 消息在库里已经「存在」，
   // 后续的增量落盘只需 UPDATE 这条占位行；刷新页面读历史也能看到「进行中/已停止」的半截消息，
@@ -260,20 +291,9 @@ export async function POST(req: NextRequest) {
 
   db.prepare(`UPDATE sessions SET updated_at = ? WHERE id = ?`).run(now, sid);
 
-  // 判断该会话是否有「暂停中、等待用户回复」的计划（HITL 补问后）。
-  // 有则本轮走续跑（resumeLoop），把用户这轮的 content 当作补问的答案；无则正常走 agentLoop。
-  const pausedPlan = getPausedPlan(db, sid);
-
-  // 断点恢复：读取「可恢复的未完成计划」（running / stopped），供 resume 分支与「归档旧计划」使用。
-  const recoverablePlan = getRecoverablePlan(db, sid);
-
-  // resume 请求的前置校验：必须存在「已停止（stopped）」的计划才能续跑。若没有（例如用户
-  // 在别的窗口已放弃、或计划已完成），直接拒绝，并清掉刚才临时创建的 assistant 占位行，
-  // 避免库里残留一条空壳消息。
-  if (resume && (!recoverablePlan || recoverablePlan.status !== "stopped")) {
-    db.prepare(`DELETE FROM messages WHERE id = ?`).run(assistantMsgId);
-    return new Response("没有可恢复的中断任务", { status: 400 });
-  }
+  // 本轮走向判定（pausedPlan / recoverablePlan 读取）与「残留 stopped 任务归档」已前移到
+  // 查 history 之前执行（原因见上方归档段注释）；resume 的 400 前置校验也一并前移，
+  // 提前到 assistant 占位行 INSERT 之前，被拒时无需再清理占位。
 
   const encoder = new TextEncoder();
   const stream = new ReadableStream({
@@ -450,15 +470,8 @@ export async function POST(req: NextRequest) {
             req.signal,
           );
         } else {
-          // 正常新消息：若上一轮残留了「已停止」的任务，整轮归档成 cancelled（被这轮取代）。
-          // 归档是配对的整体（archiveStoppedTurn 连 user 提问一起收尾）：
-          //   - 计划翻 cancelled → 前端 getRecoverablePlan 读不到，不再渲染「继续/放弃」；
-          //   - 消息整轮翻 cancelled → 刷新后旧任务显示「已放弃」角标而非「已停止」空壳，
-          //     且这轮「提问 + 半截回复」都不会再进模型上下文（见上文 history 过滤）。
-          if (recoverablePlan && recoverablePlan.status === "stopped") {
-            updatePlanStatus(db, sid, PLAN_STATUS.CANCELLED);
-            archiveStoppedTurn(db, sid);
-          }
+          // 正常新消息：残留 stopped 任务的整轮归档已在进入本 stream 之前完成——
+          // 必须先归档再查 history，否则归档动作对本轮已取出的历史不生效（见上文注释）。
           loopResult = await agentLoop(
             model,
             SYSTEM_PROMPT,
