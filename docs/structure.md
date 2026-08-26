@@ -124,8 +124,8 @@ docs/
 | 页面 | 路由 | 状态 |
 |------|------|------|
 | 首页 Dashboard | `/` | ✅ 已完成（问候/时钟/农历/年度进度、每日一句、KPI、快捷工具、最近活动、自动化任务、最新文章、AI Agent、音乐播放器、便签、待办） |
-| AI Agent | `/agent` | ✅ 真实对话已实现（多模型切换、流式输出、深度思考、图片看图、SQLite 会话持久化、工具调用——天气/联网搜索、工具调用/思考过程/token 用量落库还原；意图理解/任务规划待开发） |
-| 知识库 | `/knowledge` | 🟡 K3 前置完成：notes/trash 接库（同表 kind=note 区分、回收站软删+捞回+7天懒清理，34 测试全绿）；K2 服务端检索+标签筛选+Markdown 已通；下一步=K3 Agent 衔接 |
+| AI Agent | `/agent` | 🟢 K3 完成：真实对话+Agent Loop+工具体系齐备（get_weather / web_search / 知识库双工具 search_knowledge+read_knowledge，kept 语义红线），多模型切换、真流式、深度思考、图片看图、会话落库；43 测试全绿；下一步=K4 向量检索替换 search 内核 |
+| 知识库 | `/knowledge` | ✅ K0~K3 全部完成：数据地基→采集拍板闭环→知识流页面（检索+标签筛选+Markdown）→notes/trash 接库（同表 kind 区分+回收站软删7天懒清理）→Agent 衔接（知识库工具注册给 Loop）；下一步=K4 向量检索 |
 | 工具中心 | `/tools` | ✅ 页面已完成（59 个工具卡片、搜索 + 分类筛选、三档响应式；工具均为 mock 无实际执行） |
 | 文件管理 | `/files` | 🔲 占位 |
 | 自动化 | `/automation` | 🔲 占位 |
