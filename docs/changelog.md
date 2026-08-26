@@ -4,6 +4,46 @@
 
 ---
 
+## 2026-08-26 — 质量基建：Vitest 单元测试体系 + Node 版本统一 + 停止内容丢失修复
+
+### 新增
+- **Vitest 单元测试体系**（`9abc2ef`）：新增 `vitest.config.mts` 与首个测试套件 `src/lib/agent/archive-stopped-turn.test.ts`，7 个用例全部通过；覆盖整轮配对归档、停止→续跑→又停止链路、重复归档幂等、不误伤历史消息、failed 不归档、计划状态流转。为支撑测试，`db.ts` 抽出 `initSchema(conn)` 与 `createInMemoryDb()`，生产库与内存测试库共用同一份 schema
+- **Node 版本统一**（`d1579a5`）：新增 `.nvmrc` 固定 Node 22.23.2，dev server 与单元测试共用同一版本（进项目目录 `nvm use` 自动切换）；pnpm 经 corepack 在 Node 22 下启用（10.34.5）
+
+### 修复
+- **普通聊天停止后半截内容刷新丢失**（`5d44376`）：根因是流式 `delta` / `reasoning` / `tool_call` / `tool_result` / `tool_error` 事件只透传给前端、从不累积到持久化变量，abort 时 `persistAssistant("stopped")` 存的是空壳。修复后六类事件边收边累积，停止/断连时半截正文与工具调用随占位消息落库，刷新后保留
+- **vitest.config.ts → vitest.config.mts 重命名**：消除 Vite「ESM syntax in a file loaded as CommonJS」警告；配置内 `__dirname` 替换为 `fileURLToPath(import.meta.url)`
+- **环境问题排查**：better-sqlite3 原生模块在部分环境下加载即崩（SIGSEGV），定位出「prebuild 跳过编译 / 项目路径含空格 / NAPI 版本不足 / Coze 桌面端沙箱限制」四重原因，最终以 Node 22.23.2 源码编译解决（过程沉淀至 pitfalls.md #5/#6）
+
+### 决策记录
+- better-sqlite3 v13 需要 NAPI 10（Node ≥ 22.23.2）；旧版 Node 20/22.13 均不够。版本统一后不再来回切换
+- 涉及原生模块的测试须在本机终端跑（Coze 沙箱禁止加载 .node 且拦截 spawn）
+
+---
+
+## 2026-08-25(下午~晚间) — Agent 编排升级：任务规划 Plan-and-Execute + 真停止 + 断点恢复
+
+### 新增
+- **任务规划 Plan-and-Execute**（`fb2961b`）：新增 `planner.ts`（LLM 拆解步骤清单，≤8 步，纯 JSON 输出 + 鲁棒解析：剥代码块/截大括号/去尾逗号）与 `plan.ts` 类型层；`loop.ts` 从单步 ReAct 升级为「规划 → 逐步执行 → 失败重试 → 汇总」编排。每步是小型 ReAct（≤4 轮工具往返），步级失败自动重试（≤2 次），重试前回滚上下文避免脏残留
+- **HITL 补问暂停-续跑**（`34efa1f`）：规划器发现请求缺关键信息时拆出 `ask_user` 步骤，执行器在该步暂停（`plan_paused` 事件），问句原样抛给用户、计划存 paused 态；用户回复后 `resumeLoop` 把回答填回补问步骤并从断点继续，已完成步骤结果以摘要回灌上下文避免「失忆」。续跑中可再次暂停（多轮补问）
+- **真停止 / 刷新保留**（`c63ea62` `3a45e33`）：AbortSignal 贯穿 callLLM 与每个循环检查点；assistant 消息先 INSERT 占位行（status=running）再以 800ms 节流增量落盘，停止/刷新后半截内容、思考过程、工具调用记录全部保留；前端发送按钮切换为停止按钮，渲染 stopped 态
+- **断点恢复与继续/放弃**（`b9a9b7d` 及后续系列）：计划持久化新增 stopped/cancelled 状态；stopped 计划支持一键续跑（`resumeStoppedLoop`：中断时残留的 running 步骤重置 pending 重跑）或放弃（新增 `POST /api/plan` 归档入口）
+- **会话身份先行 + 整轮配对归档**（`ec2e65c` `16d4444`）：发新消息时旧 stopped 任务整轮归档为 cancelled——user 提问一起收尾，「提问+半截回复」从模型上下文中整体消失但界面保留痕迹；归档动作前移到查历史之前（`7047bab`），杜绝旧需求污染本轮上下文（表现为停止后换话题 AI 仍答旧话题）
+- **简单直答路径**（`4735808` `3680993` `367eed4`）：打招呼/闲聊等无任务意图消息经关键词启发式判定后绕开规划直接 ReAct 回答，不渲染进度面板；规划失败同样降级直答，不再出现假计划框
+- **续跑接管摘除旧面板**（`52b919c`）：新任务开始时旧进度面板收敛为 cancelled，避免刷新前 UI 残留两个可恢复任务
+
+### 修改
+- **数据库**：新增 `task_plans` 表（goal/steps JSON/status 六态）；messages 表增加 `status` 列（running/done/stopped/failed/cancelled 消息生命周期）
+- **历史构建规则**：只喂完整有效轮次，running/stopped/called 三种状态一律排除（注意 SQL 中 `!=` 对 NULL 不生效的坑，显式写 `IS NULL OR NOT IN`）
+- **前端计划进度面板**（`4ee3038`）：step_start/done/failed/paused 实时渲染，断点续跑时继承后端快照状态不回退灰色；思考过程默认收起（`844c962`）
+
+### 决策记录
+- 一个会话同一时刻最多一个活动计划（running/paused），保证断点定位稳定；历史上已完成的计划保留多条供审计
+- 「继续执行/放弃」仅对有计划的多步任务展示；普通聊天没有可恢复的计划，停止即终态（半截内容保留）
+- paused 计划不算「被取代」，用户下一轮输入默认视为补问的回答走 resumeLoop
+
+---
+
 ## 2026-08-25 — Agent 工具调用落地：Agent Loop + 真实天气/搜索 + 真流式
 
 ### 新增

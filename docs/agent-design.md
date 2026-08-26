@@ -2,7 +2,7 @@
 
 本文档描述 Nexus OS 中 AI Agent 模块的设计思路与架构规划。
 
-> **当前状态**：`/agent` 已从 UI mock 落地为真实对话——DeepSeek 多模型切换、SSE 流式输出、深度思考（按模型独立）、图片看图、SQLite 会话持久化均已实现；模型接入已开放为多供应商架构（DeepSeek / OpenRouter）。**工具调用已落地**：Agent Loop（模型决策 → 执行工具 → 结果回传循环，上限 5 轮）+ 工具注册表 + 真实天气（Open-Meteo）+ 联网搜索（Tavily），且已改为真流式（首字 1-2s）；工具调用过程、思考过程与 token 用量均随消息落库（messages.tool_calls / messages.reasoning / messages.usage），刷新 / 重开会话可还原展示。意图理解、任务规划等更高级编排能力仍在规划中。本文档描述的是目标架构设计，其中「工具调用」部分已按 Loop 方式实现雏形。
+> **当前状态**（2026-08-26）：`/agent` 已落地完整 Agent 编排能力——**任务规划 Plan-and-Execute**（planner 拆步 ≤8 → 逐步执行[每步小型 ReAct+失败重试] → 流式汇总）、**HITL 补问暂停-续跑**（ask_user 步骤暂停抛问，回复后断点续跑）、**真停止与断点恢复**（AbortSignal 贯穿 + 占位行 800ms 增量落盘，停止/刷新半截内容保留；stopped 计划可继续/放弃，整轮配对归档防旧任务污染上下文）。工具调用：Agent Loop + 工具注册表 + 真实天气（Open-Meteo）+ 联网搜索（Tavily），真流式首字 1-2s；工具调用、思考过程、token 用量随消息落库。质量基建：Vitest 单测体系（7 用例覆盖归档与计划状态流转），Node 版本统一 22.23.2（.nvmrc）。多模型接入开放化（DeepSeek / OpenRouter 多供应商适配层）。待深化：意图理解从关键词启发式升级为模型判定、历史压缩、知识库优先问答（RAG）衔接。
 
 ---
 
@@ -82,10 +82,12 @@ Agent 回复：
 
 - **模型选型** ✅：DeepSeek 为默认底座，模型接入层已开放为多供应商（DeepSeek / OpenRouter，可扩展）
 - **多模型支持** ✅：模型选择器 + models.ts 注册表 + 供应商适配层，支持切换模型，深度思考偏好按模型独立
+- **任务规划** ✅：Plan-and-Execute 已落地——planner 拆步、逐步执行、失败重试、流式汇总；ask_user 补问步骤支撑 HITL 暂停-续跑；stopped 计划支持断点恢复
 - **对话界面** 🟡：SSE 流式输出已实现；Markdown 渲染、代码高亮待做
-- **上下文策略** 🟡：滑动窗口按轮裁最近 20 轮；历史压缩、关键信息提取待做
+- **上下文策略** 🟡：滑动窗口按轮裁最近 20 轮 + 状态过滤（running/stopped/cancelled 不进历史）；历史压缩、关键信息提取待做
 - **工具注册机制** ✅：已用 Function Calling 落地——`src/lib/agent/tools.ts` 注册工具，`buildToolsSchema()` 生成工具清单喂给模型，`getTool()` 按名执行
-- **安全边界**：Agent 操作权限控制，避免误操作（如误删文件）
+- **简单/任务消息分流** 🟡：当前用关键词启发式（isSimpleQuery），误判代价小但不够聪明，后续可换小模型分类
+- **安全边界**：Agent 操作权限控制，避免误操作（如误删文件）；服务端并发锁待加
 
 ---
 

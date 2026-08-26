@@ -1,7 +1,7 @@
 # Nexus OS 工具系统文档
 
-> 最后更新：2026-08-25
-> 对应代码：`src/lib/agent/tools.ts`、`src/lib/agent/loop.ts`、`src/lib/search/`
+> 最后更新：2026-08-26
+> 对应代码：`src/lib/agent/tools.ts`、`src/lib/agent/loop.ts`、`src/lib/agent/planner.ts`、`src/lib/search/`
 
 ---
 
@@ -13,24 +13,32 @@
   ▼
 agentLoop()                          ← src/lib/agent/loop.ts
   │
-  ├─→ callLLM()  带上 tools schema   ← 模型决定是否调工具
-  │     │
-  │     ├─ 无 tool_calls → 返回最终回答（流式吐出）
-  │     │
-  │     └─ 有 tool_calls → 逐个执行
-  │           │
-  │           ├─ getTool(name)       ← src/lib/agent/tools.ts 注册表
-  │           │     │
-  │           │     ├─ weatherTool     → Open-Meteo API
-  │           │     └─ webSearchTool   → Tavily API（经 search 抽象层）
-  │           │
-  │           └─ 结果加回 messages → 回到循环顶部（最多 5 轮）
+  ├─→ isSimpleQuery() 闲聊/打招呼 → directReply() 直接 ReAct 回答（不拆计划）
+  │
+  ├─→ generatePlan() 拆解步骤清单（≤8步，纯 JSON）   ← src/lib/agent/planner.ts
+  │     └─ 缺关键信息时拆出 ask_user 补问步骤（执行到该步暂停等回复）
+  │
+  └─→ runPlanSteps() 逐步骤执行，每步 = 小型 ReAct：
+        │
+        ├─→ callLLM() 带上 tools schema              ← 模型决定是否调工具
+        │     ├─ 无 tool_calls → 该步文本结论即产出 → 下一步
+        │     └─ 有 tool_calls → 逐个执行：
+        │           ├─ getTool(name)   ← src/lib/agent/tools.ts 注册表
+        │           │     ├─ weatherTool   → Open-Meteo API
+        │           │     └─ webSearchTool → Tavily API（经 search 抽象层）
+        │           └─ 结果加回 conversation → 回到本步循环顶部（≤4 轮）
+        │
+        ├─ 步骤失败 → 自动重试（≤2 次，重试前回滚上下文）→ 仍失败标记 failed 跳过
+        ├─ 遇 ask_user 步骤 → plan_paused 暂停，问句抛给用户等回复
+        └─ 全部完成 → finishPlan() 综合各步结果流式汇总 → plan_done
   │
   ▼
-SSE 事件推给前端（tool_call / tool_result / delta / done）
+SSE 事件推给前端（delta / reasoning / tool_call / tool_result / tool_error /
+                plan_created / step_start / step_done / step_failed /
+                plan_paused / plan_done / stopped / error / done）
 ```
 
-**核心原则：** 加一个新工具只需在 `tools.ts` 注册表里加一行，Loop 代码完全不用改。
+**核心原则：** 加一个新工具只需在 `tools.ts` 注册表里加一行，Loop 与规划器代码完全不用改（规划器 prompt 里同步补一句工具说明即可）。
 
 ---
 
@@ -174,47 +182,65 @@ if (provider === "serper") {
 
 ## 五、Agent Loop 机制
 
-文件：`src/lib/agent/loop.ts`
+文件：`src/lib/agent/loop.ts`（编排）、`src/lib/agent/planner.ts`（规划）
 
-### 循环流程
+### 编排流程（Plan-and-Execute）
 
 ```
-for step = 0 to 4 (MAX_STEPS=5):
-    1. callLLM(messages) — 真流式调用（stream:true），带 tools schema
-       · 正文/思考实时通过 onEvent("delta"/"reasoning") 推给前端
-       · tool_calls 的 arguments 按 index 增量拼接到流结束
-    2. 如果无 tool_calls → 最终回答已流式吐完 → return
-    3. 如果有 tool_calls:
-       a. assistant 消息（含 tool_calls）加入 messages
-       b. 逐个执行工具：
-          - onEvent("tool_call") → 前端显示执行中
-          - tool.execute(args)
-          - 成功 → onEvent("tool_result")，结果作为 tool 消息加入
-          - 失败 → onEvent("tool_error")，错误信息作为 tool 消息加入
-       c. 回到步骤 1（模型拿到工具结果后再决策）
-    4. 超过 5 轮 → 返回兜底提示
+1. isSimpleQuery() 关键词启发式判定：闲聊/打招呼/追问 → directReply() 直接回答
+2. generatePlan(modelId, userContent, history)：
+   · 非流式 LLM 调用（stream:false，不传 tools），强制输出 JSON 计划
+   · parsePlan 鲁棒解析：剥 ```json 代码块 → 截最外层大括号 → 去尾逗号 → 结构校验
+   · 步骤数截断 ≤ MAX_PLAN_STEPS(8)；ask_user 步骤强制 tool=null
+   · 规划失败 / 返回空 → 降级 directReply，不渲染假进度面板
+3. runPlanSteps() 逐步执行：
+   for each step:
+     a. step_start 事件
+     b. executeOneStep()：步内小型 ReAct
+        for round in 0..STEP_MAX_ROUNDS(4):
+          callLLM(messages, stream:true)
+          · 无 tool_calls → 该步成功，结果写回 conversation + step_done
+          · 有 tool_calls → executeToolCalls() 执行并回填，继续下一轮
+          · 工具全失败 / 模型报错 → 本轮尝试失败
+        失败自动重试 ≤ STEP_RETRY_LIMIT(2) 次（重试前 splice 回滚上下文）
+     c. ask_user 步骤 → status=paused、result=问句、plan_paused 事件 → 立即返回
+4. finishPlan()：SUMMARY_INSTRUCTION 综合各步结果流式汇总 → plan_done 事件
+
+续跑入口（复用同一套步骤推进器）：
+· resumeLoop()          补问续跑：用户回答填回 paused 步骤，从断点之后继续
+· resumeStoppedLoop()   断点恢复：残留 running 步骤重置 pending 重跑，
+                        已完成/失败步骤以 recap 摘要回灌上下文避免失忆
 ```
 
 ### SSE 事件类型
 
 | 事件 | 触发时机 | 前端展示 |
 |------|----------|----------|
+| `delta` | 模型文本逐块输出 | 打字机效果渲染回复 |
+| `reasoning` | 模型思考过程逐块输出 | 思考过程块（默认收起，可点击展开） |
 | `tool_call` | 模型决定调工具 | 工具行出现，spinner 转动 |
 | `tool_result` | 工具执行成功 | spinner 变绿勾，可展开看结果 |
 | `tool_error` | 工具执行抛异常 | spinner 变红叉，显示错误 |
-| `delta` | 模型最终文本逐块输出 | 打字机效果渲染回复 |
-| `reasoning` | 模型思考过程（DeepSeek） | 思考过程块（默认展开，可点击收起） |
+| `plan_created` | 计划生成 / 断点续跑重画 | 进度面板出现（继承快照状态） |
+| `step_start` / `step_done` / `step_failed` | 某步开始/完成/失败跳过 | 步骤行状态流转 |
+| `plan_paused` | 补问步骤暂停 | 面板标「等你输入」，展示问句 |
+| `plan_done` | 全部步骤完成汇总 | 进度面板标记完成 |
+| `stopped` | 用户停止 / 刷新断连确认 | 半截内容保留 + 停止态 |
+| `error` | 模型报错（非取消） | 显示错误消息，计划标 failed |
 | `done` | 流结束（携带 sessionId / title / usage） | 落定会话、显示「本轮 N tokens」 |
 
 ### 安全边界
 
 | 限制 | 值 | 目的 |
 |------|-----|------|
-| MAX_STEPS | 5 | 防模型陷入工具调用死循环 |
+| MAX_PLAN_STEPS | 8 | 规划过长导致执行不收敛、耗时失控 |
+| STEP_MAX_ROUNDS | 4 | 单步内工具循环上限，防反复调工具不收敛 |
+| STEP_RETRY_LIMIT | 2 | 单步失败重试上限（正试 1 次 + 重试 2 次） |
 | 搜索超时 | 15s | 单次搜索不能无限等 |
 | 搜索结果数 | 6 条 | 控制 token 消耗 |
 | 单条 content | 500 字 | 防止单条结果撑爆上下文 |
-| 总请求超时 | 60s | 沿用接口层超时保护 |
+| 总请求超时 | 60s | 前端空闲超时保护（60s 无新数据 abort） |
+| 上下文窗口 | 最近 20 轮 | history 滑动窗口；running/stopped/cancelled 不进历史 |
 
 ---
 

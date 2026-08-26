@@ -4,7 +4,27 @@
 >
 > 每个条目固定五段：**日期**（踩坑时点）→ **现象**（怎么发现的）→ **根因**（为什么）→ **解决方案**（怎么做）→ **一句话**（记忆钩子）。
 >
-> 最后整理时间：2026-08-25。部分条目标「约」的，是整理时按所在项目阶段推算，非精确到天。
+> 最后整理时间：2026-08-26。部分条目标「约」的，是整理时按所在项目阶段推算，非精确到天。
+
+---
+
+### 6. Node 原生模块加载即崩（SIGSEGV）：NAPI 版本 + 沙箱限制
+
+- **日期**：2026-08-26
+- **现象**：better-sqlite3 编译明明成功了（build/Release 下有 .node 文件），`require` 阶段直接段错误退出（退出码 139，SIGSEGV），一行 JS 都没执行到。
+- **根因**：两个独立原因叠加。① **NAPI 版本不足**：better-sqlite3 v13 的 binding.gyp 声明 `NAPI_VERSION=10`，而 Node 20.20.2 / 22.13.0 只带 NAPI 9，ABI 不匹配导致加载即崩；② **沙箱限制**：Coze 桌面端 bash 运行在 macOS Seatbelt 沙箱中（环境变量 `COZE_SANDBOX=seatbelt`，进程级强制，`env -i`/`unset` 都绕不过），禁止加载原生 .node 模块。用 nvm 的 Node v22.23.2（NAPI 10）验证立即恢复正常。
+- **解决方案**：统一 Node 版本到 v22.23.2（`.nvmrc` 固化），在该版本下从源码编译 better-sqlite3；涉及原生模块的验证与测试一律在本机终端跑，不在 Coze 沙箱里做。选 Node 版本前先查 `process.versions.napi` 与依赖的 NAPI 要求是否匹配。
+- **一句话**：原生模块崩溃先查 NAPI 版本匹配和运行环境沙箱，「编译成功」不等于「能加载」。
+
+---
+
+### 5. pnpm rebuild「假成功」：有 prebuild 时 node-gyp 跳过编译 + 项目路径含空格
+
+- **日期**：2026-08-26
+- **现象**：`pnpm rebuild better-sqlite3` 退出码 0、无任何输出，看似成功，但 build/Release 目录里只有 obj.target 和 stamp、没有 .node 产物；改用 node-gyp 直接编译后，clang++ 报 `no such file or directory: 'OS/node_modules/...'`，路径从空格处被截断。
+- **根因**：① better-sqlite3 v13 的 binding.gyp 检测到 prebuilds 目录存在预编译产物时，会把 target 设为 `type: none` **跳过编译**——rebuild 空转一圈假装成功；② 项目目录名含空格（`Nexus OS`）时，Makefile 把空格当参数分隔符，编译命令在空格处截断必然失败。
+- **解决方案**：清掉 build 缓存后强制源码编译：在 node_modules/better-sqlite3 目录下执行 `npx node-gyp rebuild --release -- -Dforce_build=1`；同时把项目目录重命名为无空格的 `nexus-os`（编辑器里重新打开新路径即可）。
+- **一句话**：带 prebuild 的包 rebuild 可能根本没编译（要 `-Dforce_build=1`）；项目路径别带空格，原生工具链会把它撕碎。
 
 ---
 

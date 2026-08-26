@@ -21,6 +21,8 @@ Nexus OS/
 ├── README.md               # 项目概览（面向人类，简洁版 + 链接到 docs/）
 ├── components.json         # shadcn/ui 组件库配置（主题风格、CSS 变量映射等）
 ├── next.config.ts          # Next.js 框架配置
+├── vitest.config.mts       # Vitest 4 单元测试配置（.mts 扩展避免 ESM/CommonJS 警告，fileURLToPath 替代 __dirname）
+├── .nvmrc                  # 固定 Node 版本（22.23.2），dev server 与测试统一，进目录 nvm use 自动切换
 ├── tsconfig.json           # TypeScript 编译器配置（路径别名 @/ → src/）
 ├── eslint.config.mjs       # ESLint 9 扁平配置（集成 eslint-config-next）
 ├── postcss.config.mjs      # PostCSS 配置（Tailwind CSS 4 插件）
@@ -41,13 +43,14 @@ src/
 │   │
 │   ├── tools/page.tsx      # 工具中心页面：客户端交互，59 个工具，搜索 + 分类筛选 + 三档响应式（宽屏内联/窄屏下拉/手机折叠）
 │   ├── files/page.tsx      # 文件管理页面（占位，待开发）
-│   ├── agent/page.tsx      # AI Agent 页面：真实对话（多模型+流式输出+深度思考+图片看图+语音输入+工具调用折叠卡片），左侧会话栏对齐知识页
+│   ├── agent/page.tsx      # AI Agent 页面：真实对话（多模型+流式输出+深度思考+图片看图+语音输入+工具调用折叠卡片+任务计划进度面板+停止/断点恢复），左侧会话栏对齐知识页
 │   ├── knowledge/page.tsx  # 知识库页面：7 个 section（知识流/我的文章/收件箱/回收站/订阅源/自测/回顾），纯前端 mock 全交互
 │   ├── automation/page.tsx # 自动化页面（占位，待开发）
 │   ├── settings/page.tsx   # 设置页面：AI 模型配置、工具目录等（框架已搭建，功能待开发）
 │   └── api/                # API 路由（Next.js Route Handlers）
-│       ├── chat/route.ts   # AI 对话：POST 接消息→落库→组装上下文→流式调模型→落库回复
-│       └── sessions/       # 会话管理：列表/新建、历史/重命名/删除
+│       ├── chat/route.ts   # AI 对话：POST 接消息→落库→归档残留任务→组装上下文→走 Loop（规划执行/续跑/断点恢复三路）→SSE 流式输出+增量落盘
+│       ├── plan/route.ts   # 放弃中断计划：POST 把 stopped 计划翻 cancelled + 整轮配对归档
+│       └── sessions/       # 会话管理：列表/新建、历史/重命名/删除（历史接口顺带返回可恢复计划）
 │
 ├── components/             # React 组件
 │   ├── ui/                 # shadcn/ui 基础组件（代码直接复制到项目中，完全可控）
@@ -77,10 +80,14 @@ src/
 └── lib/
     ├── utils.ts            # 工具函数：cn() — 合并 clsx + tailwind-merge 的类名处理
     ├── models.ts           # 模型注册表：模型元信息（id/供应商/能力），前端选择器与后端白名单共用
-    ├── db.ts               # SQLite 访问：getDb() 连接，sessions/messages 表操作；messages 含 tool_calls/reasoning/usage 字段（工具调用、思考过程、token 用量持久化），内置幂等迁移自动补列
-    ├── agent/              # Agent Loop 核心（工具调用编排）
-    │   ├── loop.ts         # Agent 循环：流式调模型 → 拼接 tool_calls → 执行工具 → 回传再决策
-    │   └── tools.ts        # 工具注册表：天气 get_weather / 搜索 web_search + buildToolsSchema/getTool
+    ├── db.ts               # SQLite 访问：getDb() 连接 + initSchema()（生产/测试共用）+ createInMemoryDb()（内存测试库）；sessions/messages/task_plans 表，messages 含 tool_calls/reasoning/usage/status 字段，内置幂等迁移自动补列
+    ├── agent/              # Agent 编排核心（规划-执行 + 工具调用）
+    │   ├── loop.ts         # Agent Loop：规划→逐步执行(每步小型 ReAct+失败重试)→汇总；callLLM 真流式；agentLoop/resumeLoop(补问续跑)/resumeStoppedLoop(断点恢复) 三入口
+    │   ├── planner.ts      # 任务规划器：LLM 拆解步骤清单（≤8步），纯 JSON 输出 + 鲁棒解析（剥代码块/截大括号/去尾逗号）
+    │   ├── plan.ts         # Plan/PlanStep/StepStatus 类型层（无依赖纯类型，避免循环 import）
+    │   ├── plan-store.ts   # 计划持久化：task_plans 表六态状态机（running/done/failed/paused/stopped/cancelled）+ 整轮配对归档 archiveStoppedTurn
+    │   ├── tools.ts        # 工具注册表：天气 get_weather / 搜索 web_search + buildToolsSchema/getTool
+    │   └── archive-stopped-turn.test.ts  # Vitest 单测：归档配对、停止→续跑→又停止链、幂等、计划状态流转（7 用例）
     ├── search/             # 联网搜索抽象层
     │   ├── types.ts        # SearchProvider 接口 + SearchResult 类型
     │   ├── tavily.ts       # Tavily 实现（15s 超时、6 条结果、正文截断）
@@ -101,6 +108,7 @@ docs/
 ├── interfaces.md           # 接口设计：RESTful API、WebSocket、插件 SDK 接口
 ├── structure.md            # 项目目录结构说明（本文件）
 ├── conventions.md          # 开发规范：配色、组件样式、命名约定等
+├── pitfalls.md             # 踩坑日志：Agent/大模型应用开发踩过的坑（现象→根因→解决→一句话）
 ├── tools.md                # 工具系统：架构 / 天气 / 搜索抽象层 / Loop 机制 / SSE 事件 / 前端展示 / 加新工具步骤
 └── changelog.md            # 开发日志：按日期记录的变更流水账
 ```
