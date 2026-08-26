@@ -2,6 +2,8 @@
 // 每个工具由这两部分组成。模型只看 schema 决定调什么、传什么参数；
 // execute 在服务端运行，模型看不到代码，只能拿到返回结果。
 
+import type Database from "better-sqlite3";
+
 export interface ToolDefinition {
   /** 工具名（模型用这个名字发起调用） */
   name: string;
@@ -172,10 +174,187 @@ const webSearchTool: ToolDefinition = {
   },
 };
 
+// ─── 知识库检索工具（K3：让 Agent 能查主人自己的知识库）───────
+// 与天气/联网搜索的「向外问别人」不同，这两个工具是「向内查自己家」。
+//
+// 分层设计（可测试性）：业务逻辑抽成 runXxx(conn, args) 内核函数，
+// 数据库连接由外部注入；ToolDefinition.execute 只是薄壳——解析参数、
+// 取连接、调内核。这样单元测试可以用 :memory: 内存库直测内核，
+// 不碰真实的 data/nexus.db。
+//
+// 语义红线：只有 kept（已保留）的内容对 Agent 可见。
+// inbox 还没拍板、trashed 在回收站、discarded 从未保留过——
+// 主人没决定留下的东西，不该被 AI 当作事实来引用。
+
+const KIND_LABEL: Record<string, string> = {
+  note: "手写笔记",
+  captured: "采集条目",
+};
+
+const STATUS_LABEL: Record<string, string> = {
+  inbox: "待拍板",
+  trashed: "回收站",
+  discarded: "已放弃",
+};
+
+/** 毫秒时间戳 → "2026-08-26"，给模型看人话日期而不是一串数字 */
+function fmtDate(ts: number): string {
+  return new Date(ts).toISOString().slice(0, 10);
+}
+
+interface KnowledgeSearchArgs {
+  q?: unknown;
+  kind?: unknown;
+  limit?: unknown;
+}
+
+// 导出是为了让单元测试能用内存库直测业务逻辑（见文件头分层设计说明）
+export async function runKnowledgeSearch(
+  conn: Database.Database,
+  args: KnowledgeSearchArgs,
+) {
+  const q = String(args.q ?? "").trim();
+  if (!q) return { error: "请提供搜索关键词" };
+
+  // kind 收窄是可选项；模型传了别的值就按「搜全部」处理——
+  // 宽容非法输入，别因为一个小参数把整个调用炸掉
+  const kindArg = String(args.kind ?? "").trim();
+  const kind =
+    kindArg === "note" || kindArg === "captured" ? kindArg : undefined;
+
+  const limitRaw = Number(args.limit);
+  const limit =
+    Number.isFinite(limitRaw) && limitRaw > 0
+      ? Math.min(Math.floor(limitRaw), 10)
+      : 5;
+
+  // 动态 import：跟 webSearchTool 一个道理，避免 tools.ts 被别的模块
+  // 引用时就在加载期拉起数据库初始化，用到才加载
+  const { listItems } = await import("@/lib/knowledge/store");
+  const { items, total } = listItems(conn, {
+    q,
+    status: "kept", // 语义红线：只搜已保留内容
+    kind,
+    limit,
+  });
+
+  return {
+    query: q,
+    total,
+    returned: items.length,
+    results: items.map((it) => ({
+      id: it.id,
+      title: it.title || "(无标题)",
+      kind: KIND_LABEL[it.kind] ?? it.kind,
+      tags: it.tags,
+      savedAt: fmtDate(it.created_at),
+      // 摘要只给前 200 字：搜索阶段帮模型判断「哪条相关」就够，
+      // 全文留给 read_knowledge 精读——防止一次多结果的搜索撑爆上下文窗口
+      excerpt:
+        it.content.replace(/\s+/g, " ").trim().slice(0, 200) +
+        (it.content.length > 200 ? "…" : ""),
+    })),
+  };
+}
+
+interface KnowledgeReadArgs {
+  id?: unknown;
+}
+
+export async function runKnowledgeRead(
+  conn: Database.Database,
+  args: KnowledgeReadArgs,
+) {
+  const id = String(args.id ?? "").trim();
+  if (!id) return { error: "请提供条目 id（先用 search_knowledge 搜索获得）" };
+
+  const { getItem } = await import("@/lib/knowledge/store");
+  const item = getItem(conn, id);
+
+  if (!item) return { error: `知识库中不存在 id 为 ${id} 的条目` };
+
+  // 非 kept 不给内容，但要说明原因——模型能向用户解释，
+  // 而不是抛一个莫名其妙的错误
+  if (item.status !== "kept") {
+    return {
+      error: `该条目当前状态为「${STATUS_LABEL[item.status]}」，不在可查阅范围内`,
+    };
+  }
+
+  return {
+    id: item.id,
+    title: item.title || "(无标题)",
+    kind: KIND_LABEL[item.kind] ?? item.kind,
+    tags: item.tags,
+    source: item.source,
+    sourceUrl: item.source_url,
+    savedAt: fmtDate(item.created_at),
+    updatedAt: fmtDate(item.updated_at),
+    content: item.content,
+  };
+}
+
+const knowledgeSearchTool: ToolDefinition = {
+  name: "search_knowledge",
+  description:
+    "搜索主人的个人知识库（已保存的文章、笔记和采集条目）。" +
+    "当用户提到「我收藏过的」「我记的笔记」「我之前存的」，或问题可能与主人收集过的资料相关时先来这里找。" +
+    "返回摘要列表；需要某条的完整内容时再用 read_knowledge 按 id 读取。",
+  parameters: {
+    type: "object",
+    properties: {
+      q: {
+        type: "string",
+        description: "搜索关键词，会在标题和正文里做子串匹配",
+      },
+      kind: {
+        type: "string",
+        enum: ["note", "captured"],
+        description:
+          "可选。只搜手写笔记(note)或只搜采集的文章(captured)，不传则全部搜",
+      },
+      limit: {
+        type: "number",
+        description: "可选。最多返回几条，默认 5，最大 10",
+      },
+    },
+    required: ["q"],
+  },
+  async execute(args) {
+    const { getDb } = await import("@/lib/db");
+    return runKnowledgeSearch(getDb(), args as KnowledgeSearchArgs);
+  },
+};
+
+const knowledgeReadTool: ToolDefinition = {
+  name: "read_knowledge",
+  description:
+    "读取知识库中单条内容的完整正文。必须先通过 search_knowledge 拿到 id 再调用。",
+  parameters: {
+    type: "object",
+    properties: {
+      id: {
+        type: "string",
+        description: "search_knowledge 结果里返回的条目 id",
+      },
+    },
+    required: ["id"],
+  },
+  async execute(args) {
+    const { getDb } = await import("@/lib/db");
+    return runKnowledgeRead(getDb(), args as KnowledgeReadArgs);
+  },
+};
+
 // ─── 工具注册表 ───────────────────────────────────────────────
 // 后续加工具只需要在这里加一行。Loop 代码完全不用改。
 
-export const tools: ToolDefinition[] = [weatherTool, webSearchTool];
+export const tools: ToolDefinition[] = [
+  weatherTool,
+  webSearchTool,
+  knowledgeSearchTool,
+  knowledgeReadTool,
+];
 
 export function getTool(name: string): ToolDefinition | undefined {
   return tools.find((t) => t.name === name);
