@@ -50,6 +50,7 @@ src/
 │   └── api/                # API 路由（Next.js Route Handlers）
 │       ├── chat/route.ts   # AI 对话：POST 接消息→落库→归档残留任务→组装上下文→走 Loop（规划执行/续跑/断点恢复三路）→SSE 流式输出+增量落盘
 │       ├── plan/route.ts   # 放弃中断计划：POST 把 stopped 计划翻 cancelled + 整轮配对归档
+│       ├── providers/route.ts # 供应商 Key 配置状态：GET 返回 {deepseek:true, openrouter:false} 布尔表（Key 不出服务端），驱动前端模型置灰标注与默认模型动态校正
 │       └── sessions/       # 会话管理：列表/新建、历史/重命名/删除（历史接口顺带返回可恢复计划）
 │
 ├── components/             # React 组件
