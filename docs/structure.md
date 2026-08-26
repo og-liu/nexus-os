@@ -81,7 +81,10 @@ src/
 └── lib/
     ├── utils.ts            # 工具函数：cn() — 合并 clsx + tailwind-merge 的类名处理
     ├── models.ts           # 模型注册表：模型元信息（id/供应商/能力），前端选择器与后端白名单共用
-    ├── db.ts               # SQLite 访问：getDb() 连接 + initSchema()（生产/测试共用）+ createInMemoryDb()（内存测试库）；sessions/messages/task_plans 表，messages 含 tool_calls/reasoning/usage/status 字段，内置幂等迁移自动补列
+    ├── db.ts               # SQLite 访问：getDb() 连接 + initSchema()（生产/测试共用）+ createInMemoryDb()（内存测试库）；sessions/messages/task_plans/knowledge_items/knowledge_item_tags 表，messages 含 tool_calls/reasoning/usage/status 字段，内置幂等迁移自动补列
+    ├── knowledge/          # 知识库数据层（K0 数据地基）
+    │   ├── store.ts        # 知识条目 CRUD：createItem/getItem/listItems(状态+标签+关键词过滤)/updateItem/setTags/deleteItem/countsByStatus；依赖注入风格（首参为连接，测试喂内存库）；状态白名单校验；LIKE 检索通配符转义；rowid 第二排序键
+    │   └── store.test.ts   # Vitest 单测：创建回读/过滤组合/LIKE 转义/分页/状态流转/级联删除/计数（13 用例）
     ├── agent/              # Agent 编排核心（规划-执行 + 工具调用）
     │   ├── loop.ts         # Agent Loop：规划→逐步执行(每步小型 ReAct+失败重试)→汇总；callLLM 真流式；agentLoop/resumeLoop(补问续跑)/resumeStoppedLoop(断点恢复) 三入口
     │   ├── planner.ts      # 任务规划器：LLM 拆解步骤清单（≤8步），纯 JSON 输出 + 鲁棒解析（剥代码块/截大括号/去尾逗号）
@@ -121,7 +124,7 @@ docs/
 |------|------|------|
 | 首页 Dashboard | `/` | ✅ 已完成（问候/时钟/农历/年度进度、每日一句、KPI、快捷工具、最近活动、自动化任务、最新文章、AI Agent、音乐播放器、便签、待办） |
 | AI Agent | `/agent` | ✅ 真实对话已实现（多模型切换、流式输出、深度思考、图片看图、SQLite 会话持久化、工具调用——天气/联网搜索、工具调用/思考过程/token 用量落库还原；意图理解/任务规划待开发） |
-| 知识库 | `/knowledge` | 🟡 UI mock 已完成（知识流/我的文章/收件箱/回收站/订阅源/自测闪卡选择题/回顾统计，全前端交互；无真实存储/AI 加工/检索） |
+| 知识库 | `/knowledge` | 🟡 K0 数据地基已落地（knowledge_items 四态生命周期 + 标签关联表 + store CRUD 层 13 用例单测；UI 仍为 mock，K1 采集入口待做） |
 | 工具中心 | `/tools` | ✅ 页面已完成（59 个工具卡片、搜索 + 分类筛选、三档响应式；工具均为 mock 无实际执行） |
 | 文件管理 | `/files` | 🔲 占位 |
 | 自动化 | `/automation` | 🔲 占位 |

@@ -4,6 +4,18 @@
 
 ---
 
+## 2026-08-26(午后·三) — Knowledge 开工：K0 数据地基（建表 + CRUD 数据层）
+
+### 背景
+Knowledge 模块（产品主阵地）正式开工。开工前两项数据地基决策已拍板：**内容格式 = Markdown 存 TEXT 列**（纯文本单一事实源，渲染归前端）；**组织方式 = 标签起步、双链后置**。推进路线沉淀在云盘《NexusOS完整度盘点与推进路线_20260826》：K0 地基 → K1 采集入口 → K2 知识流页面 → K3 Agent 衔接 → K4 向量检索 → K5 自动化采集。
+
+### 新增
+- **schema**（db.ts）：`knowledge_items` 主表（title/content/source/source_url/status/时间戳）——status 为生命周期四态 inbox(待拍板)→kept(保留)→trashed(回收站)，discarded(拍板放弃)，对应产品「待你拍板→知识流」采集流；`knowledge_item_tags` 标签多对多关联表（复合主键防重 + 外键级联清理）——用关联表而非 JSON 列，因为标签筛选是高频查询，索引精确匹配优于全表扫
+- **CRUD 数据层**（`src/lib/knowledge/store.ts`）：createItem / getItem / listItems / updateItem / setTags / deleteItem / countsByStatus。依赖注入风格（首参连接，测试喂 :memory: 库）；状态白名单与标签清洗在 store 层把住数据边界；listItems 支持 status/tag/q 组合过滤（AND 语义）+ 分页 + total，q 用 LIKE 子串检索并转义 `% _ \` 通配符按字面匹配；排序带 rowid 第二排序键规避同毫秒不稳定（pitfalls #7 教训前置）；setTags 全量替换语义配事务包裹
+- **单测 13 例**（store.test.ts）：创建回读/标签去重/空标题兜底/非法状态拒绝/三类过滤/组合条件/通配符字面匹配/分页 total/状态流转/setTags 多退少补/删除级联/计数——全套 25/25 通过
+
+---
+
 ## 2026-08-26(午后·二) — 多步任务重复输出治理：素材与交付分离 + 流式阶段标记
 
 ### 问题
