@@ -23,6 +23,21 @@ const KNOWLEDGE_STATUSES: readonly KnowledgeStatus[] = [
   "trashed",
 ];
 
+/**
+ * 条目出身（K3 前置决策：笔记与采集共用一张表，用身份字段区分而非分表）。
+ * captured = 外部采集（走 inbox 拍板流）；note = 用户手写（创建即 kept）。
+ * 共表让搜索/标签/回收站/AI 检索只维护一套设施；查询侧必须带 kind 防串味。
+ */
+export type KnowledgeKind = "captured" | "note";
+
+const KNOWLEDGE_KINDS: readonly KnowledgeKind[] = ["captured", "note"];
+
+function assertKind(kind: string): asserts kind is KnowledgeKind {
+  if (!KNOWLEDGE_KINDS.includes(kind as KnowledgeKind)) {
+    throw new Error(`非法的条目类型：${kind}（允许：${KNOWLEDGE_KINDS.join(" / ")}）`);
+  }
+}
+
 /** 面向上层的知识条目视图：SQL 行 + 组装好的标签数组 */
 export interface KnowledgeItemRow {
   id: string;
@@ -32,6 +47,9 @@ export interface KnowledgeItemRow {
   source: string | null;
   source_url: string | null;
   status: KnowledgeStatus;
+  kind: KnowledgeKind;
+  /** 进入回收站的时间（仅 trashed 有值），7 天懒清理依据 */
+  deleted_at: number | null;
   tags: string[];
   created_at: number;
   updated_at: number;
@@ -45,6 +63,8 @@ interface ItemSqlRow {
   source: string | null;
   source_url: string | null;
   status: string;
+  kind: string;
+  deleted_at: number | null;
   created_at: number;
   updated_at: number;
 }
@@ -92,6 +112,7 @@ function attachTags(conn: Database.Database, rows: ItemSqlRow[]): KnowledgeItemR
   return rows.map((r) => ({
     ...r,
     status: r.status as KnowledgeStatus,
+    kind: r.kind as KnowledgeKind,
     tags: tagsByItem.get(r.id) ?? [],
   }));
 }
@@ -102,6 +123,9 @@ export interface CreateItemInput {
   source?: string | null;
   source_url?: string | null;
   status?: KnowledgeStatus;
+  /** 出身：captured（默认，采集流）/ note（手写文章）。默认值放 store，
+   *  route 层显式传参时以 route 为准（如笔记创建传 kind=note + status=kept） */
+  kind?: KnowledgeKind;
   tags?: string[];
 }
 
@@ -111,16 +135,18 @@ export function createItem(
 ): KnowledgeItemRow {
   const status = input.status ?? "inbox"; // 采集默认进「待拍板」，与产品采集流的默认行为对齐
   assertStatus(status);
+  const kind = input.kind ?? "captured"; // 不传出身按采集处理，兼容既有调用方
+  assertKind(kind);
 
   const now = Date.now();
   const id = randomUUID();
 
   conn
     .prepare(
-      `INSERT INTO knowledge_items (id, title, content, source, source_url, status, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO knowledge_items (id, title, content, source, source_url, status, kind, deleted_at, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, NULL, ?, ?)`,
     )
-    .run(id, input.title?.trim() ?? "", input.content ?? "", input.source ?? null, input.source_url ?? null, status, now, now);
+    .run(id, input.title?.trim() ?? "", input.content ?? "", input.source ?? null, input.source_url ?? null, status, kind, now, now);
 
   const tags = normalizeTags(input.tags ?? []);
   if (tags.length > 0) {
@@ -149,6 +175,11 @@ export function getItem(
 
 export interface ListOptions {
   status?: KnowledgeStatus;
+  /** 排除某状态：HTTP 列表默认排除 trashed（回收站是独立视图，不混进常规列表），
+   *  比「查出来再过滤」正确——分页计数不会错位 */
+  notStatus?: KnowledgeStatus;
+  /** 出身过滤：知识流只看 captured、我的文章只看 note，由调用方显式指定防串味 */
+  kind?: KnowledgeKind;
   /** 标签精确过滤（单标签起步；多标签 AND/OR 组合留给需要时再加） */
   tag?: string;
   /** 关键词：LIKE 子串匹配 title / content。中文场景够用的最低成本检索，
@@ -172,6 +203,16 @@ export function listItems(
     assertStatus(opts.status);
     conds.push("status = ?");
     params.push(opts.status);
+  }
+  if (opts.notStatus) {
+    assertStatus(opts.notStatus);
+    conds.push("status != ?");
+    params.push(opts.notStatus);
+  }
+  if (opts.kind) {
+    assertKind(opts.kind);
+    conds.push("kind = ?");
+    params.push(opts.kind);
   }
   if (opts.q) {
     conds.push("(title LIKE ? ESCAPE '\\' OR content LIKE ? ESCAPE '\\')");
@@ -214,7 +255,18 @@ export function updateItem(
   id: string,
   patch: UpdateItemPatch,
 ): KnowledgeItemRow | null {
-  if (patch.status !== undefined) assertStatus(patch.status);
+  if (patch.status !== undefined) {
+    assertStatus(patch.status);
+    // 状态机保护：进出回收站必须走 trashItem / restoreItem（它们同步维护
+    // deleted_at 时间戳），直接改 status 会漏掉时间戳，7 天清理就失去依据
+    if (patch.status === "trashed") {
+      throw new Error('请使用 trashItem 进入回收站，不允许直接把 status 改为 "trashed"');
+    }
+    const current = getItem(conn, id);
+    if (current?.status === "trashed") {
+      throw new Error("回收站内的条目请先 restoreItem 捞回，再修改状态");
+    }
+  }
 
   const sets: string[] = [];
   const params: Array<string | number> = [];
@@ -331,6 +383,55 @@ export function deleteItem(conn: Database.Database, id: string): boolean {
     .prepare(`DELETE FROM knowledge_items WHERE id = ?`)
     .run(id);
   return info.changes > 0;
+}
+
+// ---------- 回收站（K3 前置：软删 → 捞回 → 7 天懒清理） ----------
+// 与 discarded 的语义分野：discarded 是「从未保留过」（拍板放弃），trashed 是
+// 「曾经保留过再删」。回收站只收后者——用户亲手留下的东西才值得给反悔期。
+
+/** 软删除：kept → trashed 并记录 deleted_at。只有保留过的条目能进回收站，
+ *  inbox/discarded 条目没有「反悔」概念（前者还没拍板、后者已经拍板放弃） */
+export function trashItem(conn: Database.Database, id: string): KnowledgeItemRow | null {
+  const current = getItem(conn, id);
+  if (!current || current.status !== "kept") return null;
+  const now = Date.now();
+  conn
+    .prepare(
+      `UPDATE knowledge_items SET status = 'trashed', deleted_at = ?, updated_at = ? WHERE id = ?`,
+    )
+    .run(now, now, id);
+  return getItem(conn, id);
+}
+
+/** 捞回：trashed → kept，清除 deleted_at。条目回到它被删前的位置（知识流或我的文章） */
+export function restoreItem(conn: Database.Database, id: string): KnowledgeItemRow | null {
+  const current = getItem(conn, id);
+  if (!current || current.status !== "trashed") return null;
+  conn
+    .prepare(
+      `UPDATE knowledge_items SET status = 'kept', deleted_at = NULL, updated_at = ? WHERE id = ?`,
+    )
+    .run(Date.now(), id);
+  return getItem(conn, id);
+}
+
+/**
+ * 懒清理：删掉进回收站超过 maxAgeMs 的条目。
+ * 为什么不做定时任务：单机 SQLite 没有后台进程，而「列表请求顺手清一次」
+ * 效果完全等价——过期条目反正不会展示给用户，晚几毫秒物理消失无感知，
+ * 却省掉一整套 cron 基础设施。返回本次清理的条数（供日志/测试断言）。
+ */
+export function purgeExpiredTrash(
+  conn: Database.Database,
+  maxAgeMs: number = 7 * 24 * 3_600_000,
+): number {
+  const cutoff = Date.now() - maxAgeMs;
+  const info = conn
+    .prepare(
+      `DELETE FROM knowledge_items WHERE status = 'trashed' AND deleted_at IS NOT NULL AND deleted_at < ?`,
+    )
+    .run(cutoff);
+  return info.changes;
 }
 
 /** 各状态计数：给前端「待拍板红点」和导航角标一次性取数用 */

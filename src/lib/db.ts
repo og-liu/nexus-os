@@ -105,6 +105,13 @@ export function initSchema(conn: Database.Database): void {
     --   kept      —— 已保留，进入知识流（产品的主内容面）
     --   discarded —— 拍板时放弃（左滑），保留记录但不再出现在默认视图
     --   trashed   —— kept 之后被删除，进回收站（可恢复，与 discarded 的区别是「曾经保留过」）
+    --
+    -- kind 是条目的出身（K3 前置设计决策：共用一张表 + 身份字段，而非分表）：
+    --   captured —— 从外部采集来的内容（手动粘贴 / 未来 RSS 订阅源），走 inbox 拍板流
+    --   note     —— 用户自己写的文章，创建即保留（没有拍板概念），不出现在知识流列表
+    -- 共表的收益：搜索/标签/回收站/AI 检索只维护一套设施，Agent 工具将来只查一处；
+    -- 代价是查询必须带 kind 条件防串味，由 route 层固定传入。
+    -- deleted_at：进入回收站的时间戳（仅 trashed 状态有值），7 天懒清理的依据
     CREATE TABLE IF NOT EXISTS knowledge_items (
       id TEXT PRIMARY KEY,
       title TEXT NOT NULL DEFAULT '',
@@ -112,6 +119,8 @@ export function initSchema(conn: Database.Database): void {
       source TEXT,
       source_url TEXT,
       status TEXT NOT NULL DEFAULT 'inbox',
+      kind TEXT NOT NULL DEFAULT 'captured',
+      deleted_at INTEGER,
       created_at INTEGER NOT NULL,
       updated_at INTEGER NOT NULL
     );
@@ -148,6 +157,21 @@ export function initSchema(conn: Database.Database): void {
   }
   if (!cols.some((c) => c.name === "status")) {
     conn.exec(`ALTER TABLE messages ADD COLUMN status TEXT`);
+  }
+
+  // 迁移：knowledge_items 补 kind（条目出身）与 deleted_at（回收站时间戳）两列
+  // 老库已有数据全部默认 kind='captured'——它们本来就是采集来的，语义天然吻合；
+  // 新装的库走上面 CREATE TABLE 已带全字段，这里的 ALTER 检测是幂等的，重复执行无副作用
+  const itemCols = conn.prepare(`PRAGMA table_info(knowledge_items)`).all() as Array<{
+    name: string;
+  }>;
+  if (!itemCols.some((c) => c.name === "kind")) {
+    conn.exec(
+      `ALTER TABLE knowledge_items ADD COLUMN kind TEXT NOT NULL DEFAULT 'captured'`,
+    );
+  }
+  if (!itemCols.some((c) => c.name === "deleted_at")) {
+    conn.exec(`ALTER TABLE knowledge_items ADD COLUMN deleted_at INTEGER`);
   }
 }
 

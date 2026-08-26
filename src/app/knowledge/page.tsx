@@ -42,12 +42,11 @@ interface FeedItem {
 }
 
 interface Note {
-  id: number;
+  id: string; // K3 前置起接真库，与 feed 同一张表同一个 UUID 体系
   title: string;
   content: string;
   tags: string[];
-  updatedAt: string;
-  inFeed: boolean;
+  updatedAt: string; // 渲染时由 formatRelTime 现算的相对时间文案
 }
 
 interface InboxItem {
@@ -58,12 +57,12 @@ interface InboxItem {
 }
 
 interface TrashItem {
-  id: number;
+  id: string;
   title: string;
   source: string;
   summary: string;
-  origin: "采集" | "文章";
-  daysLeft: number;
+  origin: "采集" | "文章"; // 由 kind 映射的出身标签
+  daysLeft: number; // 由 deleted_at 现算：距彻底删除还剩几天
 }
 
 interface Source {
@@ -74,9 +73,8 @@ interface Source {
 }
 
 type Section = "feed" | "notes" | "inbox" | "trash" | "sources" | "quiz" | "review";
-// feed 条目的 id 是 UUID（string），note 仍是本地数字 id——两种视图模型并存，
-// 等 notes 接真库后统一成 string
-type DetailRef = { type: "feed"; id: string } | { type: "note"; id: number } | null;
+// K3 前置起 feed 与 note 都是真库 UUID，详情引用统一 string
+type DetailRef = { type: "feed"; id: string } | { type: "note"; id: string } | null;
 
 // ---------- 自测 / 回顾 Mock ----------
 
@@ -142,6 +140,8 @@ interface KnowledgeRow {
   content: string;
   source: string | null;
   status: "inbox" | "kept" | "discarded" | "trashed";
+  kind: "captured" | "note";
+  deleted_at: number | null;
   tags: string[];
   created_at: number;
   updated_at: number;
@@ -191,6 +191,39 @@ function toInboxItem(row: KnowledgeRow): InboxItem {
     title: row.title,
     source: row.source ?? "手动采集",
     summary: makeSummary(row.content),
+  };
+}
+
+// store 行 → 我的文章卡片。笔记与采集同表后只是 kind 不同，
+// 视图模型各自转换，让渲染层继续拿到自己顺手用的形状
+function toNoteItem(row: KnowledgeRow): Note {
+  return {
+    id: row.id,
+    title: row.title,
+    content: row.content,
+    tags: row.tags,
+    updatedAt: formatRelTime(row.updated_at),
+  };
+}
+
+/** 回收站条目的剩余天数：deleted_at + 7 天减去当前时刻，向上取整。
+ *  过期条目已被服务端懒清理物理删除，正常不会看到 ≤0 的情况，max(1) 兜底显示 */
+const TRASH_RETENTION_MS = 7 * 24 * 3_600_000;
+
+function daysLeftOf(deletedAt: number): number {
+  const left = deletedAt + TRASH_RETENTION_MS - Date.now();
+  return Math.max(1, Math.ceil(left / (24 * 3_600_000)));
+}
+
+// store 行 → 回收站卡片
+function toTrashItem(row: KnowledgeRow): TrashItem {
+  return {
+    id: row.id,
+    title: row.title || "无标题文章",
+    source: row.kind === "note" ? "我的文章" : (row.source ?? "手动采集"),
+    summary: makeSummary(row.content),
+    origin: row.kind === "note" ? "文章" : "采集",
+    daysLeft: row.deleted_at ? daysLeftOf(row.deleted_at) : 7,
   };
 }
 
@@ -254,38 +287,8 @@ const markdownComponents = {
 };
 
 
-const initialNotes: Note[] = [
-  {
-    id: 101,
-    title: "从切图仔到造 Agent：我的转型路线图",
-    content:
-      "转型不是换工种，是换个站位。\n\n前端的优势：懂交互、懂状态、懂工程化，这些在 Agent 产品里全是硬通货。缺的是三块：模型能力的边界认知、后端和数据的补课、把「需求」翻译成「任务编排」的思维。\n\n路线图分三步：\n\n第一步，用起来。把 AI 塞进日常工作流，code review、写周报、查文档，先建立体感。\n\n第二步，造小工具。不追求产品级，追求闭环：一个能跑的 Agent，工具调用、记忆、规划都亲手摸一遍。\n\n第三步，做真项目。拿自己的知识库练手，痛点真实、需求熟悉，是最好的第一战。",
-    tags: ["转型", "Agent"],
-    updatedAt: "昨天 22:40",
-    inFeed: true,
-  },
-  {
-    id: 102,
-    title: "笔记：RAG 检索质量排查清单（草稿）",
-    content:
-      "检索不准，先查这三样：\n\n1. 切片粒度：太大噪声多，太小上下文丢，先试 300-500 字符带重叠。\n\n2. 向量模型：通用向量模型在你的领域不一定好，领域词多的话考虑微调或换模型。\n\n3. 重排：召回 20 条，用重排模型筛 top 3，准确率普遍能涨一截。\n\n（待补充：混合检索 BM25 + 向量的实测数据）",
-    tags: ["RAG"],
-    updatedAt: "今天 10:05",
-    inFeed: false,
-  },
-];
 
 
-const initialTrash: TrashItem[] = [
-  {
-    id: 1,
-    title: "某大厂又发布了新模型（营销稿）",
-    source: "订阅源 · 昨天采集",
-    summary: "通稿式内容，信息密度低，已放弃。",
-    origin: "采集",
-    daysLeft: 6,
-  },
-];
 
 const initialSources: Source[] = [
   { id: 1, name: "技术晨报", freq: "每天 07:00", on: true },
@@ -345,12 +348,12 @@ export default function KnowledgePage() {
   const [searchQuery, setSearchQuery] = useState("");
   const [captureInput, setCaptureInput] = useState("");
 
-  // K1 起 feed / inbox 从真库加载（初值空数组，useEffect 里拉取）；
-  // notes / trash / sources 仍是 mock，等 K2+ 逐步替换
+  // K1 起 feed / inbox 接真库；K3 前置起 notes / trash 也接库（与 feed 同表，kind 区分）。
+  // sources 仍是 mock，等自动化采集（K5 RSS）时一并设计
   const [feed, setFeed] = useState<FeedItem[]>([]);
-  const [notes, setNotes] = useState<Note[]>(initialNotes);
+  const [notes, setNotes] = useState<Note[]>([]);
   const [inbox, setInbox] = useState<InboxItem[]>([]);
-  const [trash, setTrash] = useState<TrashItem[]>(initialTrash);
+  const [trash, setTrash] = useState<TrashItem[]>([]);
   const [sources, setSources] = useState<Source[]>(initialSources);
   const [allTags, setAllTags] = useState<string[]>([]); // 全部标签，从 /api/knowledge/tags 拉取
   // K2 标签筛选：点知识流里的标签 pill 即按该标签过滤（服务端 tag 参数）
@@ -399,25 +402,46 @@ export default function KnowledgePage() {
     setAllTags((data.tags as Array<{ tag: string; count: number }>).map((t) => t.tag));
   };
 
-  // 首屏并行拉收件箱、知识流、标签列表三路数据。
+  /** 拉我的文章（kind=note 且 kept）。笔记不走搜索/筛选，固定全量拉取 */
+  const loadNotes = async () => {
+    const res = await fetch("/api/knowledge?status=kept&kind=note&limit=200");
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const data = await res.json();
+    setNotes((data.items as KnowledgeRow[]).map(toNoteItem));
+  };
+
+  /** 拉回收站（status=trashed）。服务端在列表请求里顺手做过期清理，
+   *  所以每次进回收站视图看到的数据都是刚清过账的 */
+  const loadTrash = async () => {
+    const res = await fetch("/api/knowledge?status=trashed&limit=200");
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const data = await res.json();
+    setTrash((data.items as KnowledgeRow[]).map(toTrashItem));
+  };
+
+  // 首屏并行拉五路数据：收件箱、知识流、标签、我的文章、回收站。
   // 用 allSettled 而不是 all：一个接口挂了其他照常显示，不至于整页报废
   useEffect(() => {
     let alive = true; // 组件卸载后不再 setState
     (async () => {
-      const [inboxRes] = await Promise.allSettled([
+      const results = await Promise.allSettled([
         fetch("/api/knowledge?status=inbox&limit=100"),
         loadFeed("", null),
         loadAllTags(),
+        loadNotes(),
+        loadTrash(),
       ]);
       if (!alive) return;
-      let failed = inboxRes.status === "rejected";
-      if (inboxRes.status === "fulfilled") {
-        if (!inboxRes.value.ok) failed = true;
+      // 收件箱那路要单独解析 body；其余四路内部已各自 setState
+      let failed = results[0].status === "rejected";
+      if (results[0].status === "fulfilled") {
+        if (!results[0].value.ok) failed = true;
         else {
-          const data = await inboxRes.value.json();
+          const data = await results[0].value.json();
           setInbox((data.items as KnowledgeRow[]).map(toInboxItem));
         }
       }
+      if (results.slice(1).some((r) => r.status === "rejected")) failed = true;
       if (failed) showToast("部分数据加载失败，请刷新重试");
       setLoadingKnowledge(false);
     })();
@@ -447,8 +471,8 @@ export default function KnowledgePage() {
     return () => window.clearTimeout(timer);
   }, [searchQuery, activeTag]);
 
-  // 文章编辑
-  const [editingNoteId, setEditingNoteId] = useState<number | null>(null);
+  // 文章编辑（id 是真库 UUID；「draft-」前缀表示尚未落库的新建草稿）
+  const [editingNoteId, setEditingNoteId] = useState<string | null>(null);
   const [noteDraft, setNoteDraft] = useState({ title: "", content: "" });
 
   // 标签选择器
@@ -556,26 +580,25 @@ export default function KnowledgePage() {
 
   // ----- 回收站 -----
 
-  const restoreTrash = (item: TrashItem) => {
-    if (item.origin === "采集") {
-      // K1 起「放弃的采集」走 discarded 状态、不再进回收站；回收站里残留的
-      // 采集条目是历史演示数据，没有真实库记录，捞回动作无从落地——
-      // 明确告知，而不是造一条假数据混进已接真库的收件箱
-      showToast("该条为界面演示数据，不支持捞回");
-      return;
+  // 捞回：PATCH action=restore，条目回 kept。成功后按出身刷新对应列表——
+  // 恢复的可能是采集文章也可能是笔记，两路都重拉最省心（数据量小，代价可忽略）
+  const restoreTrash = async (item: TrashItem) => {
+    try {
+      const res = await fetch(`/api/knowledge/${item.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "restore" }),
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      setTrash((prev) => prev.filter((t) => t.id !== item.id));
+      await Promise.allSettled([
+        loadFeed(searchQuery.trim(), activeTag),
+        loadNotes(),
+      ]);
+      showToast("已捞回");
+    } catch {
+      showToast("捞回失败，请重试");
     }
-    setTrash((prev) => prev.filter((t) => t.id !== item.id));
-    setNotes((prev) => [
-      {
-        id: Date.now(),
-        title: item.title,
-        content: item.summary,
-        tags: [],
-        updatedAt: "刚刚",
-        inFeed: false,
-      },
-      ...prev,
-    ]);
   };
 
   const askDeleteTrash = (item: TrashItem) => {
@@ -583,21 +606,32 @@ export default function KnowledgePage() {
       title: "彻底删除？",
       desc: "删除后不可恢复。",
       okText: "彻底删除",
-      onOk: () => setTrash((prev) => prev.filter((t) => t.id !== item.id)),
+      onOk: () => {
+        // ?purge=true 走硬删除：标签随外键级联清理，物理消失
+        fetch(`/api/knowledge/${item.id}?purge=true`, { method: "DELETE" })
+          .then(async (res) => {
+            if (!res.ok) throw new Error(`HTTP ${res.status}`);
+            setTrash((prev) => prev.filter((t) => t.id !== item.id));
+          })
+          .catch(() => showToast("删除失败，请重试"));
+      },
     });
   };
 
   // ----- 我的文章 -----
+  // 笔记与采集同表（kind=note），创建/编辑/删除全部落库。
+  // 新建走「草稿」模式：点「写文章」先造一条本地临时卡片（id 前缀 draft-），
+  // 点保存才 POST 落库换真 id——直接落库会让取消编辑留下空记录垃圾
 
   const createNote = () => {
-    const id = Date.now();
+    const draftId = `draft-${Date.now()}`;
     setNotes((prev) => [
-      { id, title: "", content: "", tags: [], updatedAt: "刚刚", inFeed: false },
+      { id: draftId, title: "", content: "", tags: [], updatedAt: "刚刚" },
       ...prev,
     ]);
     setNoteDraft({ title: "", content: "" });
-    setEditingNoteId(id);
-    setDetail({ type: "note", id });
+    setEditingNoteId(draftId);
+    setDetail({ type: "note", id: draftId });
   };
 
   const startEditNote = (note: Note) => {
@@ -605,58 +639,99 @@ export default function KnowledgePage() {
     setEditingNoteId(note.id);
   };
 
-  const saveNote = (id: number) => {
-    setNotes((prev) =>
-      prev.map((n) =>
-        n.id === id
-          ? {
-              ...n,
-              title: noteDraft.title.trim() || "无标题文章",
-              content: noteDraft.content,
-              updatedAt: "刚刚",
-            }
-          : n,
-      ),
-    );
+  const saveNote = async (id: string) => {
+    const isDraft = id.startsWith("draft-");
+    const title = noteDraft.title.trim() || "无标题文章";
+    try {
+      if (isDraft) {
+        // 草稿首次保存：POST 创建拿真 UUID，替换掉本地临时卡片
+        const res = await fetch("/api/knowledge", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            kind: "note",
+            title,
+            content: noteDraft.content,
+          }),
+        });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const row = (await res.json()) as KnowledgeRow;
+        setNotes((prev) =>
+          prev.map((n) => (n.id === id ? toNoteItem(row) : n)),
+        );
+        // 详情页还停在草稿引用上，切到真 id 才能继续阅读/打标签
+        setDetail({ type: "note", id: row.id });
+        await loadAllTags();
+      } else {
+        const res = await fetch(`/api/knowledge/${id}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ title, content: noteDraft.content }),
+        });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        setNotes((prev) =>
+          prev.map((n) =>
+            n.id === id ? { ...n, title, content: noteDraft.content, updatedAt: "刚刚" } : n,
+          ),
+        );
+      }
+      setEditingNoteId(null);
+      showToast("已保存");
+    } catch {
+      showToast("保存失败，请重试");
+    }
+  };
+
+  // 取消编辑：纯草稿（无标题无正文）直接从列表移除，别留一张空白卡片；
+  // 有内容的草稿保留在列表里，但提示未落库、刷新会丢
+  const cancelEditNote = () => {
+    if (editingNoteId?.startsWith("draft-")) {
+      const empty = !noteDraft.title.trim() && !noteDraft.content.trim();
+      if (empty) {
+        setNotes((prev) => prev.filter((n) => n.id !== editingNoteId));
+        goList();
+        return;
+      }
+      showToast("尚未保存，刷新页面后草稿会丢失");
+    }
     setEditingNoteId(null);
   };
 
   const askDeleteNote = (note: Note) => {
+    if (note.id.startsWith("draft-")) {
+      // 纯本地草稿没有库记录，「删除」就是把它从列表上拿掉
+      setConfirmState({
+        title: "丢弃这篇草稿？",
+        desc: "草稿尚未保存，丢弃后不可恢复。",
+        okText: "丢弃",
+        onOk: () => {
+          setNotes((prev) => prev.filter((n) => n.id !== note.id));
+          goList();
+        },
+      });
+      return;
+    }
     setConfirmState({
       title: "删除这篇文章？",
       desc: "文章会进回收站，7 天内可以捞回，之后彻底删除。",
       okText: "删除",
       onOk: () => {
-        setNotes((prev) => prev.filter((n) => n.id !== note.id));
-        // 原 mock 会按标题从知识流里删同名条目——feed 已接真库，按 title 匹配
-        // 可能误删同名的真实条目；笔记与库的联动等 K2 notes 接库后统一处理
-        setTrash((prev) => [
-          {
-            id: Date.now(),
-            title: note.title,
-            source: "我的文章",
-            summary: note.content.slice(0, 50) || "（空文章）",
-            origin: "文章",
-            daysLeft: 7,
-          },
-          ...prev,
-        ]);
-        goList();
+        // PATCH action=trash：软删进回收站，deleted_at 由后端记录
+        fetch(`/api/knowledge/${note.id}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ action: "trash" }),
+        })
+          .then(async (res) => {
+            if (!res.ok) throw new Error(`HTTP ${res.status}`);
+            const row = (await res.json()) as KnowledgeRow;
+            setNotes((prev) => prev.filter((n) => n.id !== note.id));
+            setTrash((prev) => [toTrashItem(row), ...prev]);
+            goList();
+          })
+          .catch(() => showToast("删除失败，请重试"));
       },
     });
-  };
-
-  const toggleNoteInFeed = (note: Note) => {
-    if (note.inFeed) {
-      // 只翻本地演示状态：按标题从真知识流删条目会误伤同名真实数据
-      setNotes((prev) =>
-        prev.map((n) => (n.id === note.id ? { ...n, inFeed: false } : n)),
-      );
-      return;
-    }
-    // 「笔记加入知识流」需要把笔记写进库才有意义——K2 notes 接库后开放，
-    // 现在往已接真库的 feed 塞 mock 卡片，刷新即消失还会污染列表
-    showToast("笔记入库将在后续版本开放，敬请期待");
   };
 
   // ----- 标签闭环 -----
@@ -670,34 +745,37 @@ export default function KnowledgePage() {
 
   const setTagsOf = (ref: DetailRef, tags: string[]) => {
     if (!ref) return;
-    if (ref.type === "feed") {
-      // K2 标签编辑落库：先乐观更新本地（界面零等待），PATCH 到后端确认；
-      // 失败时回滚到改前快照并提示——不打断浏览，也不让假状态留在屏幕上
-      const prevTags = feed.find((f) => f.id === ref.id)?.tags ?? [];
-      setFeed((prev) =>
-        prev.map((f) => (f.id === ref.id ? { ...f, tags } : f)),
-      );
-      fetch(`/api/knowledge/${ref.id}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ tags }),
+    // K3 前置起 feed 与 note 都是真库行，标签编辑统一走「乐观更新本地 +
+    // PATCH 确认 + 失败回滚快照」。两个分支只差操作的 state 列表
+    const isFeed = ref.type === "feed";
+    const prevTags = isFeed
+      ? (feed.find((f) => f.id === ref.id)?.tags ?? [])
+      : (notes.find((n) => n.id === ref.id)?.tags ?? []);
+    const applyLocal = (next: string[]) => {
+      if (isFeed) {
+        setFeed((prev) =>
+          prev.map((f) => (f.id === ref.id ? { ...f, tags: next } : f)),
+        );
+      } else {
+        setNotes((prev) =>
+          prev.map((n) => (n.id === ref.id ? { ...n, tags: next } : n)),
+        );
+      }
+    };
+    applyLocal(tags);
+    fetch(`/api/knowledge/${ref.id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ tags }),
+    })
+      .then(async (res) => {
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        await loadAllTags(); // 新打的标签可能刚诞生，刷新全局候选列表
       })
-        .then(async (res) => {
-          if (!res.ok) throw new Error(`HTTP ${res.status}`);
-          await loadAllTags(); // 新打的标签可能刚诞生，刷新全局候选列表
-        })
-        .catch(() => {
-          setFeed((prev) =>
-            prev.map((f) => (f.id === ref.id ? { ...f, tags: prevTags } : f)),
-          );
-          showToast("标签保存失败，已还原");
-        });
-    } else {
-      // notes 还是 mock，仅本地态
-      setNotes((prev) =>
-        prev.map((n) => (n.id === ref.id ? { ...n, tags } : n)),
-      );
-    }
+      .catch(() => {
+        applyLocal(prevTags); // 失败回滚到改前快照，不让假状态留在屏幕上
+        showToast("标签保存失败，已还原");
+      });
   };
 
   const toggleTagOnTarget = (tag: string) => {
@@ -910,7 +988,7 @@ export default function KnowledgePage() {
               />
               <div className="mt-4 flex items-center justify-end gap-2 border-t border-[#F0F0F0] pt-4">
                 <button
-                  onClick={() => setEditingNoteId(null)}
+                  onClick={cancelEditNote}
                   className="h-9 rounded-[2px] border border-[#D9D9D9] bg-white px-4 text-xs font-medium text-[#4A4A4A] transition-colors hover:border-[#000000] hover:text-black"
                 >
                   取消
@@ -931,7 +1009,6 @@ export default function KnowledgePage() {
               </h1>
               <p className="mt-2 text-xs text-[#A0A8B4]">
                 最后编辑 {currentNote.updatedAt}
-                {currentNote.inFeed && " · 已加入知识流"}
               </p>
               <div className="mt-4 flex flex-wrap items-center gap-1.5 border-b border-[#F0F0F0] pb-4">
                 {currentNote.tags.map((tag) => (
@@ -946,26 +1023,19 @@ export default function KnowledgePage() {
                 ))}
                 <AddTagButton onClick={() => setTagPicker(detail)} />
               </div>
-              <div className="mt-5 space-y-4">
-                {currentNote.content.split("\n\n").map((para, i) => (
-                  <p key={i} className="text-[15px] leading-7 text-[#2A2A2A]">
-                    {para}
-                  </p>
-                ))}
-              </div>
-              {/* 底部操作 */}
-              <div className="mt-6 flex flex-wrap items-center gap-2 border-t border-[#F0F0F0] pt-4">
-                <button
-                  onClick={() => toggleNoteInFeed(currentNote)}
-                  className={cn(
-                    "flex h-9 items-center gap-1.5 rounded-[2px] px-4 text-xs font-medium transition-all",
-                    currentNote.inFeed
-                      ? "border border-[#D9D9D9] bg-white text-[#4A4A4A] hover:border-[#000000] hover:text-black"
-                      : "bg-[#000000] text-white hover:opacity-85",
-                  )}
+              {/* 笔记正文同样接 Markdown 渲染：存储是纯文本单一事实源，
+                  展示层与知识流共用同一套 components 映射 */}
+              <div className="mt-5">
+                <ReactMarkdown
+                  remarkPlugins={[remarkGfm]}
+                  components={markdownComponents}
                 >
-                  {currentNote.inFeed ? "已在知识流 · 点击移出" : "加入知识流"}
-                </button>
+                  {currentNote.content}
+                </ReactMarkdown>
+              </div>
+              {/* 底部操作。「加入知识流」按钮已移除：笔记入库后天然可被
+                  检索/AI 看到（同表 kind=note），原按钮建立在「笔记不在库」的旧前提上 */}
+              <div className="mt-6 flex flex-wrap items-center gap-2 border-t border-[#F0F0F0] pt-4">
                 <button
                   onClick={() => startEditNote(currentNote)}
                   className="flex h-9 items-center gap-1.5 rounded-[2px] border border-[#D9D9D9] bg-white px-4 text-xs font-medium text-[#4A4A4A] transition-colors hover:border-[#000000] hover:text-black"
@@ -1088,7 +1158,7 @@ export default function KnowledgePage() {
         return (
           <div className="space-y-4">
             <div className="flex items-center justify-between px-1">
-              <p className="text-xs text-[#A0A8B4]">自己写的文章，可编辑、删除、加入知识流</p>
+              <p className="text-xs text-[#A0A8B4]">自己写的文章，自动保存到知识库，可编辑、打标签、删除</p>
               <button
                 onClick={createNote}
                 className="flex h-9 items-center gap-1.5 rounded-[2px] bg-[#000000] px-4 text-xs font-medium text-white transition-opacity hover:opacity-85"
@@ -1112,11 +1182,6 @@ export default function KnowledgePage() {
                     <span className="min-w-0 truncate">
                       {note.title || "无标题文章"}
                     </span>
-                    {note.inFeed && (
-                      <span className="shrink-0 rounded-full bg-[#ECECEC] px-1.5 py-0.5 text-[10px] font-medium text-[#4A4A4A]">
-                        已在知识流
-                      </span>
-                    )}
                   </h3>
                   <p className="mt-1 line-clamp-2 text-[13.5px] leading-relaxed text-[#8A8A8A]">
                     {note.content.split("\n")[0] || "（正文为空）"}
@@ -1166,7 +1231,7 @@ export default function KnowledgePage() {
             </div>
             <p className="flex items-center gap-1.5 px-1 text-xs text-[#A0A8B4]">
               <Sparkles className="h-3.5 w-3.5" />
-              AI 已按你的口味初筛；保留进知识流，放弃进回收站（7 天后彻底删除）
+              AI 已按你的口味初筛；保留进知识流，放弃则不再出现（放弃与删除是两件事）
             </p>
             {loadingKnowledge ? (
               <div className="rounded-[2px] border border-dashed border-[#D9D9D9] bg-white p-12 text-center">
@@ -1219,7 +1284,7 @@ export default function KnowledgePage() {
         return (
           <div className="space-y-4">
             <p className="px-1 text-xs text-[#A0A8B4]">
-              放弃的采集和删除的文章先进这，7 天后彻底删除，过期前都能捞回
+              删除的文章和采集条目先进这，7 天后彻底删除，过期前都能捞回
             </p>
             {trash.length === 0 ? (
               <div className="rounded-[2px] border border-dashed border-[#D9D9D9] bg-white p-12 text-center">

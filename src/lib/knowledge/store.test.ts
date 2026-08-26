@@ -15,6 +15,9 @@ import {
   renameTag,
   removeTag,
   listTags,
+  trashItem,
+  restoreItem,
+  purgeExpiredTrash,
 } from "./store";
 
 let conn: Database.Database;
@@ -220,5 +223,93 @@ describe("knowledge store · 全局标签管理（K2）", () => {
       { tag: "热门", count: 2 },
       { tag: "冷门", count: 1 },
     ]);
+  });
+});
+
+describe("knowledge store · 笔记与回收站（K3 前置）", () => {
+  it("kind=note 创建即保留，与 captured 条目在列表里互不串味", () => {
+    const note = createItem(conn, {
+      title: "我的第一篇笔记",
+      content: "正文",
+      kind: "note",
+      status: "kept", // route 层对笔记的约定：创建即保留，不走拍板流
+    });
+    // captured 也造一条 kept 的：知识流的查询条件是 status=kept + kind=captured
+    const captured = createItem(conn, { content: "采集来的", status: "kept" });
+
+    expect(note.kind).toBe("note");
+    expect(note.status).toBe("kept");
+    expect(captured.kind).toBe("captured");
+
+    // 知识流只看 captured：手写文章不该混进阅读信息流
+    const feed = listItems(conn, { status: "kept", kind: "captured" });
+    expect(feed.items.map((i) => i.id)).toEqual([captured.id]);
+
+    // 我的文章只看 note
+    const notes = listItems(conn, { status: "kept", kind: "note" });
+    expect(notes.items.map((i) => i.id)).toEqual([note.id]);
+  });
+
+  it("notStatus 排除回收站条目，常规列表天然看不到已删内容", () => {
+    const a = createItem(conn, { content: "A", status: "kept" });
+    createItem(conn, { content: "B" }); // inbox
+    trashItem(conn, a.id);
+
+    const visible = listItems(conn, { notStatus: "trashed" });
+    expect(visible.total).toBe(1);
+    expect(visible.items[0].status).toBe("inbox");
+  });
+
+  it("trashItem 只有 kept 能进回收站；restoreItem 捞回并清 deleted_at", () => {
+    const kept = createItem(conn, { content: "已保留", status: "kept" });
+    const inboxItem = createItem(conn, { content: "待拍板" }); // 默认 inbox
+
+    // inbox 条目不能直接进回收站（还没拍板，没有反悔期可言）
+    expect(trashItem(conn, inboxItem.id)).toBeNull();
+
+    const trashed = trashItem(conn, kept.id);
+    expect(trashed?.status).toBe("trashed");
+    expect(trashed?.deleted_at).toBeGreaterThan(0);
+
+    const restored = restoreItem(conn, kept.id);
+    expect(restored?.status).toBe("kept");
+    expect(restored?.deleted_at).toBeNull();
+  });
+
+  it("purgeExpiredTrash 只清过期的：未到期的和已捞回的都不动", () => {
+    const old = createItem(conn, { content: "8 天前进回收站", status: "kept" });
+    const fresh = createItem(conn, { content: "刚进回收站", status: "kept" });
+    const back = createItem(conn, { content: "已经捞回了", status: "kept" });
+
+    trashItem(conn, old.id);
+    trashItem(conn, fresh.id);
+    trashItem(conn, back.id);
+
+    // 手动把「old」的删除时间拨回 8 天前，模拟时间流逝（测试里直接改库是合理手段）
+    conn
+      .prepare(`UPDATE knowledge_items SET deleted_at = ? WHERE id = ?`)
+      .run(Date.now() - 8 * 24 * 3_600_000, old.id);
+
+    restoreItem(conn, back.id); // back 捞回后不该被清理波及
+
+    const purged = purgeExpiredTrash(conn);
+    expect(purged).toBe(1); // 只有过期的 old 被物理删除
+
+    expect(getItem(conn, old.id)).toBeNull();
+    expect(getItem(conn, fresh.id)?.status).toBe("trashed"); // 未到期仍在站内
+    expect(getItem(conn, back.id)?.status).toBe("kept"); // 已捞回不受影响
+  });
+
+  it("updateItem 不允许绕过状态机直接改 trashed（保护 deleted_at 一致性）", () => {
+    const item = createItem(conn, { content: "x", status: "kept" });
+    expect(() =>
+      updateItem(conn, item.id, { status: "trashed" }),
+    ).toThrow(/trashItem/);
+
+    trashItem(conn, item.id);
+    // 站内条目也不能随手改状态，必须先捞回
+    expect(() =>
+      updateItem(conn, item.id, { status: "kept" }),
+    ).toThrow(/restoreItem/);
   });
 });
