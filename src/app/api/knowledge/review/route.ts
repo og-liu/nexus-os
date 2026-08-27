@@ -1,6 +1,6 @@
 // 每日回顾接口（阶段4 P2）：GET /api/knowledge/review
 //
-// 数据底座是 store.getReviewItems（今日统计 + 20 条最久未读候选）。
+// 数据底座是 store.getReviewItems（今日统计 + 20 条最久存库的候选）。
 // 随机挑 4 条在这里做而不是 store：挑几条、要不要随机，是展示策略，
 // 数据层该稳定（测试才可断言），展示策略随产品感觉调
 

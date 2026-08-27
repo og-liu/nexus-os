@@ -58,8 +58,6 @@ interface InboxItem {
   title: string;
   source: string;
   summary: string;
-  /** 阶段2 P0·未读聚焦：还没点开读过（蓝点依据） */
-  unread: boolean;
   /** 阶段2 P0·失败兜底：当初没抓到正文、只按链接落库（可重试） */
   degraded: boolean;
   /** 阶段2 P0·永久快照：详情「查看原文」的入口。列表不拖正文与快照 */
@@ -156,8 +154,6 @@ interface KnowledgeRow {
   tags: string[];
   created_at: number;
   updated_at: number;
-  /** 首次点开阅读时间，NULL = 未读 */
-  read_at: number | null;
   /** 1 = 只按链接降级落库（可重试抓取） */
   degraded: number;
   /** 剥净的正文 HTML 快照：只有详情接口（GET /api/knowledge/[id]）返回，列表行没有 */
@@ -232,7 +228,6 @@ function toInboxItem(row: KnowledgeRow): InboxItem {
     title: row.title,
     source: row.source ?? "手动采集",
     summary: makeSummary(row.content),
-    unread: row.read_at == null,
     degraded: row.degraded === 1,
     sourceUrl: row.source_url ?? null,
     // 阶段4 P2·过期清理：前端判断「超过 30 天」要用（展示、批量丢弃），
@@ -348,7 +343,7 @@ function TagPill({
   onRemove?: () => void;
 }) {
   return (
-    <span className="group/tag inline-flex items-center gap-1 whitespace-nowrap rounded-full bg-[#ECECEC] px-2.5 py-0.5 text-xs text-[#4A4A4A]">
+    <span className="group/tag inline-flex items-center gap-1 whitespace-nowrap rounded-[2px] bg-[#ECECEC] px-2.5 py-0.5 text-xs text-[#4A4A4A]">
       {children}
       {onRemove && (
         <button
@@ -395,9 +390,21 @@ export default function KnowledgePage() {
   const [notes, setNotes] = useState<Note[]>([]);
   const [inbox, setInbox] = useState<InboxItem[]>([]);
   const [trash, setTrash] = useState<TrashItem[]>([]);
-  const [allTags, setAllTags] = useState<string[]>([]); // 全部标签，从 /api/knowledge/tags 拉取
-  // K2 标签筛选：点知识流里的标签 pill 即按该标签过滤（服务端 tag 参数）
-  const [activeTag, setActiveTag] = useState<string | null>(null);
+  // 全部标签及其使用计数，从 /api/knowledge/tags 拉取；计数驱动顶部筛选按频次排序
+  const [allTags, setAllTags] = useState<Array<{ tag: string; count: number }>>([]);
+  // 标签多选筛选：顶部标签 chips 点选/再点取消，服务端多 tag AND 交集；空数组 = 全部
+  const [activeTags, setActiveTags] = useState<string[]>([]);
+  // 标签太多时默认折叠，点「展开」看全量
+  const [tagsExpanded, setTagsExpanded] = useState(false);
+
+  // 顶部标签 chips 的点选/取消：在集合里则移除（取消），不在则加入（多选）
+  const toggleTag = (tag: string) => {
+    setActiveTags((prev) =>
+      prev.includes(tag) ? prev.filter((t) => t !== tag) : [...prev, tag],
+    );
+  };
+  // 一键清空所有选中标签，回到「全部」
+  const clearTagFilter = () => setActiveTags([]);
   // 服务端检索进行中提示（搜索框防抖请求发出后到返回前）
   const [searching, setSearching] = useState(false);
 
@@ -420,24 +427,15 @@ export default function KnowledgePage() {
 
   // ----- 数据加载（K2：搜索与标签筛选都走服务端） -----
 
-  /** 拉知识流（kept 列表）：关键词 q 与标签 tag 传给服务端组合过滤——
+  /** 拉知识流（kept 列表）：关键词 q 与多标签交集 tags 传给服务端组合过滤——
    *  LIKE 检索和标签匹配在 store 层拼 WHERE 条件，前端只负责拼参数。
    *  这取代了 K1 之前「整页拉回来前端 filter」的做法：数据库是唯一真相，
    *  分页/大数据量时也不会把全表拖到浏览器。
-   *  阶段4 P2·智能列表：filter 走服务端参数（unread=1 / since=7 天前），
-   *  与「只看未读」开关同一套哲学——服务端过滤，total 才是真实计数 */
-  const loadFeed = async (
-    q: string,
-    tag: string | null,
-    filter: "all" | "unread" | "week" = "all",
-  ) => {
+   *  多标签 AND 交集：每个选中标签 append 一次 tag 参数，服务端全满足才命中 */
+  const loadFeed = async (q: string, tags: string[] = []) => {
     const params = new URLSearchParams({ status: "kept", limit: "100" });
     if (q) params.set("q", q);
-    if (tag) params.set("tag", tag);
-    if (filter === "unread") params.set("unread", "1");
-    if (filter === "week") {
-      params.set("since", String(Date.now() - 7 * 24 * 60 * 60 * 1000));
-    }
+    for (const t of tags) params.append("tag", t);
     const res = await fetch(`/api/knowledge?${params.toString()}`);
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const data = await res.json();
@@ -456,12 +454,17 @@ export default function KnowledgePage() {
     }
   };
 
-  /** 拉全部标签及计数，驱动标签选择器候选列表（新打标签后也要刷新它） */
+  /** 拉全部标签及计数，驱动标签选择器候选与顶部筛选 chips。
+   *  按使用频次降序：常用标签靠前、长尾标签收进折叠（新打标签后也要刷新） */
   const loadAllTags = async () => {
     const res = await fetch("/api/knowledge/tags");
     if (!res.ok) return;
     const data = await res.json();
-    setAllTags((data.tags as Array<{ tag: string; count: number }>).map((t) => t.tag));
+    setAllTags(
+      (data.tags as Array<{ tag: string; count: number }>).sort(
+        (a, b) => b.count - a.count,
+      ),
+    );
   };
 
   /** 拉我的文章（kind=note，draft 和 kept 都拉）。方案 B 下草稿和已入库的
@@ -482,12 +485,10 @@ export default function KnowledgePage() {
     setTrash((data.items as KnowledgeRow[]).map(toTrashItem));
   };
 
-  /** 拉待处理列表。「只看未读」开关切换时带 unread=1 让服务端过滤——
-   *  这样拿到的 total 就是未读总数，蓝点消失一条列表少一条，前端不用自己算。
+  /** 拉待处理列表（status=inbox，即「还没拍板」的条目——与读没读无关）。
    *  顺手存 counts：agedInbox（阶段4 P2·过期清理）驱动待处理顶部的堆积提示条 */
-  const loadInbox = async (unreadOnly: boolean) => {
+  const loadInbox = async () => {
     const params = new URLSearchParams({ status: "inbox", limit: "100" });
-    if (unreadOnly) params.set("unread", "1");
     const res = await fetch(`/api/knowledge?${params.toString()}`);
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const data = await res.json();
@@ -503,8 +504,8 @@ export default function KnowledgePage() {
     let alive = true; // 组件卸载后不再 setState
     (async () => {
       const results = await Promise.allSettled([
-        loadInbox(false),
-        loadFeed("", null),
+        loadInbox(),
+        loadFeed(""),
         loadAllTags(),
         loadNotes(),
         loadTrash(),
@@ -519,17 +520,6 @@ export default function KnowledgePage() {
       alive = false;
     };
   }, []);
-
-  // 只看未读开关：服务端过滤（unread=1），开关切换重拉列表。
-  // 声明必须在这组消费它的 useEffect 之前——块级作用域先用后声明，tsc 直接报错
-  const [onlyUnread, setOnlyUnread] = useState(false);
-
-  // 「只看未读」开关切换：重拉待处理列表（服务端过滤）。旧列表先清掉，
-  // 避免开关切回去的瞬间闪一屏旧数据
-  useEffect(() => {
-    if (loadingKnowledge) return; // 首屏那次不算开关变化，主加载已经拉过
-    loadInbox(onlyUnread).catch(() => showToast("待处理加载失败，请重试"));
-  }, [onlyUnread]);
 
   // 详情全量行（阶段2 P0·永久快照）：列表行刻意不拖 snapshot_html 大字段，
   // 打开详情时才单拉一次全行。加载失败回落列表数据渲染，只是没有快照排版。
@@ -579,10 +569,6 @@ export default function KnowledgePage() {
     }
   }, [section]);
 
-  // ── 阶段4 P2·智能列表：feed 视图快捷过滤（全部 / 未读 / 近七天）──
-  // 声明必须先于下方防抖 effect：effect 依赖数组里引用了它
-  const [feedFilter, setFeedFilter] = useState<"all" | "unread" | "week">("all");
-
   // 搜索 + 标签筛选联动：任一变化后停手 350ms 才发一次请求——连续按键只打
   // 最后一枪，避免每个字符一趟往返。首帧跳过：初值就是空搜索，主加载已拉过
   const skipNextSearch = useRef(true);
@@ -594,7 +580,7 @@ export default function KnowledgePage() {
     const timer = window.setTimeout(async () => {
       setSearching(true);
       try {
-        await loadFeed(searchQuery.trim(), activeTag, feedFilter);
+        await loadFeed(searchQuery.trim(), activeTags);
       } catch {
         showToast("检索失败，请重试");
       } finally {
@@ -602,9 +588,9 @@ export default function KnowledgePage() {
       }
     }, 350);
     return () => window.clearTimeout(timer);
-    // feedFilter 在依赖里：切换「未读/近七天」与改搜索词走同一套防抖，
+    // activeTags 在依赖里：切标签与改搜索词走同一套防抖，
     // 一处节流逻辑管全部触发源，不另开一条即时通道
-  }, [searchQuery, activeTag, feedFilter]);
+  }, [searchQuery, activeTags]);
 
   // 文章编辑（id 是真库 UUID；「draft-」前缀表示尚未落库的新建草稿）
   const [editingNoteId, setEditingNoteId] = useState<string | null>(null);
@@ -630,9 +616,8 @@ export default function KnowledgePage() {
   const [importing, setImporting] = useState(false); // md 文件导入进行中
   const importInputRef = useRef<HTMLInputElement | null>(null); // 隐藏的 file input，按钮点它触发选择
 
-  // ----- 待处理：未读聚焦 + 批量拍板 + 快捷键（阶段2 P0） -----
-  // onlyUnread 的声明在上方「只看未读」useEffect 旁边（使用处就近），
-  // 这里是同组的其他状态
+  // ----- 待处理：批量拍板 + 快捷键（阶段2 P0） -----
+  // （只读/未读机制已整体移除，待处理 = 纯「没操作过」的 inbox 条目）
   const [inboxSelectMode, setInboxSelectMode] = useState(false); // 待处理批量选择模式
   const [inboxSelected, setInboxSelected] = useState<Set<string>>(new Set());
   const [inboxBatchBusy, setInboxBatchBusy] = useState(false);
@@ -647,7 +632,6 @@ export default function KnowledgePage() {
     title: string;
     summary: string;
     tags: string[];
-    read_at: number | null;
     created_at: number;
   }
   const [reviewData, setReviewData] = useState<{
@@ -710,7 +694,7 @@ export default function KnowledgePage() {
   const closeDuplicates = () => {
     setDupGroups(null);
     // 去重动过库（discarded 的条目离开 kept），回列表前按当前过滤条件重拉
-    void loadFeed(searchQuery.trim(), activeTag, feedFilter).catch(() => {});
+    void loadFeed(searchQuery.trim(), activeTags).catch(() => {});
   };
 
   /** 一组重复里「保留最新、丢弃其余」：最新的信息最全（重抓/改过标签），
@@ -850,7 +834,7 @@ export default function KnowledgePage() {
       );
       const ok = results.filter((r) => r.status === "fulfilled").length;
       const fail = results.length - ok;
-      await loadInbox(onlyUnread).catch(() => {});
+      await loadInbox().catch(() => {});
       showToast(
         fail === 0 ? `已清走 ${ok} 条老条目` : `成功 ${ok} 条，失败 ${fail} 条`,
       );
@@ -924,23 +908,9 @@ export default function KnowledgePage() {
 
   // ----- 待处理：详情 / 已读 / 重试 / 批量 / 快捷键（阶段2 P0） -----
 
-  // 打开待处理详情：顺手标已读（fire-and-forget，不打断浏览）。
-  // 已读语义 = 「点开看过」，拍板与否是另一回事——读过的条目蓝点消失，
-  // 没读过的继续亮着提醒「还有没看的新东西」
+  // 打开待处理详情：只看全文帮拍板，不掺「已读」状态——读没读与拍不拍板无关
   const openInboxDetail = (item: InboxItem) => {
     setDetail({ type: "inbox", id: item.id });
-    if (item.unread) {
-      setInbox((prev) =>
-        prev.map((i) => (i.id === item.id ? { ...i, unread: false } : i)),
-      );
-      fetch(`/api/knowledge/${item.id}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ read: true }),
-      }).catch(() => {
-        /* 标读失败无伤大雅：本地蓝点已灭，下次打开会再标一次 */
-      });
-    }
   };
 
   // 重试抓取：degraded 条目（当初只存了链接）重新抓正文。
@@ -1232,7 +1202,7 @@ export default function KnowledgePage() {
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       setTrash((prev) => prev.filter((t) => t.id !== item.id));
       await Promise.allSettled([
-        loadFeed(searchQuery.trim(), activeTag, feedFilter),
+        loadFeed(searchQuery.trim(), activeTags),
         loadNotes(),
       ]);
       showToast("已捞回");
@@ -1393,7 +1363,7 @@ export default function KnowledgePage() {
         prev.map((n) => (n.id === note.id ? { ...n, inLibrary: true } : n)),
       );
       // 带当前搜索词/标签/筛选器重拉，保持用户正在看的视图口径一致
-      await loadFeed(searchQuery.trim(), activeTag, feedFilter);
+      await loadFeed(searchQuery.trim(), activeTags);
       showToast("已加入知识流，AI 也能检索到它了");
     } catch {
       showToast("操作失败，请重试");
@@ -1417,7 +1387,7 @@ export default function KnowledgePage() {
         prev.map((n) => (n.id === note.id ? { ...n, inLibrary: false } : n)),
       );
       // 移出后条目应立刻从知识流消失，重拉保持一致（与加入对称）
-      await loadFeed(searchQuery.trim(), activeTag, feedFilter);
+      await loadFeed(searchQuery.trim(), activeTags);
       showToast("已移出知识流，文章还在「我的文章」里");
     } catch {
       showToast("操作失败，请重试");
@@ -1471,7 +1441,7 @@ export default function KnowledgePage() {
     // 两路都重拉：文章列表刷新 inLibrary 标记，知识流列表接住新加入的条目
     await Promise.allSettled([
       loadNotes(),
-      loadFeed(searchQuery.trim(), activeTag, feedFilter),
+      loadFeed(searchQuery.trim(), activeTags),
     ]);
     exitSelectMode();
     showToast(
@@ -1637,7 +1607,7 @@ export default function KnowledgePage() {
   const createTagAndSelect = () => {
     const name = newTagInput.trim();
     if (!name || !tagPicker) return;
-    if (!allTags.includes(name)) setAllTags((prev) => [...prev, name]);
+    if (!allTags.some((t) => t.tag === name)) setAllTags((prev) => [...prev, { tag: name, count: 0 }]);
     const current = getTagsOf(tagPicker);
     if (!current.includes(name)) setTagsOf(tagPicker, [...current, name]);
     setNewTagInput("");
@@ -1646,7 +1616,7 @@ export default function KnowledgePage() {
   const renameTag = (oldName: string, newName: string) => {
     const name = newName.trim();
     if (!name || name === oldName) return;
-    setAllTags((prev) => prev.map((t) => (t === oldName ? name : t)));
+    setAllTags((prev) => prev.map((t) => (t.tag === oldName ? { ...t, tag: name } : t)));
     setFeed((prev) =>
       prev.map((f) => ({
         ...f,
@@ -1660,7 +1630,7 @@ export default function KnowledgePage() {
       })),
     );
     // 正在按这个标签筛选时同步更新筛选条件，否则横幅显示旧名
-    if (activeTag === oldName) setActiveTag(name);
+    if (activeTags.includes(oldName)) setActiveTags((prev) => prev.map((t) => (t === oldName ? name : t)));
     // 全局重命名落库：新名已存在时后端自动合并（store 的两步走策略）
     fetch("/api/knowledge/tags", {
       method: "PATCH",
@@ -1675,15 +1645,15 @@ export default function KnowledgePage() {
       desc: "会从所有条目上移除这个标签。",
       okText: "删除标签",
       onOk: () => {
-        setAllTags((prev) => prev.filter((t) => t !== tag));
+        setAllTags((prev) => prev.filter((t) => t.tag !== tag));
         setFeed((prev) =>
           prev.map((f) => ({ ...f, tags: f.tags.filter((t) => t !== tag) })),
         );
         setNotes((prev) =>
           prev.map((n) => ({ ...n, tags: n.tags.filter((t) => t !== tag) })),
         );
-        // 删掉的正是当前筛选标签时，退出筛选（不然列表还挂在已消失的条件上）
-        if (activeTag === tag) setActiveTag(null);
+        // 删掉的正是当前筛选标签时，退掉这个筛选（不然列表还挂在已消失的条件上）
+        setActiveTags((prev) => prev.filter((t) => t !== tag));
         fetch(
           `/api/knowledge/tags?tag=${encodeURIComponent(tag)}`,
           { method: "DELETE" },
@@ -1708,7 +1678,7 @@ export default function KnowledgePage() {
       items: [
         { key: "feed", label: "知识流", icon: BookOpen, desc: `${feed.length} 条已沉淀` },
         { key: "notes", label: "我的文章", icon: PenLine, desc: `${notes.length} 篇内容` },
-        { key: "inbox", label: "待处理", icon: Inbox, desc: "新到的等你拍板", count: inbox.filter((i) => i.unread).length },
+        { key: "inbox", label: "待处理", icon: Inbox, desc: "新到的等你拍板", count: inbox.length },
         { key: "trash", label: "回收站", icon: Trash2, desc: "7 天内可捞回", count: trash.length },
       ],
     },
@@ -2260,34 +2230,62 @@ export default function KnowledgePage() {
                 className="h-10 w-full rounded-[2px] border border-[#E5E5E5] bg-white pl-9 pr-3 text-sm text-[#000000] placeholder:text-[#999999] outline-none focus:border-[#000000]"
               />
             </div>
-            {/* 智能列表（阶段4 P2）：固定三档快捷过滤 + 查重入口同一行。
-                过滤切换走与搜索同一套防抖重拉（服务端过滤），不另起即时通道 */}
-            <div className="flex items-center gap-1.5">
-              {(
-                [
-                  { key: "all", label: "全部" },
-                  { key: "unread", label: "未读" },
-                  { key: "week", label: "近七天" },
-                ] as const
-              ).map((f) => (
+            {/* 标签筛选（减法改造）：顶部平铺所有标签，多选 AND 交集、再点取消、
+                空选 = 全部。频次降序排放；超过 12 个默认折叠，点「展开」看全量。
+                全设备 wrap 换行，手机端不横滑，过滤切换与搜索共用同一套防抖重拉 */}
+            <div className="flex flex-wrap items-center gap-1.5">
+              {allTags
+                .slice(0, tagsExpanded ? allTags.length : 12)
+                .map(({ tag, count }) => {
+                  const active = activeTags.includes(tag);
+                  return (
+                    <button
+                      key={tag}
+                      onClick={() => toggleTag(tag)}
+                      className={cn(
+                        "rounded-[2px] px-2.5 py-1 text-xs transition-colors",
+                        active
+                          ? "bg-[#000000] text-white"
+                          : "bg-white text-[#4A4A4A] hover:bg-[#F5F5F5]",
+                      )}
+                    >
+                      {tag}
+                      <span
+                        className={cn(
+                          "ml-1",
+                          active ? "text-white/60" : "text-[#A0A8B4]",
+                        )}
+                      >
+                        {count}
+                      </span>
+                    </button>
+                  );
+                })}
+              {allTags.length > 12 && (
                 <button
-                  key={f.key}
-                  onClick={() => setFeedFilter(f.key)}
-                  className={cn(
-                    "rounded-full px-3 py-1 text-xs transition-colors",
-                    feedFilter === f.key
-                      ? "bg-[#000000] text-white"
-                      : "bg-white text-[#4A4A4A] hover:bg-[#F5F5F5]",
-                  )}
+                  onClick={() => setTagsExpanded((v) => !v)}
+                  className="rounded-[2px] px-2 py-1 text-xs text-[#8A8A8A] transition-colors hover:text-black"
                 >
-                  {f.label}
+                  {tagsExpanded ? "收起" : `展开 +${allTags.length - 12}`}
                 </button>
-              ))}
+              )}
+              {activeTags.length > 0 && (
+                <button
+                  onClick={clearTagFilter}
+                  className="ml-auto flex items-center gap-1 rounded-[2px] px-2 py-1 text-xs text-[#8A8A8A] transition-colors hover:text-black"
+                >
+                  <X className="h-3 w-3" />
+                  清除筛选
+                </button>
+              )}
               <button
                 onClick={() =>
                   dupGroups === null ? void openDuplicates() : closeDuplicates()
                 }
-                className="ml-auto rounded-full bg-white px-3 py-1 text-xs text-[#4A4A4A] transition-colors hover:bg-[#F5F5F5]"
+                className={cn(
+                  "rounded-[2px] bg-white px-3 py-1 text-xs text-[#4A4A4A] transition-colors hover:bg-[#F5F5F5]",
+                  activeTags.length === 0 && "ml-auto",
+                )}
               >
                 {dupGroups === null ? "查重" : "退出查重"}
               </button>
@@ -2351,19 +2349,6 @@ export default function KnowledgePage() {
               </div>
             ) : (
               <>
-            {/* K2 标签筛选横幅：点列表里的标签 pill 进入筛选，这里给出退出入口 */}
-            {activeTag && (
-              <div className="flex items-center gap-2 rounded-[2px] border border-[#E5E5E5] bg-white px-3 py-2 text-xs text-[#4A4A4A]">
-                <span>按标签「{activeTag}」筛选</span>
-                <button
-                  onClick={() => setActiveTag(null)}
-                  className="ml-auto flex items-center gap-1 text-[#8A8A8A] transition-colors hover:text-black"
-                >
-                  <X className="h-3 w-3" />
-                  清除筛选
-                </button>
-              </div>
-            )}
             {/* 服务端检索进行中的轻提示 */}
             {searching && (
               <p className="px-1 text-xs text-[#A0A8B4]">检索中…</p>
@@ -2395,28 +2380,16 @@ export default function KnowledgePage() {
                     {item.summary}
                   </p>
                   <div className="mt-2.5 flex flex-wrap items-center gap-1.5">
-                    {/* 标签即筛选入口：点 pill 直接按该标签过滤知识流。
-                        stopPropagation 防止触发卡片的进详情点击 */}
-                    {item.tags.map((tag) => {
-                      const active = activeTag === tag;
-                      return (
-                        <button
-                          key={tag}
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            setActiveTag(active ? null : tag);
-                          }}
-                          className={cn(
-                            "whitespace-nowrap rounded-full px-2.5 py-0.5 text-xs transition-colors",
-                            active
-                              ? "bg-[#000000] text-white"
-                              : "bg-[#ECECEC] text-[#4A4A4A] hover:bg-[#D9D9D9]",
-                          )}
-                        >
-                          {tag}
-                        </button>
-                      );
-                    })}
+                    {/* 标签即样式标识（减法改造）：筛选统一收口到顶部，
+                        卡片上的 pill 不再可点，只用于视觉上区分内容归属 */}
+                    {item.tags.map((tag) => (
+                      <span
+                        key={tag}
+                        className="rounded-[2px] bg-[#ECECEC] px-2.5 py-0.5 text-xs text-[#4A4A4A]"
+                      >
+                        {tag}
+                      </span>
+                    ))}
                     <AddTagButton onClick={() => setTagPicker({ type: "feed", id: item.id })} />
                     <span className="ml-auto text-xs text-[#A0A8B4]">
                       {item.source} · {item.time}
@@ -2559,7 +2532,7 @@ export default function KnowledgePage() {
                     {note.tags.map((tag) => (
                       <span
                         key={tag}
-                        className="whitespace-nowrap rounded-full bg-[#ECECEC] px-2.5 py-0.5 text-xs text-[#4A4A4A]"
+                        className="whitespace-nowrap rounded-[2px] bg-[#ECECEC] px-2.5 py-0.5 text-xs text-[#4A4A4A]"
                       >
                         {tag}
                       </span>
@@ -2640,29 +2613,9 @@ export default function KnowledgePage() {
                 </button>
               </div>
             )}
-            {/* 工具行：只看未读开关（左）+ 批量操作入口（右）。
-                批量模式切换会关掉「只看未读」之外的一切跳转——批量圈选
-                需要稳定的列表上下文 */}
+            {/* 工具行：批量操作入口（右）。批量模式切换会关掉其余跳转——
+                批量圈选需要稳定的列表上下文 */}
             <div className="flex flex-wrap items-center gap-3 px-1">
-              <button
-                onClick={() => setOnlyUnread((v) => !v)}
-                disabled={inboxSelectMode}
-                className="flex h-7 items-center gap-2 rounded-full border border-[#E5E5E5] bg-white px-3 text-xs text-[#4A4A4A] transition-colors hover:border-[#000000] disabled:opacity-40"
-              >
-                {/* 开关芯：自绘小圆点比原生 checkbox 贴极简视觉 */}
-                <span
-                  className={cn(
-                    "h-1.5 w-1.5 rounded-full transition-colors",
-                    onlyUnread ? "bg-[#2F6BFF]" : "bg-[#C4C4C4]",
-                  )}
-                />
-                只看未读
-                {inbox.filter((i) => i.unread).length > 0 && !onlyUnread && (
-                  <span className="text-[#2F6BFF]">
-                    {inbox.filter((i) => i.unread).length} 条没看过
-                  </span>
-                )}
-              </button>
               <button
                 onClick={() =>
                   inboxSelectMode ? exitInboxSelect() : setInboxSelectMode(true)
@@ -2716,9 +2669,7 @@ export default function KnowledgePage() {
               </div>
             ) : inbox.length === 0 ? (
               <div className="rounded-[2px] border border-dashed border-[#D9D9D9] bg-white p-12 text-center">
-                <p className="text-sm text-[#A0A8B4]">
-                  {onlyUnread ? "没有没看过的了，都读过啦" : "待处理空空如也，去采集吧"}
-                </p>
+                <p className="text-sm text-[#A0A8B4]">待处理空空如也，去采集吧</p>
               </div>
             ) : (
               inbox.map((item, idx) => (
@@ -2752,10 +2703,6 @@ export default function KnowledgePage() {
                             <Check className="h-3 w-3" />
                           )}
                         </span>
-                      )}
-                      {/* 未读蓝点：还没点开过的新东西。点开详情即熄灭 */}
-                      {item.unread && (
-                        <span className="mt-1.5 h-2 w-2 shrink-0 rounded-full bg-[#2F6BFF]" />
                       )}
                       <h3
                         className={cn(
@@ -3104,18 +3051,11 @@ export default function KnowledgePage() {
                       onClick={() => {
                         goList();
                         setDetail({ type: "feed", id: card.id });
-                        // 从回顾点开 = 在读它，标记已读让「未读优先重现」
-                        // 的排序把它往后挪（markRead 由详情打开逻辑统一处理）
                       }}
                       className="block w-full rounded-[2px] border border-[#F0F0F0] px-4 py-3 text-left transition-colors hover:border-[#D9D9D9]"
                     >
                       <h4 className="flex items-center gap-2 text-[14px] font-medium text-black">
                         <span className="min-w-0 truncate">{card.title}</span>
-                        {card.read_at == null && (
-                          <span className="shrink-0 rounded-full bg-[#000000] px-1.5 py-0.5 text-[10px] font-medium text-white">
-                            从未读过
-                          </span>
-                        )}
                       </h4>
                       <p className="mt-1 line-clamp-2 text-[13px] leading-relaxed text-[#8A8A8A]">
                         {card.summary}
@@ -3124,7 +3064,7 @@ export default function KnowledgePage() {
                         {card.tags.slice(0, 4).map((t) => (
                           <span
                             key={t}
-                            className="rounded-full bg-[#ECECEC] px-2 py-0.5 text-[#4A4A4A]"
+                            className="rounded-[2px] bg-[#ECECEC] px-2 py-0.5 text-[#4A4A4A]"
                           >
                             {t}
                           </span>
@@ -3327,14 +3267,14 @@ export default function KnowledgePage() {
             {!pickerManage ? (
               <>
                 <div className="mt-3 flex max-h-52 flex-wrap gap-1.5 overflow-y-auto">
-                  {allTags.map((tag) => {
+                  {allTags.map(({ tag }) => {
                     const selected = getTagsOf(tagPicker).includes(tag);
                     return (
                       <button
                         key={tag}
                         onClick={() => toggleTagOnTarget(tag)}
                         className={cn(
-                          "flex items-center gap-1 rounded-full px-2.5 py-1 text-xs transition-all",
+                          "flex items-center gap-1 rounded-[2px] px-2.5 py-1 text-xs transition-all",
                           selected
                             ? "bg-[#000000] font-medium text-white"
                             : "bg-[#ECECEC] text-[#4A4A4A] hover:bg-[#E0E0E0]",
@@ -3366,7 +3306,7 @@ export default function KnowledgePage() {
             ) : (
               <>
                 <div className="mt-3 max-h-64 space-y-2 overflow-y-auto">
-                  {allTags.map((tag) => (
+                  {allTags.map(({ tag }) => (
                     <div key={tag} className="flex items-center gap-2">
                       <input
                         type="text"

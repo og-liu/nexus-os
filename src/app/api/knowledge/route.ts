@@ -12,7 +12,6 @@ import { NextResponse, type NextRequest } from "next/server";
 import { getDb } from "@/lib/db";
 import {
   countsByStatus,
-  countUnread,
   createItem,
   KNOWLEDGE_STATUSES,
   listItems,
@@ -92,8 +91,8 @@ function scheduleAutoRefetch(id: string) {
   }, 45_000);
 }
 
-// GET /api/knowledge?status=inbox&kind=captured&q=关键词&tag=标签&unread=1&limit=50&offset=0
-// 返回 { items, total, counts }。unread=1 只返回没读过的（待处理「只看未读」开关）
+// GET /api/knowledge?status=inbox&kind=captured&q=关键词&tag=标签&limit=50&offset=0
+// 返回 { items, total, counts }。tag 可重复传多个，命中者需同时拥有所有选中标签（AND 交集）
 export async function GET(req: NextRequest) {
   const statuses = parseStatus(req.nextUrl.searchParams.get("status"));
   if (statuses === "invalid") {
@@ -116,8 +115,6 @@ export async function GET(req: NextRequest) {
   const sp = req.nextUrl.searchParams;
   const parsedLimit = parseInt(sp.get("limit") ?? "", 10);
   const parsedOffset = parseInt(sp.get("offset") ?? "", 10);
-  // 阶段4 P2·智能列表：「近七天」快捷视图传 since（毫秒时间戳），NaN 忽略
-  const parsedSince = parseInt(sp.get("since") ?? "", 10);
 
   try {
     const db = getDb();
@@ -132,10 +129,7 @@ export async function GET(req: NextRequest) {
       notStatus: statuses ? undefined : "trashed",
       kind,
       q: sp.get("q") ?? undefined,
-      tag: sp.get("tag") ?? undefined,
-      // 只看未读：值宽容处理，除了空串和 "0" 都算开启（"1"/"true" 常见形态全接）
-      unreadOnly: ["1", "true"].includes((sp.get("unread") ?? "").toLowerCase()),
-      since: Number.isNaN(parsedSince) ? undefined : parsedSince,
+      tags: sp.getAll("tag"),
       limit: Number.isNaN(parsedLimit) ? undefined : parsedLimit,
       offset: Number.isNaN(parsedOffset) ? undefined : parsedOffset,
     });
@@ -154,11 +148,8 @@ export async function GET(req: NextRequest) {
 
     return NextResponse.json({
       ...result,
-      // unread 单独给：侧栏角标要的是「还没看过的条数」而不是待处理总数，
-      // 读过的条目不该继续制造紧迫感
       counts: {
         ...countsByStatus(db),
-        unread: countUnread(db),
         agedInbox: agingOff ? 0 : countAgedInbox(db, agingDays),
       },
     });

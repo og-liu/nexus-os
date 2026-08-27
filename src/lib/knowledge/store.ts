@@ -66,8 +66,6 @@ export interface KnowledgeItemRow {
   kind: KnowledgeKind;
   /** 进入回收站的时间（仅 trashed 有值），7 天懒清理依据 */
   deleted_at: number | null;
-  /** 首次点开阅读的时间（阶段2 P0·未读聚焦），NULL = 未读（蓝点依据） */
-  read_at: number | null;
   /** 剥净的正文 HTML（阶段2 P0·永久快照），只在详情接口返回；列表查询刻意不拖它 */
   snapshot_html?: string | null;
   /** 1 = 只按链接降级落库（阶段2 P0·失败兜底），重试成功后清零 */
@@ -97,7 +95,6 @@ interface ItemSqlRow {
   status: string;
   kind: string;
   deleted_at: number | null;
-  read_at?: number | null;
   snapshot_html?: string | null;
   degraded?: number;
   /** 自动解读的 4 列：列表显式列查询不取，详情 SELECT * 才带（同 snapshot_html） */
@@ -157,8 +154,7 @@ function attachTags(conn: Database.Database, rows: ItemSqlRow[]): KnowledgeItemR
     ...r,
     status: r.status as KnowledgeStatus,
     kind: r.kind as KnowledgeKind,
-    // 显式列查询必有这两列；?? 兜底是给「SELECT * 之外的手写查询漏列」上保险
-    read_at: r.read_at ?? null,
+    // 显式列查询必有这一列；?? 兜底是给「SELECT * 之外的手写查询漏列」上保险
     degraded: r.degraded ?? 0,
     tags: tagsByItem.get(r.id) ?? [],
   }));
@@ -250,15 +246,8 @@ export interface ListOptions {
   notStatus?: KnowledgeStatus;
   /** 出身过滤：知识流只看 captured、我的文章只看 note，由调用方显式指定防串味 */
   kind?: KnowledgeKind;
-  /** 只看未读（read_at IS NULL）：待处理页「只看未读」开关的支撑。
-   *  为什么不在前端过滤列表：服务端过滤后 total 才是未读总数，
-   *  前端过滤拿不到「还剩几条没读」的真实计数 */
-  unreadOnly?: boolean;
-  /** 标签精确过滤（单标签起步；多标签 AND/OR 组合留给需要时再加） */
-  tag?: string;
-  /** 阶段4 P2·智能列表：只看这个时间戳（毫秒）之后采集的条目——
-   *  「最近七天」快捷视图的支撑。服务端过滤的理由同 unreadOnly */
-  since?: number;
+  /** 标签精确过滤（多标签 AND 交集：同时拥有所有选中标签才命中） */
+  tags?: string[];
   /** 关键词：LIKE 子串匹配 title / content。中文场景够用的最低成本检索，
    *  语义检索（向量）属于 K4 阶段，届时在这层之上叠加而非替换。 */
   q?: string;
@@ -295,13 +284,6 @@ export function listItems(
     conds.push("kind = ?");
     params.push(opts.kind);
   }
-  if (opts.unreadOnly) {
-    conds.push("read_at IS NULL");
-  }
-  if (opts.since !== undefined) {
-    conds.push("created_at >= ?");
-    params.push(opts.since);
-  }
   if (opts.q) {
     // 阶段3 P1·全文搜索：≥3 字符走 FTS5（trigram 子串匹配 + 倒排索引加速，
     // 「只记得正文里一句话」也能搜到）；<3 字符回落 LIKE——trigram 的
@@ -322,11 +304,15 @@ export function listItems(
       params.push(like, like);
     }
   }
-  if (opts.tag) {
-    conds.push(
-      `EXISTS (SELECT 1 FROM knowledge_item_tags t WHERE t.item_id = knowledge_items.id AND t.tag = ?)`,
-    );
-    params.push(opts.tag);
+  if (opts.tags && opts.tags.length > 0) {
+    // 多标签 AND 交集：每个选中标签各拼一个 EXISTS，全部满足才命中。
+    // 不选（空数组）等于不过滤，等价于「全部」
+    for (const t of opts.tags) {
+      conds.push(
+        `EXISTS (SELECT 1 FROM knowledge_item_tags t WHERE t.item_id = knowledge_items.id AND t.tag = ?)`,
+      );
+      params.push(t);
+    }
   }
 
   const where = conds.length > 0 ? `WHERE ${conds.join(" AND ")}` : "";
@@ -336,7 +322,7 @@ export function listItems(
   // 是详情才需要的大字段，列表一页几十条全拖回来纯属浪费带宽和内存
   const rows = conn
     .prepare(
-      `SELECT id, title, content, source, source_url, status, kind, deleted_at, read_at, degraded, created_at, updated_at
+      `SELECT id, title, content, source, source_url, status, kind, deleted_at, degraded, created_at, updated_at
        FROM knowledge_items ${where} ORDER BY updated_at DESC, rowid DESC LIMIT ? OFFSET ?`,
     )
     .all(...params, limit, offset) as ItemSqlRow[];
@@ -352,8 +338,6 @@ export interface UpdateItemPatch {
   title?: string;
   content?: string;
   status?: KnowledgeStatus;
-  /** true = 标记为已读（记录首次阅读时间，重复标记不覆盖） */
-  read?: boolean;
   /** 快照 / 指纹 / 降级标记：重试抓取成功时由 refetch 一并更新 */
   snapshot_html?: string | null;
   simhash?: string | null;
@@ -397,12 +381,6 @@ export function updateItem(
   if (patch.status !== undefined) {
     sets.push("status = ?");
     params.push(patch.status);
-  }
-  if (patch.read === true) {
-    // COALESCE 保住第一次的阅读时间：已读的重复标记是幂等无害的，
-    // 不该把「三天前读过」刷成「刚刚读过」
-    sets.push("read_at = COALESCE(read_at, ?)");
-    params.push(Date.now());
   }
   if (patch.snapshot_html !== undefined) {
     sets.push("snapshot_html = ?");
@@ -640,8 +618,7 @@ export function countAgedInbox(
  *  - todayKept：今天拍板留下的（用 updated_at 近似拍板时间：个人库改标签
  *    也会刷它，略微虚高但方向正确；为精确而单独立一列拍板时间戳，
  *    等真实反馈觉得有必要再说）
- *  - revisit：重温候选。排序 COALESCE(read_at, 0)：从未读过的排最前
- *    （存了就再没打开过，正是「存了不读」的病灶），读得很久的其次。
+ *  - revisit：重温候选。按 created_at 升序（存得最久的最该重温），
  *    取最久远的 20 条给调用方随机挑——固定「最老四条」会让人产生
  *    「回顾页永远那几条」的疲劳感，轻随机保持新鲜 */
 export function getReviewItems(
@@ -654,7 +631,6 @@ export function getReviewItems(
     title: string;
     summary: string;
     tags: string[];
-    read_at: number | null;
     created_at: number;
   }>;
 } {
@@ -676,15 +652,14 @@ export function getReviewItems(
   // 不是常规列表，带正文前 160 字作摘要兜底，这点带宽不心疼
   const rows = conn
     .prepare(
-      `SELECT id, title, content, read_at, created_at FROM knowledge_items
+      `SELECT id, title, content, created_at FROM knowledge_items
        WHERE status = 'kept' AND deleted_at IS NULL
-       ORDER BY COALESCE(read_at, 0) ASC, created_at ASC LIMIT 20`,
+       ORDER BY created_at ASC LIMIT 20`,
     )
     .all() as Array<{
     id: string;
     title: string;
     content: string;
-    read_at: number | null;
     created_at: number;
   }>;
 
@@ -714,7 +689,6 @@ export function getReviewItems(
     title: r.title,
     summary: r.content.replace(/\s+/g, " ").trim().slice(0, 160),
     tags: tagMap.get(r.id) ?? [],
-    read_at: r.read_at,
     created_at: r.created_at,
   }));
 
@@ -725,26 +699,6 @@ export function getReviewItems(
   };
 }
 
-/** 批量标记已读：打开详情时逐条 PATCH 太碎，这里一条语句打一批。
- *  COALESCE 语义与 updateItem(read) 一致——只记第一次阅读时间 */
-export function markRead(conn: Database.Database, ids: string[]): number {
-  if (ids.length === 0) return 0;
-  const info = conn
-    .prepare(
-      `UPDATE knowledge_items SET read_at = COALESCE(read_at, ?) WHERE id IN (${ids.map(() => "?").join(", ")})`,
-    )
-    .run(Date.now(), ...ids);
-  return info.changes;
-}
-
-/** 待处理里的未读数：侧栏角标显示「还有几条没看过」，比条目总数更贴合
- *  「待办」心智——读过的即使还没拍板，也不再制造紧迫感 */
-export function countUnread(conn: Database.Database): number {
-  const row = conn
-    .prepare(`SELECT COUNT(*) AS c FROM knowledge_items WHERE status = 'inbox' AND read_at IS NULL`)
-    .get() as { c: number };
-  return row.c;
-}
 // ─── K4 向量检索：语义指纹存取 + 混合检索（关键词路 × 语义路 RRF 融合）───
 
 /**

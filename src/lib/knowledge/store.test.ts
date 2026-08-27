@@ -118,14 +118,14 @@ describe("knowledge store · listItems", () => {
   });
 
   it("按标签精确过滤", () => {
-    const rag = listItems(conn, { tag: "rag" });
+    const rag = listItems(conn, { tags: ["rag"] });
     expect(rag.total).toBe(1);
     expect(rag.items[0]?.title).toBe("RAG 入门");
   });
 
   it("status + tag + q 组合条件是 AND 关系", () => {
-    expect(listItems(conn, { tag: "agent", q: "规划" }).total).toBe(1);
-    expect(listItems(conn, { tag: "agent", q: "番茄" }).total).toBe(0);
+    expect(listItems(conn, { tags: ["agent"], q: "规划" }).total).toBe(1);
+    expect(listItems(conn, { tags: ["agent"], q: "番茄" }).total).toBe(0);
   });
 
   it("limit/offset 分页且 total 不随分页变化", () => {
@@ -455,59 +455,34 @@ describe("knowledge store · 混合检索 searchHybrid（K4）", () => {
   });
 });
 
-describe("阶段4 P2 · 智能列表 since 过滤 + 每日回顾数据", () => {
-  it("since：只返回指定时间之后采集的条目", () => {
-    const now = Date.now();
-    const old = createItem(conn, {
-      title: "一周前的老条目",
-      content: "c",
+describe("阶段4 P2 · 多标签 AND 过滤 + 每日回顾数据", () => {
+  it("getReviewItems：创建时间最久的排最前（存得越久越该重温）", () => {
+    const oldest = createItem(conn, {
+      title: "存最久的",
+      content: "很久以前存的",
       status: "kept",
     });
-    const fresh = createItem(conn, {
-      title: "刚存的新条目",
-      content: "c",
+    const middle = createItem(conn, {
+      title: "存中间的",
+      content: "一段时间前存的",
       status: "kept",
     });
-    // createItem 的 created_at 用当下时间，手工把老条目改回 8 天前
+    const newest = createItem(conn, {
+      title: "刚存的",
+      content: "刚存进知识流",
+      status: "kept",
+    });
+    // createItem 的 created_at 都取当下时间，手工把三条改开，验证排序按存库时间升序
     conn
       .prepare("UPDATE knowledge_items SET created_at = ? WHERE id = ?")
-      .run(now - 8 * 24 * 3_600_000, old.id);
-
-    const { items, total } = listItems(conn, {
-      status: "kept",
-      since: now - 7 * 24 * 3_600_000,
-    });
-    expect(total).toBe(1);
-    expect(items.map((i) => i.id)).toEqual([fresh.id]);
-  });
-
-  it("getReviewItems：从未读过的排最前，读过的按最早阅读时间排", () => {
-    const unread = createItem(conn, {
-      title: "存了从没读",
-      content: "从未读过的内容",
-      status: "kept",
-    });
-    const readOld = createItem(conn, {
-      title: "读过的老条目",
-      content: "很早读过",
-      status: "kept",
-    });
-    const readNew = createItem(conn, {
-      title: "读过的新条目",
-      content: "最近读过",
-      status: "kept",
-    });
-    // readOld：10 天前读过；readNew：1 天前读过（markRead 用当下时间，手工改）
+      .run(Date.now() - 10 * 24 * 3_600_000, oldest.id);
     conn
-      .prepare("UPDATE knowledge_items SET read_at = ? WHERE id = ?")
-      .run(Date.now() - 10 * 24 * 3_600_000, readOld.id);
-    conn
-      .prepare("UPDATE knowledge_items SET read_at = ? WHERE id = ?")
-      .run(Date.now() - 1 * 24 * 3_600_000, readNew.id);
+      .prepare("UPDATE knowledge_items SET created_at = ? WHERE id = ?")
+      .run(Date.now() - 3 * 24 * 3_600_000, middle.id);
 
     const { revisit } = getReviewItems(conn);
-    // 顺序断言：从未读（COALESCE(read_at,0)=0）→ 最早读过的 → 最近读过的
-    expect(revisit.map((r) => r.id)).toEqual([unread.id, readOld.id, readNew.id]);
+    // 最久入库的排最前：oldest → middle → newest（newest 保持当下时间）
+    expect(revisit.map((r) => r.id)).toEqual([oldest.id, middle.id, newest.id]);
   });
 
   it("getReviewItems：只有 kept 参与，回收站/待处理/草稿不进重温", () => {
