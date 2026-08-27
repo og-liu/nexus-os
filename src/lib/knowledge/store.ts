@@ -498,7 +498,26 @@ export interface TagCount {
   count: number;
 }
 
-export function listTags(conn: Database.Database): TagCount[] {
+export function listTags(
+  conn: Database.Database,
+  opts: { status?: KnowledgeStatus } = {},
+): TagCount[] {
+  // 顶部筛选栏需要「知识流里留下（kept）」的精确计数，不能把回收站 / 待处理 /
+  // 丢弃里残留的同名标签也算进去（否则数字跟列表对不上）；候选列表与
+  // 「管理标签」保持全量（不传 status）——标签只要出现过就该能被看到、改到
+  if (opts.status) {
+    assertStatus(opts.status);
+    return conn
+      .prepare(
+        `SELECT t.tag, COUNT(*) AS count
+         FROM knowledge_item_tags t
+         JOIN knowledge_items i ON i.id = t.item_id
+         WHERE i.status = ?
+         GROUP BY t.tag
+         ORDER BY count DESC, t.tag`,
+      )
+      .all(opts.status) as TagCount[];
+  }
   return conn
     .prepare(
       `SELECT tag, COUNT(*) AS count FROM knowledge_item_tags GROUP BY tag ORDER BY count DESC, tag`,

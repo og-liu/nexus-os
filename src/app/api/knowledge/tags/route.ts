@@ -14,7 +14,14 @@ export const dynamic = "force-dynamic";
 // GET /api/knowledge/tags —— 全部标签 + 使用计数（降序），驱动标签选择器与筛选入口
 export async function GET() {
   try {
-    return NextResponse.json({ tags: listTags(getDb()) });
+    const db = getDb();
+    return NextResponse.json({
+      // tags：全量标签（驱动打标签候选 + 「管理标签」列表，标签只要出现过就该可见）
+      tags: listTags(db),
+      // feedTags：只数「知识流里留下（kept）」的条目，驱动顶部筛选栏的计数——
+      // 跟列表一条不差地对齐；回收站 / 待处理 / 丢弃里的同名标签不计入
+      feedTags: listTags(db, { status: "kept" }),
+    });
   } catch (e) {
     console.error("[knowledge:tags:list]", e);
     return NextResponse.json({ error: "读取标签失败" }, { status: 500 });

@@ -392,6 +392,8 @@ export default function KnowledgePage() {
   const [trash, setTrash] = useState<TrashItem[]>([]);
   // 全部标签及其使用计数，从 /api/knowledge/tags 拉取；计数驱动顶部筛选按频次排序
   const [allTags, setAllTags] = useState<Array<{ tag: string; count: number }>>([]);
+  // 顶部筛选栏专用：只数「知识流里留下（kept）」的标签，跟列表一条不差
+  const [feedTags, setFeedTags] = useState<Array<{ tag: string; count: number }>>([]);
   // 标签多选筛选：顶部标签 chips 点选/再点取消，服务端多 tag AND 交集；空数组 = 全部
   const [activeTags, setActiveTags] = useState<string[]>([]);
   // 标签太多时默认折叠，点「展开」看全量
@@ -462,6 +464,11 @@ export default function KnowledgePage() {
     const data = await res.json();
     setAllTags(
       (data.tags as Array<{ tag: string; count: number }>).sort(
+        (a, b) => b.count - a.count,
+      ),
+    );
+    setFeedTags(
+      (data.feedTags as Array<{ tag: string; count: number }>).sort(
         (a, b) => b.count - a.count,
       ),
     );
@@ -1617,6 +1624,7 @@ export default function KnowledgePage() {
     const name = newName.trim();
     if (!name || name === oldName) return;
     setAllTags((prev) => prev.map((t) => (t.tag === oldName ? { ...t, tag: name } : t)));
+    setFeedTags((prev) => prev.map((t) => (t.tag === oldName ? { ...t, tag: name } : t)));
     setFeed((prev) =>
       prev.map((f) => ({
         ...f,
@@ -1646,6 +1654,7 @@ export default function KnowledgePage() {
       okText: "删除标签",
       onOk: () => {
         setAllTags((prev) => prev.filter((t) => t.tag !== tag));
+        setFeedTags((prev) => prev.filter((t) => t.tag !== tag));
         setFeed((prev) =>
           prev.map((f) => ({ ...f, tags: f.tags.filter((t) => t !== tag) })),
         );
@@ -2234,8 +2243,8 @@ export default function KnowledgePage() {
                 空选 = 全部。频次降序排放；超过 12 个默认折叠，点「展开」看全量。
                 全设备 wrap 换行，手机端不横滑，过滤切换与搜索共用同一套防抖重拉 */}
             <div className="flex flex-wrap items-center gap-1.5">
-              {allTags
-                .slice(0, tagsExpanded ? allTags.length : 12)
+              {feedTags
+                .slice(0, tagsExpanded ? feedTags.length : 12)
                 .map(({ tag, count }) => {
                   const active = activeTags.includes(tag);
                   return (
@@ -2261,12 +2270,12 @@ export default function KnowledgePage() {
                     </button>
                   );
                 })}
-              {allTags.length > 12 && (
+              {feedTags.length > 12 && (
                 <button
                   onClick={() => setTagsExpanded((v) => !v)}
                   className="rounded-[2px] px-2 py-1 text-xs text-[#8A8A8A] transition-colors hover:text-black"
                 >
-                  {tagsExpanded ? "收起" : `展开 +${allTags.length - 12}`}
+                  {tagsExpanded ? "收起" : `展开 +${feedTags.length - 12}`}
                 </button>
               )}
               {activeTags.length > 0 && (
