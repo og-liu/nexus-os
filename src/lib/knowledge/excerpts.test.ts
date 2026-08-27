@@ -36,8 +36,8 @@ describe("excerpts · 摘录 CRUD", () => {
       content: "c",
       source: "手动采集",
     });
-    const first = addExcerpt(conn, item.id, "金句");
-    const second = addExcerpt(conn, item.id, "金句");
+    const first = addExcerpt(conn, item.id, "一句金句");
+    const second = addExcerpt(conn, item.id, "一句金句");
 
     expect("row" in first).toBe(true);
     expect("duplicate" in second).toBe(true);

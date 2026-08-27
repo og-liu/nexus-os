@@ -24,7 +24,7 @@ describe("rules · 规则管理", () => {
     const r1 = addRule(conn, { type: "domain", pattern: "github.com", tag: "开源" });
     expect(() =>
       addRule(conn, { type: "domain", pattern: "github.com", tag: "代码" }),
-    ).toThrow("已存在");
+    ).toThrow("已经存在");
 
     // 同 pattern 不同型是两条独立规则（语义不同：域名 vs 关键词）
     const r2 = addRule(conn, { type: "keyword", pattern: "github.com", tag: "平台" });
@@ -80,7 +80,12 @@ describe("rules · applyRulesToItem", () => {
     });
 
     applyRulesToItem(conn, item.id);
-    expect(getItem(conn, item.id)?.tags).toEqual(["笔记", "agent"]);
+    // 读出侧按字典序稳定排序（store.normalizeTags），所以这里验证集合语义：
+    // 人工标签「笔记」还在 + 规则标签「agent」被追加，两个都在、也只有两个
+    const tags = getItem(conn, item.id)?.tags ?? [];
+    expect(tags).toHaveLength(2);
+    expect(tags).toContain("笔记");
+    expect(tags).toContain("agent");
   });
 
   it("停用的规则不参与匹配；不存在的条目安全返回空", () => {
