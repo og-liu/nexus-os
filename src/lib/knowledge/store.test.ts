@@ -21,6 +21,8 @@ import {
   setEmbedding,
   listItemsNeedingEmbedding,
   searchHybrid,
+  getReviewItems,
+  countAgedInbox,
 } from "./store";
 
 let conn: Database.Database;
@@ -450,5 +452,87 @@ describe("knowledge store · 混合检索 searchHybrid（K4）", () => {
     expect(listItemsNeedingEmbedding(conn).map((i) => i.id)).not.toContain(
       item.id,
     );
+  });
+});
+
+describe("阶段4 P2 · 智能列表 since 过滤 + 每日回顾数据", () => {
+  it("since：只返回指定时间之后采集的条目", () => {
+    const now = Date.now();
+    const old = createItem(conn, {
+      title: "一周前的老条目",
+      content: "c",
+      status: "kept",
+    });
+    const fresh = createItem(conn, {
+      title: "刚存的新条目",
+      content: "c",
+      status: "kept",
+    });
+    // createItem 的 created_at 用当下时间，手工把老条目改回 8 天前
+    conn
+      .prepare("UPDATE knowledge_items SET created_at = ? WHERE id = ?")
+      .run(now - 8 * 24 * 3_600_000, old.id);
+
+    const { items, total } = listItems(conn, {
+      status: "kept",
+      since: now - 7 * 24 * 3_600_000,
+    });
+    expect(total).toBe(1);
+    expect(items.map((i) => i.id)).toEqual([fresh.id]);
+  });
+
+  it("getReviewItems：从未读过的排最前，读过的按最早阅读时间排", () => {
+    const unread = createItem(conn, {
+      title: "存了从没读",
+      content: "从未读过的内容",
+      status: "kept",
+    });
+    const readOld = createItem(conn, {
+      title: "读过的老条目",
+      content: "很早读过",
+      status: "kept",
+    });
+    const readNew = createItem(conn, {
+      title: "读过的新条目",
+      content: "最近读过",
+      status: "kept",
+    });
+    // readOld：10 天前读过；readNew：1 天前读过（markRead 用当下时间，手工改）
+    conn
+      .prepare("UPDATE knowledge_items SET read_at = ? WHERE id = ?")
+      .run(Date.now() - 10 * 24 * 3_600_000, readOld.id);
+    conn
+      .prepare("UPDATE knowledge_items SET read_at = ? WHERE id = ?")
+      .run(Date.now() - 1 * 24 * 3_600_000, readNew.id);
+
+    const { revisit } = getReviewItems(conn);
+    // 顺序断言：从未读（COALESCE(read_at,0)=0）→ 最早读过的 → 最近读过的
+    expect(revisit.map((r) => r.id)).toEqual([unread.id, readOld.id, readNew.id]);
+  });
+
+  it("getReviewItems：只有 kept 参与，回收站/待处理/草稿不进重温", () => {
+    createItem(conn, { title: "kept 的", content: "c", status: "kept" });
+    createItem(conn, { title: "inbox 的", content: "c", status: "inbox" });
+    createItem(conn, { title: "draft 的", content: "c", status: "draft" });
+
+    const { revisit } = getReviewItems(conn);
+    expect(revisit.map((r) => r.title)).toEqual(["kept 的"]);
+  });
+
+  it("countAgedInbox：只数待处理里超过 N 天的，其他状态不算", () => {
+    const now = Date.now();
+    const aged = createItem(conn, {
+      title: "躺了很久",
+      content: "c",
+      status: "inbox",
+    });
+    createItem(conn, { title: "刚来的", content: "c", status: "inbox" });
+    createItem(conn, { title: "老的但已拍板", content: "c", status: "kept" });
+    conn
+      .prepare("UPDATE knowledge_items SET created_at = ? WHERE id = ?")
+      .run(now - 40 * 24 * 3_600_000, aged.id);
+
+    expect(countAgedInbox(conn, 30)).toBe(1);
+    expect(countAgedInbox(conn, 60)).toBe(0);
   });
 });

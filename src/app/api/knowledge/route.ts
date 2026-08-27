@@ -29,6 +29,8 @@ import {
 import { simhash64 } from "@/lib/knowledge/simhash";
 import { refetchItem } from "@/lib/knowledge/refetch";
 import { scheduleInterpret } from "@/lib/knowledge/interpret";
+import { applyRulesToItem } from "@/lib/knowledge/rules";
+import { countAgedInbox } from "@/lib/knowledge/store";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic"; // 每次请求都读最新库，不做任何缓存
@@ -114,6 +116,8 @@ export async function GET(req: NextRequest) {
   const sp = req.nextUrl.searchParams;
   const parsedLimit = parseInt(sp.get("limit") ?? "", 10);
   const parsedOffset = parseInt(sp.get("offset") ?? "", 10);
+  // 阶段4 P2·智能列表：「近七天」快捷视图传 since（毫秒时间戳），NaN 忽略
+  const parsedSince = parseInt(sp.get("since") ?? "", 10);
 
   try {
     const db = getDb();
@@ -131,14 +135,32 @@ export async function GET(req: NextRequest) {
       tag: sp.get("tag") ?? undefined,
       // 只看未读：值宽容处理，除了空串和 "0" 都算开启（"1"/"true" 常见形态全接）
       unreadOnly: ["1", "true"].includes((sp.get("unread") ?? "").toLowerCase()),
+      since: Number.isNaN(parsedSince) ? undefined : parsedSince,
       limit: Number.isNaN(parsedLimit) ? undefined : parsedLimit,
       offset: Number.isNaN(parsedOffset) ? undefined : parsedOffset,
     });
+
+    // 阶段4 P2·过期清理（提示版）：待处理堆积计数。默认 30 天阈值，
+    // KNOWLEDGE_INBOX_AGING_DAYS 可调；KNOWLEDGE_INBOX_AGING=0/off 彻底
+    // 关掉提示（方案里这项「默认关」——但提示本身无破坏性，默认开、
+    // 嫌烦的人关，比反过来更符合「堆积可见」的初衷）
+    const agingOff = ["0", "off", "false"].includes(
+      (process.env.KNOWLEDGE_INBOX_AGING ?? "").toLowerCase(),
+    );
+    const agingDays = Math.max(
+      1,
+      parseInt(process.env.KNOWLEDGE_INBOX_AGING_DAYS ?? "30", 10) || 30,
+    );
+
     return NextResponse.json({
       ...result,
       // unread 单独给：侧栏角标要的是「还没看过的条数」而不是待处理总数，
       // 读过的条目不该继续制造紧迫感
-      counts: { ...countsByStatus(db), unread: countUnread(db) },
+      counts: {
+        ...countsByStatus(db),
+        unread: countUnread(db),
+        agedInbox: agingOff ? 0 : countAgedInbox(db, agingDays),
+      },
     });
   } catch (e) {
     console.error("[knowledge:list]", e);
@@ -240,6 +262,8 @@ export async function POST(req: NextRequest) {
         // LLM 要跑几秒，不能让「保存」按钮等它；解读完成前详情页照常打开，
         // 只是还没有 AI 导读区块，生成完刷新即可见
         scheduleInterpret(item.id);
+        // 自动打标（阶段4 P2）：域名/关键词规则在这里挂上，与解读互不依赖
+        applyRulesToItem(getDb(), item.id);
         return NextResponse.json({ item }, { status: 201 });
       } catch (e) {
         console.error("[knowledge:create:url]", e);
@@ -265,6 +289,10 @@ export async function POST(req: NextRequest) {
       });
       void syncEmbedding(getDb(), item.id, item.title, item.content);
       scheduleAutoRefetch(item.id);
+      // 自动打标（阶段4 P2）：降级条目也有域名，domain 规则照常能挂；
+      // keyword 规则要等重抓补全正文后才有料——refetch 成功后不重跑规则，
+      // 打标不全会由「AI 先帮我看看」的候选标签兜住，够用
+      applyRulesToItem(getDb(), item.id);
       return NextResponse.json(
         { item, degraded: fetched.reason },
         { status: 201 },
@@ -335,6 +363,8 @@ export async function POST(req: NextRequest) {
     // 文本采集同样排队解读；手写文章（note）不解读——自己写的东西自己最清楚，
     // 「值不值得读」的判断场景不成立，白烧一次 LLM
     if (!isNote) scheduleInterpret(item.id);
+    // 自动打标（阶段4 P2）：采集文本同样过一遍规则
+    if (!isNote) applyRulesToItem(getDb(), item.id);
     return NextResponse.json(item, { status: 201 });
   } catch (e) {
     console.error("[knowledge:create]", e);

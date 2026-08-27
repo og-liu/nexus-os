@@ -64,6 +64,8 @@ interface InboxItem {
   degraded: boolean;
   /** 阶段2 P0·永久快照：详情「查看原文」的入口。列表不拖正文与快照 */
   sourceUrl: string | null;
+  /** 阶段4 P2·过期清理：进库时间（毫秒），驱动「超过 30 天」提示与批量处理 */
+  createdAt: number;
 }
 
 interface TrashItem {
@@ -233,6 +235,9 @@ function toInboxItem(row: KnowledgeRow): InboxItem {
     unread: row.read_at == null,
     degraded: row.degraded === 1,
     sourceUrl: row.source_url ?? null,
+    // 阶段4 P2·过期清理：前端判断「超过 30 天」要用（展示、批量丢弃），
+    // 毫秒时间戳原样带过来，展示层的相对时间统一用 formatRelTime 现算
+    createdAt: row.created_at,
   };
 }
 
@@ -418,15 +423,37 @@ export default function KnowledgePage() {
   /** 拉我的知识库（kept 列表）：关键词 q 与标签 tag 传给服务端组合过滤——
    *  LIKE 检索和标签匹配在 store 层拼 WHERE 条件，前端只负责拼参数。
    *  这取代了 K1 之前「整页拉回来前端 filter」的做法：数据库是唯一真相，
-   *  分页/大数据量时也不会把全表拖到浏览器 */
-  const loadFeed = async (q: string, tag: string | null) => {
+   *  分页/大数据量时也不会把全表拖到浏览器。
+   *  阶段4 P2·智能列表：filter 走服务端参数（unread=1 / since=7 天前），
+   *  与「只看未读」开关同一套哲学——服务端过滤，total 才是真实计数 */
+  const loadFeed = async (
+    q: string,
+    tag: string | null,
+    filter: "all" | "unread" | "week" = "all",
+  ) => {
     const params = new URLSearchParams({ status: "kept", limit: "100" });
     if (q) params.set("q", q);
     if (tag) params.set("tag", tag);
+    if (filter === "unread") params.set("unread", "1");
+    if (filter === "week") {
+      params.set("since", String(Date.now() - 7 * 24 * 60 * 60 * 1000));
+    }
     const res = await fetch(`/api/knowledge?${params.toString()}`);
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const data = await res.json();
     setFeed((data.items as KnowledgeRow[]).map(toFeedItem));
+  };
+
+  /** 阶段4 P2·每日回顾：统计 + 重温候选。进 review 视图才拉，
+   *  不占首屏——回顾是低频动作，数据随进随取保持新鲜（「今日」才准） */
+  const loadReview = async () => {
+    try {
+      const res = await fetch("/api/knowledge/review");
+      if (!res.ok) return;
+      setReviewData(await res.json());
+    } catch {
+      /* 回顾拉失败保持原状（可能还是 null），视图有空态兜底 */
+    }
   };
 
   /** 拉全部标签及计数，驱动标签选择器候选列表（新打标签后也要刷新它） */
@@ -456,7 +483,8 @@ export default function KnowledgePage() {
   };
 
   /** 拉待处理列表。「只看未读」开关切换时带 unread=1 让服务端过滤——
-   *  这样拿到的 total 就是未读总数，蓝点消失一条列表少一条，前端不用自己算 */
+   *  这样拿到的 total 就是未读总数，蓝点消失一条列表少一条，前端不用自己算。
+   *  顺手存 counts：agedInbox（阶段4 P2·过期清理）驱动待处理顶部的堆积提示条 */
   const loadInbox = async (unreadOnly: boolean) => {
     const params = new URLSearchParams({ status: "inbox", limit: "100" });
     if (unreadOnly) params.set("unread", "1");
@@ -464,6 +492,9 @@ export default function KnowledgePage() {
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const data = await res.json();
     setInbox((data.items as KnowledgeRow[]).map(toInboxItem));
+    if (typeof data.counts?.agedInbox === "number") {
+      setAgedInbox(data.counts.agedInbox as number);
+    }
   };
 
   // 首屏并行拉五路数据：待处理、我的知识库、标签、我的文章、回收站。
@@ -548,6 +579,10 @@ export default function KnowledgePage() {
     }
   }, [section]);
 
+  // ── 阶段4 P2·智能列表：feed 视图快捷过滤（全部 / 未读 / 近七天）──
+  // 声明必须先于下方防抖 effect：effect 依赖数组里引用了它
+  const [feedFilter, setFeedFilter] = useState<"all" | "unread" | "week">("all");
+
   // 搜索 + 标签筛选联动：任一变化后停手 350ms 才发一次请求——连续按键只打
   // 最后一枪，避免每个字符一趟往返。首帧跳过：初值就是空搜索，主加载已拉过
   const skipNextSearch = useRef(true);
@@ -559,7 +594,7 @@ export default function KnowledgePage() {
     const timer = window.setTimeout(async () => {
       setSearching(true);
       try {
-        await loadFeed(searchQuery.trim(), activeTag);
+        await loadFeed(searchQuery.trim(), activeTag, feedFilter);
       } catch {
         showToast("检索失败，请重试");
       } finally {
@@ -567,7 +602,9 @@ export default function KnowledgePage() {
       }
     }, 350);
     return () => window.clearTimeout(timer);
-  }, [searchQuery, activeTag]);
+    // feedFilter 在依赖里：切换「未读/近七天」与改搜索词走同一套防抖，
+    // 一处节流逻辑管全部触发源，不另开一条即时通道
+  }, [searchQuery, activeTag, feedFilter]);
 
   // 文章编辑（id 是真库 UUID；「draft-」前缀表示尚未落库的新建草稿）
   const [editingNoteId, setEditingNoteId] = useState<string | null>(null);
@@ -603,6 +640,40 @@ export default function KnowledgePage() {
   const lastInboxClick = useRef<number>(-1);
   // 快捷键焦点：j/k 移动的高亮卡片下标，-1 = 没有焦点（还没开始键盘操作）
   const [focusIdx, setFocusIdx] = useState(-1);
+
+  // ── 阶段4 P2·每日回顾：真实数据替换原型期的硬编码占位 ──
+  interface RevisitCard {
+    id: string;
+    title: string;
+    summary: string;
+    tags: string[];
+    read_at: number | null;
+    created_at: number;
+  }
+  const [reviewData, setReviewData] = useState<{
+    todayCaptured: number;
+    todayKept: number;
+    revisit: RevisitCard[];
+    poolSize: number;
+  } | null>(null);
+
+  // ── 阶段4 P2·过期清理提示：待处理里超过 30 天没拍板的条数 ──
+  const [agedInbox, setAgedInbox] = useState(0);
+
+  // ── 阶段4 P2·批量去重：重复报告视图 ──
+  interface DupGroup {
+    reason: "url" | "simhash";
+    items: Array<{ id: string; title: string; status: string; created_at: number }>;
+  }
+  const [dupGroups, setDupGroups] = useState<DupGroup[] | null>(null);
+  const [dedupBusy, setDedupBusy] = useState(false);
+
+  // ── 阶段4 P2·摘录：详情页选中文字存「读书划线」──
+  const [selectedText, setSelectedText] = useState("");
+  const [excerpts, setExcerpts] = useState<
+    Array<{ id: string; text: string; note: string | null; created_at: number }>
+  >([]);
+  const [excerptBusy, setExcerptBusy] = useState(false);
   // 重试抓取进行中的条目（按钮转圈防连击）
   const [refetchingId, setRefetchingId] = useState<string | null>(null);
   // 解读生成进行中的条目（同款防连击）
@@ -619,6 +690,179 @@ export default function KnowledgePage() {
   const pickOption = (qid: number, key: string) => {
     setAnswered((prev) => (prev[qid] ? prev : { ...prev, [qid]: key }));
   };
+
+  // ── 阶段4 P2·批量去重 ──
+  // 拉 / 查重报告；null = 未打开查重视图，[] = 打开了但没有重复
+  const openDuplicates = async () => {
+    if (dupGroups !== null) return; // 已打开
+    setDupGroups([]); // 先置空挡住重复点击，请求回来再填真数据
+    try {
+      const res = await fetch("/api/knowledge/duplicates");
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const data = await res.json();
+      setDupGroups(data.groups ?? []);
+    } catch {
+      setDupGroups(null);
+      showToast("查重失败，请重试");
+    }
+  };
+
+  const closeDuplicates = () => {
+    setDupGroups(null);
+    // 去重动过库（discarded 的条目离开 kept），回列表前按当前过滤条件重拉
+    void loadFeed(searchQuery.trim(), activeTag, feedFilter).catch(() => {});
+  };
+
+  /** 一组重复里「保留最新、丢弃其余」：最新的信息最全（重抓/改过标签），
+   *  旧的进「不要了」（discarded 而非物理删——批量操作误判空间大，留反悔路） */
+  const dedupeGroup = async (group: DupGroup) => {
+    if (dedupBusy) return;
+    setDedupBusy(true);
+    try {
+      const newest = [...group.items].sort((a, b) => b.created_at - a.created_at)[0];
+      const discardIds = group.items.filter((i) => i.id !== newest.id).map((i) => i.id);
+      const res = await fetch("/api/knowledge/duplicates", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ discardIds }),
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const data = await res.json();
+      if (data.missing > 0) {
+        showToast(`已处理 ${data.ok} 条，${data.missing} 条已不在库里`);
+      } else {
+        showToast(`已保留最新 1 条，丢弃其余 ${data.ok} 条`);
+      }
+      // 重新拉报告：处理过的组消失，剩余组继续展示
+      const r2 = await fetch("/api/knowledge/duplicates");
+      if (r2.ok) {
+        const d2 = await r2.json();
+        setDupGroups(d2.groups ?? []);
+      }
+    } catch {
+      showToast("去重失败，请重试");
+    } finally {
+      setDedupBusy(false);
+    }
+  };
+
+  // ── 阶段4 P2·摘录（读书划线）──
+  // 详情打开时拉这条的摘录；关详情清掉。摘录和 detailFull 分开请求：
+  // detailFull 有 5 秒补拉逻辑（等 AI 解读），摘录是静态数据不用跟着重拉
+  useEffect(() => {
+    setExcerpts([]);
+    setSelectedText("");
+    if (!detail) return;
+    let alive = true;
+    fetch(`/api/knowledge/${detail.id}/excerpts`)
+      .then((r) => (r.ok ? r.json() : null))
+      .then((data) => {
+        if (alive && data) setExcerpts(data.excerpts ?? []);
+      })
+      .catch(() => {
+        /* 摘录加载失败不阻塞阅读 */
+      });
+    return () => {
+      alive = false;
+    };
+  }, [detail]);
+
+  // 正文区松开鼠标时读选区：有选中文字就亮出「存为摘录」入口。
+  // selectionchange 太吵（拖动过程中每个像素都触发），mouseup 一次读值足够
+  const handleBodyMouseUp = () => {
+    // 等 0ms 让浏览器先结算选区再读（同一事件循环里读有时拿到上一次的）
+    window.setTimeout(() => {
+      const text = window.getSelection()?.toString() ?? "";
+      setSelectedText(text.trim());
+    }, 0);
+  };
+
+  const saveExcerpt = async () => {
+    if (!detail || !selectedText || excerptBusy) return;
+    setExcerptBusy(true);
+    try {
+      const res = await fetch(`/api/knowledge/${detail.id}/excerpts`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ text: selectedText }),
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const data = await res.json();
+      if (!data.duplicate) {
+        // 后端返回新摘录行，直接追加本地列表（不再整页重拉）
+        setExcerpts((prev) => [...prev, data.excerpt]);
+        showToast("已存为摘录");
+      } else {
+        showToast("这段已经摘过了");
+      }
+      setSelectedText("");
+      window.getSelection()?.removeAllRanges();
+    } catch {
+      showToast("存摘录失败，请重试");
+    } finally {
+      setExcerptBusy(false);
+    }
+  };
+
+  const deleteExcerpt = async (excerptId: string) => {
+    if (!detail) return;
+    setExcerpts((prev) => prev.filter((e) => e.id !== excerptId)); // 乐观删，失败再说
+    try {
+      const res = await fetch(
+        `/api/knowledge/${detail.id}/excerpts?excerptId=${excerptId}`,
+        { method: "DELETE" },
+      );
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    } catch {
+      // 删失败把数据拉回来对账
+      const r2 = await fetch(`/api/knowledge/${detail.id}/excerpts`);
+      if (r2.ok) {
+        const d2 = await r2.json();
+        setExcerpts(d2.excerpts ?? []);
+      }
+      showToast("删除失败，请重试");
+    }
+  };
+
+  // ── 阶段4 P2·过期清理（提示版）：一键处理堆积的老条目 ──
+  // 丢弃不删除：先进「不要了」，反悔期内随时反悔——批量操作的保守默认
+  const discardAgedInbox = async () => {
+    const aged = inbox.filter(
+      (i) => Date.now() - i.createdAt > 30 * 24 * 60 * 60 * 1000,
+    );
+    if (aged.length === 0 || inboxBatchBusy) return;
+    if (
+      !window.confirm(
+        `${aged.length} 条超过 30 天没拍板的老条目，全部移到「不要了」吗？\n\n之后可以反悔：在回收站外的「不要了」里还能找回。`,
+      )
+    )
+      return;
+    setInboxBatchBusy(true);
+    try {
+      const results = await Promise.allSettled(
+        aged.map((i) =>
+          fetch(`/api/knowledge/${i.id}`, {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ status: "discarded" }),
+          }),
+        ),
+      );
+      const ok = results.filter((r) => r.status === "fulfilled").length;
+      const fail = results.length - ok;
+      await loadInbox(onlyUnread).catch(() => {});
+      showToast(
+        fail === 0 ? `已清走 ${ok} 条老条目` : `成功 ${ok} 条，失败 ${fail} 条`,
+      );
+    } finally {
+      setInboxBatchBusy(false);
+    }
+  };
+
+  // 进回顾视图才拉数据：回顾的「今日」统计依赖当下时刻，进视图时取数才准
+  useEffect(() => {
+    if (section === "review") void loadReview();
+  }, [section]);
 
   const goList = () => {
     setDetail(null);
@@ -988,7 +1232,7 @@ export default function KnowledgePage() {
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       setTrash((prev) => prev.filter((t) => t.id !== item.id));
       await Promise.allSettled([
-        loadFeed(searchQuery.trim(), activeTag),
+        loadFeed(searchQuery.trim(), activeTag, feedFilter),
         loadNotes(),
       ]);
       showToast("已捞回");
@@ -1497,7 +1741,13 @@ export default function KnowledgePage() {
             <ArrowLeft className="h-3.5 w-3.5" />
             返回待处理
           </button>
-          <article className="rounded-[2px] bg-white px-5 py-6 md:px-8 md:py-8">
+          {/* 摘录（阶段4 P2）：鼠标在正文里松开时读选区，有选中文字就亮出
+              「存为摘录」。监听挂在整个 article 而不只是正文 div——快照、
+              Markdown 区域都要能划线 */}
+          <article
+            className="rounded-[2px] bg-white px-5 py-6 md:px-8 md:py-8"
+            onMouseUp={handleBodyMouseUp}
+          >
             <h1 className="text-xl font-semibold leading-snug text-black md:text-2xl">
               {currentInbox.title}
             </h1>
@@ -1618,6 +1868,61 @@ export default function KnowledgePage() {
                 </ReactMarkdown>
               )}
             </div>
+            {/* 摘录（阶段4 P2·读书划线）：在正文里选中一段文字，这里就会
+                亮出「存为摘录」；已存的摘录列在下方，先摘的在前 */}
+            {selectedText && (
+              <div className="mt-4 flex items-start gap-3 rounded-[2px] border border-[#E5E5E5] bg-[#FAFAFA] px-4 py-3">
+                <p className="min-w-0 flex-1 text-[13px] leading-relaxed text-[#4A4A4A]">
+                  <span className="mr-1 text-xs text-[#A0A8B4]">选中：</span>
+                  {selectedText.slice(0, 80)}
+                  {selectedText.length > 80 && "…"}
+                </p>
+                <div className="flex shrink-0 items-center gap-2">
+                  <button
+                    onClick={() => setSelectedText("")}
+                    className="text-xs text-[#8A8A8A] transition-colors hover:text-black"
+                  >
+                    取消
+                  </button>
+                  <button
+                    onClick={() => void saveExcerpt()}
+                    disabled={excerptBusy}
+                    className="rounded-[2px] bg-[#000000] px-2.5 py-1 text-xs text-white transition-opacity hover:opacity-80 disabled:opacity-40"
+                  >
+                    {excerptBusy ? "存中…" : "存为摘录"}
+                  </button>
+                </div>
+              </div>
+            )}
+            {excerpts.length > 0 && (
+              <div className="mt-4 border-t border-[#F0F0F0] pt-4">
+                <h3 className="text-xs font-medium text-[#8A8A8A]">
+                  摘录（{excerpts.length}）
+                </h3>
+                <ul className="mt-2 space-y-2">
+                  {excerpts.map((e) => (
+                    <li
+                      key={e.id}
+                      className="group relative border-l-2 border-[#000000] bg-[#F7F7F7] px-4 py-3"
+                    >
+                      <p className="text-[13.5px] leading-relaxed text-[#2A2A2A]">
+                        {e.text}
+                      </p>
+                      <p className="mt-1.5 text-xs text-[#A0A8B4]">
+                        {formatRelTime(e.created_at)}
+                      </p>
+                      <button
+                        onClick={() => void deleteExcerpt(e.id)}
+                        className="absolute right-2 top-2 text-xs text-[#C4C4C4] opacity-0 transition-all hover:text-[#8A8A8A] group-hover:opacity-100"
+                        aria-label="删除这条摘录"
+                      >
+                        ✕
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
             {/* 拍板按钮：看完做决定，这是待处理详情存在的全部意义 */}
             <div className="mt-6 flex items-center justify-end gap-2 border-t border-[#F0F0F0] pt-4">
               <button
@@ -1652,7 +1957,11 @@ export default function KnowledgePage() {
             <ArrowLeft className="h-3.5 w-3.5" />
             返回我的知识库
           </button>
-          <article className="rounded-[2px] bg-white px-5 py-6 md:px-8 md:py-8">
+          {/* 摘录（阶段4 P2）：同待处理详情，划线监听挂整个 article */}
+          <article
+            className="rounded-[2px] bg-white px-5 py-6 md:px-8 md:py-8"
+            onMouseUp={handleBodyMouseUp}
+          >
             <h1 className="text-xl font-semibold leading-snug text-black md:text-2xl">
               {currentFeed.title}
             </h1>
@@ -1724,6 +2033,61 @@ export default function KnowledgePage() {
                 </>
               )}
             </div>
+            {/* 摘录（阶段4 P2·读书划线）：与待处理详情同一套交互——选中
+                正文文字存摘录，已存的列在下方 */}
+            {selectedText && (
+              <div className="mt-4 flex items-start gap-3 rounded-[2px] border border-[#E5E5E5] bg-[#FAFAFA] px-4 py-3">
+                <p className="min-w-0 flex-1 text-[13px] leading-relaxed text-[#4A4A4A]">
+                  <span className="mr-1 text-xs text-[#A0A8B4]">选中：</span>
+                  {selectedText.slice(0, 80)}
+                  {selectedText.length > 80 && "…"}
+                </p>
+                <div className="flex shrink-0 items-center gap-2">
+                  <button
+                    onClick={() => setSelectedText("")}
+                    className="text-xs text-[#8A8A8A] transition-colors hover:text-black"
+                  >
+                    取消
+                  </button>
+                  <button
+                    onClick={() => void saveExcerpt()}
+                    disabled={excerptBusy}
+                    className="rounded-[2px] bg-[#000000] px-2.5 py-1 text-xs text-white transition-opacity hover:opacity-80 disabled:opacity-40"
+                  >
+                    {excerptBusy ? "存中…" : "存为摘录"}
+                  </button>
+                </div>
+              </div>
+            )}
+            {excerpts.length > 0 && (
+              <div className="mt-4 border-t border-[#F0F0F0] pt-4">
+                <h3 className="text-xs font-medium text-[#8A8A8A]">
+                  摘录（{excerpts.length}）
+                </h3>
+                <ul className="mt-2 space-y-2">
+                  {excerpts.map((e) => (
+                    <li
+                      key={e.id}
+                      className="group relative border-l-2 border-[#000000] bg-[#F7F7F7] px-4 py-3"
+                    >
+                      <p className="text-[13.5px] leading-relaxed text-[#2A2A2A]">
+                        {e.text}
+                      </p>
+                      <p className="mt-1.5 text-xs text-[#A0A8B4]">
+                        {formatRelTime(e.created_at)}
+                      </p>
+                      <button
+                        onClick={() => void deleteExcerpt(e.id)}
+                        className="absolute right-2 top-2 text-xs text-[#C4C4C4] opacity-0 transition-all hover:text-[#8A8A8A] group-hover:opacity-100"
+                        aria-label="删除这条摘录"
+                      >
+                        ✕
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
           </article>
         </div>
       );
@@ -1887,6 +2251,97 @@ export default function KnowledgePage() {
                 className="h-10 w-full rounded-[2px] border border-[#E5E5E5] bg-white pl-9 pr-3 text-sm text-[#000000] placeholder:text-[#999999] outline-none focus:border-[#000000]"
               />
             </div>
+            {/* 智能列表（阶段4 P2）：固定三档快捷过滤 + 查重入口同一行。
+                过滤切换走与搜索同一套防抖重拉（服务端过滤），不另起即时通道 */}
+            <div className="flex items-center gap-1.5">
+              {(
+                [
+                  { key: "all", label: "全部" },
+                  { key: "unread", label: "未读" },
+                  { key: "week", label: "近七天" },
+                ] as const
+              ).map((f) => (
+                <button
+                  key={f.key}
+                  onClick={() => setFeedFilter(f.key)}
+                  className={cn(
+                    "rounded-full px-3 py-1 text-xs transition-colors",
+                    feedFilter === f.key
+                      ? "bg-[#000000] text-white"
+                      : "bg-white text-[#4A4A4A] hover:bg-[#F5F5F5]",
+                  )}
+                >
+                  {f.label}
+                </button>
+              ))}
+              <button
+                onClick={() =>
+                  dupGroups === null ? void openDuplicates() : closeDuplicates()
+                }
+                className="ml-auto rounded-full bg-white px-3 py-1 text-xs text-[#4A4A4A] transition-colors hover:bg-[#F5F5F5]"
+              >
+                {dupGroups === null ? "查重" : "退出查重"}
+              </button>
+            </div>
+
+            {/* 查重报告（阶段4 P2·批量去重）：打开后替代常规列表展示。
+                每组给出「保留最新」的一键处理；去重 = 旧条目进「不要了」，
+                可反悔 */}
+            {dupGroups !== null ? (
+              <div className="space-y-3">
+                {dupGroups.length === 0 ? (
+                  <div className="rounded-[2px] border border-dashed border-[#D9D9D9] bg-white p-12 text-center">
+                    <p className="text-sm text-[#A0A8B4]">
+                      没有发现重复内容，库里很干净
+                    </p>
+                  </div>
+                ) : (
+                  dupGroups.map((g, gi) => (
+                    <div
+                      key={gi}
+                      className="rounded-[2px] bg-white px-4 py-3.5"
+                    >
+                      <div className="flex items-center gap-2">
+                        <span className="rounded-full bg-[#ECECEC] px-2 py-0.5 text-xs text-[#4A4A4A]">
+                          {g.reason === "url" ? "同一链接存了多次" : "内容几乎一样"}
+                        </span>
+                        <span className="text-xs text-[#A0A8B4]">
+                          {g.items.length} 条重复
+                        </span>
+                        <button
+                          onClick={() => void dedupeGroup(g)}
+                          disabled={dedupBusy}
+                          className="ml-auto rounded-[2px] bg-[#000000] px-2.5 py-1 text-xs text-white transition-opacity hover:opacity-80 disabled:opacity-40"
+                        >
+                          {dedupBusy ? "处理中…" : "保留最新，丢弃其余"}
+                        </button>
+                      </div>
+                      <ul className="mt-2 divide-y divide-[#F0F0F0]">
+                        {[...g.items]
+                          .sort((a, b) => b.created_at - a.created_at)
+                          .map((it, idx) => (
+                            <li
+                              key={it.id}
+                              className="flex items-center gap-2 py-2 text-[13.5px]"
+                            >
+                              <span className="shrink-0 text-xs text-[#A0A8B4]">
+                                {idx === 0 ? "将保留" : "将丢弃"}
+                              </span>
+                              <span className="min-w-0 flex-1 truncate text-[#2A2A2A]">
+                                {it.title || "(无标题)"}
+                              </span>
+                              <span className="shrink-0 text-xs text-[#A0A8B4]">
+                                {formatRelTime(it.created_at)}
+                              </span>
+                            </li>
+                          ))}
+                      </ul>
+                    </div>
+                  ))
+                )}
+              </div>
+            ) : (
+              <>
             {/* K2 标签筛选横幅：点列表里的标签 pill 进入筛选，这里给出退出入口 */}
             {activeTag && (
               <div className="flex items-center gap-2 rounded-[2px] border border-[#E5E5E5] bg-white px-3 py-2 text-xs text-[#4A4A4A]">
@@ -1971,6 +2426,8 @@ export default function KnowledgePage() {
                   </div>
                 </article>
               ))
+            )}
+              </>
             )}
           </div>
         );
@@ -2156,6 +2613,24 @@ export default function KnowledgePage() {
                 丢进来
               </button>
             </div>
+            {/* 过期清理提示（阶段4 P2）：待处理里超过 30 天没拍板的堆积。
+                只提示 + 一键丢弃，不自动删——堆积可见、清不清你说了算；
+                丢弃进「不要了」而非物理删除，留反悔路 */}
+            {agedInbox > 0 && !inboxSelectMode && (
+              <div className="flex flex-wrap items-center gap-2 rounded-[2px] border border-[#E5E5E5] bg-white px-3 py-2.5 text-xs text-[#4A4A4A]">
+                <span>
+                  有 <span className="font-semibold text-black">{agedInbox}</span>{" "}
+                  条在待处理里躺了超过 30 天，要处理一下吗？
+                </span>
+                <button
+                  onClick={() => void discardAgedInbox()}
+                  disabled={inboxBatchBusy}
+                  className="ml-auto rounded-[2px] bg-[#000000] px-2.5 py-1 text-xs text-white transition-opacity hover:opacity-80 disabled:opacity-40"
+                >
+                  {inboxBatchBusy ? "处理中…" : "都不要了"}
+                </button>
+              </div>
+            )}
             {/* 工具行：只看未读开关（左）+ 批量操作入口（右）。
                 批量模式切换会关掉「只看未读」之外的一切跳转——批量圈选
                 需要稳定的列表上下文 */}
@@ -2548,8 +3023,14 @@ export default function KnowledgePage() {
           <div className="space-y-5">
             <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
               {[
-                { num: 8, label: "今日采集" },
-                { num: 5, label: "今日留存" },
+                {
+                  num: reviewData?.todayCaptured ?? "…",
+                  label: "今日采集",
+                },
+                {
+                  num: reviewData?.todayKept ?? "…",
+                  label: "今日留存",
+                },
                 {
                   num: trash.length,
                   label: "回收站 →",
@@ -2583,58 +3064,70 @@ export default function KnowledgePage() {
               ))}
             </div>
 
+            {/* 重温旧藏（阶段4 P2·每日回顾）：对抗「存了不读」。
+                从没打开过的排最前，读过的按最久远的挑——刻意不看最新的，
+                新存的还有新鲜感，老存货才需要被想起来 */}
             <div className="rounded-[2px] bg-white px-5 py-4">
-              <h3 className="text-[15px] font-semibold text-black">今日回顾</h3>
-              <ul className="mt-2">
-                {[
-                  { t: "技术晨报 · 08-23 已生成", n: "08:00" },
-                  { t: "建议复习「RAG 是什么」", n: "快到遗忘点" },
-                  { t: "建议复习「智能体四件套」", n: "快到遗忘点" },
-                ].map((li) => (
-                  <li
-                    key={li.t}
-                    className="flex items-center gap-3 border-b border-[#F0F0F0] py-2.5 last:border-0"
-                  >
-                    <span className="min-w-0 flex-1 truncate text-[13.5px] text-[#2A2A2A]">
-                      {li.t}
-                    </span>
-                    <span className="shrink-0 text-xs text-[#A0A8B4]">{li.n}</span>
-                  </li>
-                ))}
-              </ul>
-            </div>
-
-            <div className="rounded-[2px] bg-white px-5 py-4">
-              <h3 className="text-[15px] font-semibold text-black">本周小结</h3>
-              <p className="mt-1 text-xs text-[#A0A8B4]">
-                本周入库 32 条 · 活跃主题分布
-              </p>
-              <div className="mt-3 space-y-2.5">
-                {[
-                  { name: "Agent 开发", count: 14, pct: 44 },
-                  { name: "RAG", count: 7, pct: 22 },
-                  { name: "前端", count: 6, pct: 19 },
-                  { name: "晨报", count: 5, pct: 16 },
-                ].map((topic) => (
-                  <div
-                    key={topic.name}
-                    className="flex items-center gap-3 text-[13px]"
-                  >
-                    <span className="w-20 shrink-0 text-[#4A4A4A]">
-                      {topic.name}
-                    </span>
-                    <span className="h-2 flex-1 overflow-hidden rounded-full bg-[#ECECEC]">
-                      <span
-                        className="block h-full rounded-full bg-[#000000]"
-                        style={{ width: `${topic.pct}%` }}
-                      />
-                    </span>
-                    <span className="w-10 shrink-0 text-right text-xs text-[#8A8A8A]">
-                      {topic.count} 条
-                    </span>
-                  </div>
-                ))}
+              <div className="flex items-center justify-between">
+                <h3 className="text-[15px] font-semibold text-black">
+                  重温旧藏
+                </h3>
+                <button
+                  onClick={() => void loadReview()}
+                  className="text-xs text-[#8A8A8A] transition-colors hover:text-black"
+                >
+                  换一批
+                </button>
               </div>
+              {reviewData === null ? (
+                <p className="py-6 text-center text-sm text-[#A0A8B4]">
+                  加载中…
+                </p>
+              ) : reviewData.revisit.length === 0 ? (
+                <p className="py-6 text-center text-sm text-[#A0A8B4]">
+                  知识库里还没有沉淀，先去存几条吧
+                </p>
+              ) : (
+                <div className="mt-2 space-y-2">
+                  {reviewData.revisit.map((card) => (
+                    <button
+                      key={card.id}
+                      onClick={() => {
+                        goList();
+                        setDetail({ type: "feed", id: card.id });
+                        // 从回顾点开 = 在读它，标记已读让「未读优先重现」
+                        // 的排序把它往后挪（markRead 由详情打开逻辑统一处理）
+                      }}
+                      className="block w-full rounded-[2px] border border-[#F0F0F0] px-4 py-3 text-left transition-colors hover:border-[#D9D9D9]"
+                    >
+                      <h4 className="flex items-center gap-2 text-[14px] font-medium text-black">
+                        <span className="min-w-0 truncate">{card.title}</span>
+                        {card.read_at == null && (
+                          <span className="shrink-0 rounded-full bg-[#000000] px-1.5 py-0.5 text-[10px] font-medium text-white">
+                            从未读过
+                          </span>
+                        )}
+                      </h4>
+                      <p className="mt-1 line-clamp-2 text-[13px] leading-relaxed text-[#8A8A8A]">
+                        {card.summary}
+                      </p>
+                      <p className="mt-1.5 flex flex-wrap items-center gap-1.5 text-xs text-[#A0A8B4]">
+                        {card.tags.slice(0, 4).map((t) => (
+                          <span
+                            key={t}
+                            className="rounded-full bg-[#ECECEC] px-2 py-0.5 text-[#4A4A4A]"
+                          >
+                            {t}
+                          </span>
+                        ))}
+                        <span className="ml-auto">
+                          存于 {formatRelTime(card.created_at)}
+                        </span>
+                      </p>
+                    </button>
+                  ))}
+                </div>
+              )}
             </div>
           </div>
         );

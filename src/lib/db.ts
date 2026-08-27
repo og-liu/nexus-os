@@ -189,6 +189,38 @@ export function initSchema(conn: Database.Database): void {
       last_error TEXT,
       created_at INTEGER NOT NULL
     );
+
+    -- 阶段4 P2·摘录表：读书时划的线。一条知识条目可以摘多段。
+    -- 为什么独立表而不是塞进主表 JSON 列：摘录是逐条增删的（读完删一条、
+    -- 想起来补一条），JSON 列每次都要整串读出改完整串写回，并发和原子性
+    -- 都是坑；独立表增删行天然原子。ON DELETE CASCADE：条目没了摘录
+    -- 留着没有意义（孤儿摘录连标题都对不上）
+    CREATE TABLE IF NOT EXISTS knowledge_excerpts (
+      id TEXT PRIMARY KEY,
+      item_id TEXT NOT NULL,
+      text TEXT NOT NULL,
+      note TEXT,
+      created_at INTEGER NOT NULL,
+      FOREIGN KEY (item_id) REFERENCES knowledge_items(id) ON DELETE CASCADE
+    );
+    CREATE INDEX IF NOT EXISTS idx_knowledge_excerpts_item
+      ON knowledge_excerpts (item_id, created_at);
+
+    -- 阶段4 P2·自动归档规则表：「满足什么条件就自动打什么标签」。
+    -- 语义边界（项目铁律）：规则只打标签，不替人拍板留弃——打标是
+    -- 整理（可逆、无信息损失），拍板是决策（丢弃有反悔成本）。
+    -- type='domain'：链接域名匹配（如 github.com 的都打「开源」）；
+    -- type='keyword'：标题或正文含关键词。enabled 支持临时停用不删规则
+    CREATE TABLE IF NOT EXISTS knowledge_rules (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      type TEXT NOT NULL CHECK(type IN ('domain', 'keyword')),
+      pattern TEXT NOT NULL,
+      tag TEXT NOT NULL,
+      enabled INTEGER NOT NULL DEFAULT 1,
+      created_at INTEGER NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_knowledge_rules_enabled
+      ON knowledge_rules (enabled);
   `);
 
   // 迁移：给已存在的旧库 messages 表补 tool_calls / reasoning / usage / status 列

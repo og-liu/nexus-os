@@ -15,6 +15,7 @@ import Parser from "rss-parser";
 import { createItem } from "@/lib/knowledge/store";
 import { syncEmbedding } from "@/lib/knowledge/embedding-sync";
 import { simhash64 } from "@/lib/knowledge/simhash";
+import { applyRulesToItem } from "@/lib/knowledge/rules";
 
 /** 订阅源一行数据的形状（与 feeds 表列一一对应） */
 export interface FeedRow {
@@ -185,6 +186,10 @@ export async function ingestFeedXml(
 
     // 复用 K4 写入钩子：入库后异步补语义指纹，失败只警告不阻塞采集
     void syncEmbedding(conn, row.id, row.title, row.content);
+    // 阶段4 P2·自动打标：RSS 条目同样过一遍规则（比如某博客全打「技术」）。
+    // 放同步做：打标是纯本地 SQL（几毫秒），不像解读要等 LLM——
+    // 顺序执行不破坏上面 createItem 到这里的并发保护（无 await）
+    applyRulesToItem(conn, row.id);
   }
 
   return { added, skipped };

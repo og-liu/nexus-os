@@ -256,6 +256,9 @@ export interface ListOptions {
   unreadOnly?: boolean;
   /** 标签精确过滤（单标签起步；多标签 AND/OR 组合留给需要时再加） */
   tag?: string;
+  /** 阶段4 P2·智能列表：只看这个时间戳（毫秒）之后采集的条目——
+   *  「最近七天」快捷视图的支撑。服务端过滤的理由同 unreadOnly */
+  since?: number;
   /** 关键词：LIKE 子串匹配 title / content。中文场景够用的最低成本检索，
    *  语义检索（向量）属于 K4 阶段，届时在这层之上叠加而非替换。 */
   q?: string;
@@ -294,6 +297,10 @@ export function listItems(
   }
   if (opts.unreadOnly) {
     conds.push("read_at IS NULL");
+  }
+  if (opts.since !== undefined) {
+    conds.push("created_at >= ?");
+    params.push(opts.since);
   }
   if (opts.q) {
     // 阶段3 P1·全文搜索：≥3 字符走 FTS5（trigram 子串匹配 + 倒排索引加速，
@@ -607,6 +614,115 @@ export function countsByStatus(
     }
   }
   return result;
+}
+
+/** 阶段4 P2·过期清理（提示版）：待处理里超过 N 天没拍板的条目数。
+ *  只数数不动手——清不清、怎么清是人拍板，系统只负责让堆积可见。
+ *  堆积的坏处不是占空间（SQLite 几千行毫无压力），是「待处理」这个
+ *  队列的信义：永远处理不完的队列等于没有队列 */
+export function countAgedInbox(
+  conn: Database.Database,
+  days: number,
+): number {
+  const cutoff = Date.now() - days * 24 * 60 * 60 * 1000;
+  const row = conn
+    .prepare(
+      `SELECT COUNT(*) AS c FROM knowledge_items
+       WHERE status = 'inbox' AND deleted_at IS NULL AND created_at < ?`,
+    )
+    .get(cutoff) as { c: number };
+  return row.c;
+}
+
+/** 阶段4 P2·每日回顾的数据底座。
+ *  - todayCaptured：今天进库多少条（含已拍板丢弃的——「今天收集了多少」
+ *    是行为统计，拍没拍完板是另一回事）
+ *  - todayKept：今天拍板留下的（用 updated_at 近似拍板时间：个人库改标签
+ *    也会刷它，略微虚高但方向正确；为精确而单独立一列拍板时间戳，
+ *    等真实反馈觉得有必要再说）
+ *  - revisit：重温候选。排序 COALESCE(read_at, 0)：从未读过的排最前
+ *    （存了就再没打开过，正是「存了不读」的病灶），读得很久的其次。
+ *    取最久远的 20 条给调用方随机挑——固定「最老四条」会让人产生
+ *    「回顾页永远那几条」的疲劳感，轻随机保持新鲜 */
+export function getReviewItems(
+  conn: Database.Database,
+): {
+  todayCaptured: number;
+  todayKept: number;
+  revisit: Array<{
+    id: string;
+    title: string;
+    summary: string;
+    tags: string[];
+    read_at: number | null;
+    created_at: number;
+  }>;
+} {
+  const dayStart = new Date();
+  dayStart.setHours(0, 0, 0, 0);
+  const t0 = dayStart.getTime();
+
+  const captured = conn
+    .prepare(`SELECT COUNT(*) AS c FROM knowledge_items WHERE created_at >= ?`)
+    .get(t0) as { c: number };
+  const kept = conn
+    .prepare(
+      `SELECT COUNT(*) AS c FROM knowledge_items
+       WHERE status = 'kept' AND updated_at >= ?`,
+    )
+    .get(t0) as { c: number };
+
+  // 回顾卡要显示导读（有 AI 解读用解读，没有截正文开头）——这条查询
+  // 不是常规列表，带正文前 160 字作摘要兜底，这点带宽不心疼
+  const rows = conn
+    .prepare(
+      `SELECT id, title, content, read_at, created_at FROM knowledge_items
+       WHERE status = 'kept' AND deleted_at IS NULL
+       ORDER BY COALESCE(read_at, 0) ASC, created_at ASC LIMIT 20`,
+    )
+    .all() as Array<{
+    id: string;
+    title: string;
+    content: string;
+    read_at: number | null;
+    created_at: number;
+  }>;
+
+  // 标签单独一次 IN 查询取回再按条目分组（与 attachTags 同思路，
+  // 但回顾行不是完整 ItemSqlRow，不复用那个函数反而省一次类型纠缠）
+  const tagMap = new Map<string, string[]>();
+  if (rows.length > 0) {
+    const tagRows = conn
+      .prepare(
+        `SELECT item_id, tag FROM knowledge_item_tags
+         WHERE item_id IN (${rows.map(() => "?").join(", ")})
+         ORDER BY tag ASC`,
+      )
+      .all(...rows.map((r) => r.id)) as Array<{
+      item_id: string;
+      tag: string;
+    }>;
+    for (const t of tagRows) {
+      const g = tagMap.get(t.item_id);
+      if (g) g.push(t.tag);
+      else tagMap.set(t.item_id, [t.tag]);
+    }
+  }
+
+  const revisit = rows.map((r) => ({
+    id: r.id,
+    title: r.title,
+    summary: r.content.replace(/\s+/g, " ").trim().slice(0, 160),
+    tags: tagMap.get(r.id) ?? [],
+    read_at: r.read_at,
+    created_at: r.created_at,
+  }));
+
+  return {
+    todayCaptured: captured.c,
+    todayKept: kept.c,
+    revisit,
+  };
 }
 
 /** 批量标记已读：打开详情时逐条 PATCH 太碎，这里一条语句打一批。
