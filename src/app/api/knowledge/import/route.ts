@@ -73,7 +73,7 @@ export async function POST(req: NextRequest) {
           content,
           kind: "note",
           // 与手写文章同一语义：导入 ≠ 入库，默认停在「我的文章」（draft），
-          // 想给 AI 检索就在列表里勾选后「批量加入知识库」
+          // 想给 AI 检索就在列表里勾选后「批量加入知识流」
           status: "draft",
           tags: Array.isArray(f.tags) ? f.tags.map(String) : [],
         });

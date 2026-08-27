@@ -80,7 +80,7 @@ const stickyNotes = [
 ];
 
 const latestArticles = [
-  { title: "用 OCR 把纸质笔记搬进知识库", tag: "教程", date: "8月13日" },
+  { title: "用 OCR 把纸质笔记搬进知识流", tag: "教程", date: "8月13日" },
   { title: "我的下载目录自动整理工作流", tag: "自动化", date: "8月11日" },
   { title: "本地优先：个人数据主权实践", tag: "随笔", date: "8月9日" },
   { title: "常见图片压缩算法对比笔记", tag: "技术", date: "8月6日" },
@@ -523,7 +523,7 @@ export default function HomePage() {
                 <span className="font-medium text-[#000000]">0</span>
               </div>
               <div className="flex items-center justify-between text-sm">
-                <span className="text-[#8A8A8A]">知识库条目</span>
+                <span className="text-[#8A8A8A]">知识流条目</span>
                 <span className="font-medium text-[#000000]">0</span>
               </div>
               <Link

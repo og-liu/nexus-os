@@ -106,7 +106,7 @@ export async function PATCH(req: NextRequest, ctx: Ctx) {
       updated = getItem(db, id); // 重读一次，保证返回的是含最新标签的完整行
     }
     // 写入钩子：标题或正文变了才重算语义指纹（标签变化不影响指纹）。
-    // 「加入知识库」（status → kept）同样要算：draft 期间从没算过指纹，
+    // 「加入知识流」（status → kept）同样要算：draft 期间从没算过指纹，
     // 入库那一刻它就该能被 AI 检索到，不能等下一次内容编辑才补上。
     // void 不等待——理由同创建接口；失败只记日志，回填脚本会认领
     if (

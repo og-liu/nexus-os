@@ -31,7 +31,7 @@ export async function DELETE(_req: NextRequest, { params }: Params) {
   if (!ok) {
     return NextResponse.json({ error: "订阅源不存在" }, { status: 404 });
   }
-  // 已采集的文章保留在知识库里——退订只是「以后不抓了」，
+  // 已采集的文章保留在知识流里——退订只是「以后不抓了」，
   // 不追溯清理历史内容，这是数据安全上的默认选择
   return NextResponse.json({ ok: true });
 }

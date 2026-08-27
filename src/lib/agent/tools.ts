@@ -174,7 +174,7 @@ const webSearchTool: ToolDefinition = {
   },
 };
 
-// ─── 知识库检索工具（K3：让 Agent 能查主人自己的知识库）───────
+// ─── 知识流检索工具（K3：让 Agent 能查主人自己的知识流）───────
 // 与天气/联网搜索的「向外问别人」不同，这两个工具是「向内查自己家」。
 //
 // 分层设计（可测试性）：业务逻辑抽成 runXxx(conn, args) 内核函数，
@@ -278,7 +278,7 @@ export async function runKnowledgeRead(
   const { getItem } = await import("@/lib/knowledge/store");
   const item = getItem(conn, id);
 
-  if (!item) return { error: `知识库中不存在 id 为 ${id} 的条目` };
+  if (!item) return { error: `知识流中不存在 id 为 ${id} 的条目` };
 
   // 非 kept 不给内容，但要说明原因——模型能向用户解释，
   // 而不是抛一个莫名其妙的错误
@@ -304,7 +304,7 @@ export async function runKnowledgeRead(
 const knowledgeSearchTool: ToolDefinition = {
   name: "search_knowledge",
   description:
-    "搜索主人的个人知识库（已保存的文章、笔记和采集条目）。" +
+    "搜索主人的个人知识流（已保存的文章、笔记和采集条目）。" +
     "当用户提到「我收藏过的」「我记的笔记」「我之前存的」，或问题可能与主人收集过的资料相关时先来这里找。" +
     "返回摘要列表；需要某条的完整内容时再用 read_knowledge 按 id 读取。",
   parameters: {
@@ -336,7 +336,7 @@ const knowledgeSearchTool: ToolDefinition = {
 const knowledgeReadTool: ToolDefinition = {
   name: "read_knowledge",
   description:
-    "读取知识库中单条内容的完整正文。必须先通过 search_knowledge 拿到 id 再调用。",
+    "读取知识流中单条内容的完整正文。必须先通过 search_knowledge 拿到 id 再调用。",
   parameters: {
     type: "object",
     properties: {

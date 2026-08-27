@@ -1,4 +1,4 @@
-// 知识库集合路由（K1 采集入口）。
+// 知识流集合路由（K1 采集入口）。
 //
 // 职责边界：route 层只做三件事——参数解析、HTTP 语义映射（400/404/500）、调 store。
 // 数据清洗和业务校验都在 store 层完成（K0 定下的分层），这里不重复造轮子，
@@ -172,7 +172,7 @@ export async function GET(req: NextRequest) {
 //   粘贴 URL：智能分流——订阅地址引导去「自动」页；普通网页抓正文进待处理；
 //            抓不到正文也降级存链接，绝不因网络抖动丢掉用户想存的东西
 //   默认（粘贴文本 / Markdown）：落库进待处理等拍板
-//   kind=note（手写文章）：方案 B——创建即 draft 草稿，点「加入知识库」才转
+//   kind=note（手写文章）：方案 B——创建即 draft 草稿，点「加入知识流」才转
 //            kept 进 AI 检索，写一半的稿子不该被 AI 当成品引用
 // body: { title?, content?, tags?, source?, kind?, url? }
 export async function POST(req: NextRequest) {
@@ -195,14 +195,14 @@ export async function POST(req: NextRequest) {
 
     // ── 重复检测第一关：URL 归一化查重（抓正文之前先查，省一次抓取）──
     // 「收藏过又忘了」是高频场景：同一链接带着 utm 参数再存一遍，
-    // 不拦的话待处理和知识库会慢慢堆满同一篇文章
+    // 不拦的话待处理和知识流会慢慢堆满同一篇文章
     const urlDup = findDuplicateByUrl(getDb(), url);
     if (urlDup) {
       const where =
         urlDup.status === "inbox"
           ? "已在「待处理」里"
           : urlDup.status === "kept"
-            ? "已在「我的知识库」里"
+            ? "已在「知识流」里"
             : "已在「我的文章」里";
       return NextResponse.json(
         { duplicate: urlDup, message: `这篇${where}，不再重复保存` },
@@ -233,7 +233,7 @@ export async function POST(req: NextRequest) {
           simDup.status === "inbox"
             ? "已在「待处理」里"
             : simDup.status === "kept"
-              ? "已在「我的知识库」里"
+              ? "已在「知识流」里"
               : "已在「我的文章」里";
         return NextResponse.json(
           { duplicate: simDup, message: `链接不同但这篇${where}（内容一样），不再重复保存` },
@@ -327,7 +327,7 @@ export async function POST(req: NextRequest) {
         dup.status === "inbox"
           ? "已在「待处理」里"
           : dup.status === "kept"
-            ? "已在「我的知识库」里"
+            ? "已在「知识流」里"
             : "已在「我的文章」里";
       return NextResponse.json(
         { duplicate: dup, message: `这段内容${where}，不再重复保存` },
@@ -348,7 +348,7 @@ export async function POST(req: NextRequest) {
       tags: Array.isArray(body.tags) ? body.tags.map(String) : [],
       kind: isNote ? "note" : undefined,
       // 出身决定起点状态：采集进待处理；手写文章按方案 B 起草——
-      // 创建即 draft（只在「我的文章」可见、不进 AI 检索），点「加入知识库」
+      // 创建即 draft（只在「我的文章」可见、不进 AI 检索），点「加入知识流」
       // 才转 kept。约定写在 route 层，store 保持通用能力，未来 Agent 工具
       // 复用 store 时自行选择语义
       status: isNote ? "draft" : undefined,

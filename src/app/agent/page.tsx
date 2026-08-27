@@ -157,7 +157,7 @@ const tasks: AgentTask[] = [
   },
   {
     id: 2,
-    name: "知识库增量索引",
+    name: "知识流增量索引",
     schedule: "每小时",
     status: "running",
     progress: 32,

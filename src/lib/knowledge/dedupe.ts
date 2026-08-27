@@ -69,7 +69,7 @@ export function findDuplicateBySimhash(
 }
 
 /** 全库重复报告：归一化 URL 相同 或 指纹距离 ≤3 的条目聚成一组。
- *  给将来「批量去重」功能（知识库设置里的兜底入口）当数据底座：
+ *  给将来「批量去重」功能（知识流设置里的兜底入口）当数据底座：
  *  先能稳定找出「谁和谁重复」，合并/保留策略再往上叠 */
 export function findDuplicates(conn: Database.Database): Array<{
   reason: "url" | "simhash";

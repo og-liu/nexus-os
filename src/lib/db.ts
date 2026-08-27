@@ -95,7 +95,7 @@ export function initSchema(conn: Database.Database): void {
     CREATE INDEX IF NOT EXISTS idx_task_plans_session
       ON task_plans (session_id, created_at);
 
-    -- ── 知识库模块（产品主阵地）─────────────────────────────────
+    -- ── 知识流模块（产品主阵地）─────────────────────────────────
     -- 知识条目主表。已定决策（2026-08-26）：内容格式 = Markdown 存 TEXT 列——
     -- 存储保持纯文本「单一事实源」，渲染交给前端解析，避免富文本 HTML 把格式焊死在库里；
     -- 组织方式 = 标签起步（见下方关联表），双链 [[wiki]] 后置到迭代二。
@@ -133,7 +133,7 @@ export function initSchema(conn: Database.Database): void {
       -- 阶段2 P0·永久快照：抓取成功时存一份剥净的正文 HTML（阅读排版用）。
       -- 与 content 分工：content 是给 AI 检索/拍板判断的纯文本（单一事实源），
       -- snapshot_html 只服务「人的阅读体验」（保留链接、图片、结构）；
-      -- 原文 404 后本地仍可读，知识库不做「链接坟场」
+      -- 原文 404 后本地仍可读，知识流不做「链接坟场」
       snapshot_html TEXT,
       -- 阶段2 P0·重复检测：标题+正文的 SimHash 64 位指纹（16 位 hex）。
       -- 为什么不存向量算余弦：查重要的是「是否高度相似」的二值判断，

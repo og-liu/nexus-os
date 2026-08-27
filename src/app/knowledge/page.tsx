@@ -50,7 +50,7 @@ interface Note {
   content: string;
   tags: string[];
   updatedAt: string; // 渲染时由 formatRelTime 现算的相对时间文案
-  inLibrary: boolean; // 方案 B：是否已加入知识库（status=kept），驱动「加入/移出」按钮
+  inLibrary: boolean; // 方案 B：是否已加入知识流（status=kept），驱动「加入/移出」按钮
 }
 
 interface InboxItem {
@@ -98,7 +98,7 @@ const flashCards: FlashCard[] = [
   {
     id: 1,
     q: "RAG 的两个核心步骤是什么？",
-    a: "先检索、再生成：先在知识库里搜一遍，命中了用库里的内容回答，没命中才联网。",
+    a: "先检索、再生成：先在知识流里搜一遍，命中了用库里的内容回答，没命中才联网。",
   },
   {
     id: 2,
@@ -130,7 +130,7 @@ const choiceQuestions: ChoiceQuestion[] = [
   },
   {
     id: 2,
-    q: "知识库「保鲜扫描」主要解决什么？",
+    q: "知识流「保鲜扫描」主要解决什么？",
     options: [
       { key: "A", text: "让笔记更好看" },
       { key: "B", text: "标记过时/失效内容并提示归档", correct: true },
@@ -195,7 +195,7 @@ function makeSummary(content: string): string {
   return first.length > 80 ? `${first.slice(0, 80)}…` : first || "（无正文）";
 }
 
-// store 行 → 我的知识库卡片（kept 列表）
+// store 行 → 知识流卡片（kept 列表）
 function toFeedItem(row: KnowledgeRow): FeedItem {
   return {
     id: row.id,
@@ -396,7 +396,7 @@ export default function KnowledgePage() {
   const [inbox, setInbox] = useState<InboxItem[]>([]);
   const [trash, setTrash] = useState<TrashItem[]>([]);
   const [allTags, setAllTags] = useState<string[]>([]); // 全部标签，从 /api/knowledge/tags 拉取
-  // K2 标签筛选：点我的知识库里的标签 pill 即按该标签过滤（服务端 tag 参数）
+  // K2 标签筛选：点知识流里的标签 pill 即按该标签过滤（服务端 tag 参数）
   const [activeTag, setActiveTag] = useState<string | null>(null);
   // 服务端检索进行中提示（搜索框防抖请求发出后到返回前）
   const [searching, setSearching] = useState(false);
@@ -420,7 +420,7 @@ export default function KnowledgePage() {
 
   // ----- 数据加载（K2：搜索与标签筛选都走服务端） -----
 
-  /** 拉我的知识库（kept 列表）：关键词 q 与标签 tag 传给服务端组合过滤——
+  /** 拉知识流（kept 列表）：关键词 q 与标签 tag 传给服务端组合过滤——
    *  LIKE 检索和标签匹配在 store 层拼 WHERE 条件，前端只负责拼参数。
    *  这取代了 K1 之前「整页拉回来前端 filter」的做法：数据库是唯一真相，
    *  分页/大数据量时也不会把全表拖到浏览器。
@@ -497,7 +497,7 @@ export default function KnowledgePage() {
     }
   };
 
-  // 首屏并行拉五路数据：待处理、我的知识库、标签、我的文章、回收站。
+  // 首屏并行拉五路数据：待处理、知识流、标签、我的文章、回收站。
   // 用 allSettled 而不是 all：一个接口挂了其他照常显示，不至于整页报废
   useEffect(() => {
     let alive = true; // 组件卸载后不再 setState
@@ -873,7 +873,7 @@ export default function KnowledgePage() {
 
   // 拍板「留下」：PATCH status=kept，接口确认后才动本地列表——
   // 流转失败时待处理保持原样，用户不会误以为拍板成功。
-  // 成功后把后端返回的完整行转成卡片插到我的知识库顶部，带「刚刚入库」标记，
+  // 成功后把后端返回的完整行转成卡片插到知识流顶部，带「刚刚入库」标记，
   // 让「存进去」这件事肉眼可见
   const keepItem = async (item: InboxItem) => {
     if (savingId) return; // 已有拍板在途，忽略新点击（防连击重复提交）
@@ -888,7 +888,7 @@ export default function KnowledgePage() {
       const row = (await res.json()) as KnowledgeRow;
       setInbox((prev) => prev.filter((i) => i.id !== item.id));
       setFeed((prev) => [{ ...toFeedItem(row), fresh: true }, ...prev]);
-      showToast("已留下，进我的知识库");
+      showToast("已留下，进知识流");
       // 详情里拍的板：办完事回列表，别停在一条已不存在的详情上
       if (detail?.type === "inbox" && detail.id === item.id) goList();
     } catch {
@@ -996,7 +996,7 @@ export default function KnowledgePage() {
 
   // 勾选 AI 候选标签：与手动打标签同一套 PATCH 全量替换语义。乐观更新
   // detailFull（待处理列表不显示标签，状态留在详情里最直观），失败回滚。
-  // 标签挂上后拍板「留下」，它自然跟着进知识库
+  // 标签挂上后拍板「留下」，它自然跟着进知识流
   const toggleAiTag = (tag: string) => {
     if (!detailFull) return;
     const current = detailFull.tags ?? [];
@@ -1069,7 +1069,7 @@ export default function KnowledgePage() {
       const ok = results.filter((r) => r.status === "fulfilled");
       const failed = results.length - ok.length;
       const doneIds = new Set(ok.map((r) => (r as PromiseFulfilledResult<KnowledgeRow>).value.id));
-      // 留下的条目插进我的知识库顶部（同单条拍板的体验）；不要了的只从待处理移除
+      // 留下的条目插进知识流顶部（同单条拍板的体验）；不要了的只从待处理移除
       setInbox((prev) => prev.filter((i) => !doneIds.has(i.id)));
       if (decision === "kept") {
         setFeed((prev) => [
@@ -1183,7 +1183,7 @@ export default function KnowledgePage() {
     }
   };
 
-  // 从我的知识库移除（≠删除）：按出身分流——采集来的移进回收站留 7 天反悔期；
+  // 从知识流移除（≠删除）：按出身分流——采集来的移进回收站留 7 天反悔期；
   // 自己写的退回草稿，文章本体永远在「我的文章」。两条路都可逆，不做二次确认
   const removeFromFeed = async (item: FeedItem) => {
     if (savingId) return;
@@ -1198,7 +1198,7 @@ export default function KnowledgePage() {
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         setFeed((prev) => prev.filter((f) => f.id !== item.id));
         await loadNotes(); // 草稿状态变了，重拉「我的文章」的 inLibrary 标记
-        showToast("已移出知识库，文章还在「我的文章」里");
+        showToast("已移出知识流，文章还在「我的文章」里");
       } else {
         const res = await fetch(`/api/knowledge/${item.id}`, {
           method: "PATCH",
@@ -1374,10 +1374,11 @@ export default function KnowledgePage() {
     });
   };
 
-  // ----- 文章入/出知识库（方案 B 的核心开关） -----
+  // ----- 文章入/出知识流（方案 B 的核心开关） -----
 
-  // 加入知识库：PATCH status=kept，后端会同步生成语义指纹——从这一刻起
-  // AI 检索才能命中这篇文章。局部更新列表，不用整页重拉
+  // 加入知识流：PATCH status=kept，后端会同步生成语义指纹——从这一刻起
+  // AI 检索才能命中这篇文章。notes 乐观更新标记；feed 必须重拉——它只在
+  // 首屏加载一次，不重拉的话切到知识流看到的还是旧列表（修过的坑）
   const addNoteToLibrary = async (note: Note) => {
     if (savingId) return;
     setSavingId(note.id);
@@ -1391,7 +1392,9 @@ export default function KnowledgePage() {
       setNotes((prev) =>
         prev.map((n) => (n.id === note.id ? { ...n, inLibrary: true } : n)),
       );
-      showToast("已加入知识库，AI 也能检索到它了");
+      // 带当前搜索词/标签/筛选器重拉，保持用户正在看的视图口径一致
+      await loadFeed(searchQuery.trim(), activeTag, feedFilter);
+      showToast("已加入知识流，AI 也能检索到它了");
     } catch {
       showToast("操作失败，请重试");
     } finally {
@@ -1399,7 +1402,7 @@ export default function KnowledgePage() {
     }
   };
 
-  // 移出知识库：PATCH status=draft。文章本体不动，只是退出 AI 检索范围
+  // 移出知识流：PATCH status=draft。文章本体不动，只是退出 AI 检索范围
   const removeNoteFromLibrary = async (note: Note) => {
     if (savingId) return;
     setSavingId(note.id);
@@ -1413,7 +1416,9 @@ export default function KnowledgePage() {
       setNotes((prev) =>
         prev.map((n) => (n.id === note.id ? { ...n, inLibrary: false } : n)),
       );
-      showToast("已移出知识库，文章还在「我的文章」里");
+      // 移出后条目应立刻从知识流消失，重拉保持一致（与加入对称）
+      await loadFeed(searchQuery.trim(), activeTag, feedFilter);
+      showToast("已移出知识流，文章还在「我的文章」里");
     } catch {
       showToast("操作失败，请重试");
     } finally {
@@ -1445,7 +1450,7 @@ export default function KnowledgePage() {
     );
   };
 
-  // 批量加入知识库：allSettled 逐条 PATCH——部分失败不影响其余，
+  // 批量加入知识流：allSettled 逐条 PATCH——部分失败不影响其余，
   // 结束按成败数量如实汇报
   const batchAddToLibrary = async () => {
     if (selectedIds.size === 0 || batchBusy) return;
@@ -1463,11 +1468,15 @@ export default function KnowledgePage() {
     setBatchBusy(false);
     const ok = results.filter((r) => r.status === "fulfilled").length;
     const fail = results.length - ok;
-    await loadNotes();
+    // 两路都重拉：文章列表刷新 inLibrary 标记，知识流列表接住新加入的条目
+    await Promise.allSettled([
+      loadNotes(),
+      loadFeed(searchQuery.trim(), activeTag, feedFilter),
+    ]);
     exitSelectMode();
     showToast(
       fail === 0
-        ? `已加入知识库 ${ok} 篇，AI 也能检索到它们了`
+        ? `已加入知识流 ${ok} 篇，AI 也能检索到它们了`
         : `成功 ${ok} 篇、失败 ${fail} 篇，失败的可以再试一次`,
     );
   };
@@ -1561,7 +1570,7 @@ export default function KnowledgePage() {
       showToast(
         data.skipped.length > 0
           ? `导入 ${data.created} 篇，${data.skipped.length} 篇重名被跳过`
-          : `导入成功 ${data.created} 篇，点「加入知识库」让 AI 检索到它们`,
+          : `导入成功 ${data.created} 篇，点「加入知识流」让 AI 检索到它们`,
       );
     } catch {
       showToast("导入失败，请重试");
@@ -1697,7 +1706,7 @@ export default function KnowledgePage() {
   }[] = [
     {
       items: [
-        { key: "feed", label: "我的知识库", icon: BookOpen, desc: `${feed.length} 条已沉淀` },
+        { key: "feed", label: "知识流", icon: BookOpen, desc: `${feed.length} 条已沉淀` },
         { key: "notes", label: "我的文章", icon: PenLine, desc: `${notes.length} 篇内容` },
         { key: "inbox", label: "待处理", icon: Inbox, desc: "新到的等你拍板", count: inbox.filter((i) => i.unread).length },
         { key: "trash", label: "回收站", icon: Trash2, desc: "7 天内可捞回", count: trash.length },
@@ -1837,7 +1846,7 @@ export default function KnowledgePage() {
                 )}
               </div>
             )}
-            {/* 快照优先渲染（同知识库详情），降级条目自然回落 Markdown 显示链接 */}
+            {/* 快照优先渲染（同知识流详情），降级条目自然回落 Markdown 显示链接 */}
             <div className="mt-5">
               {detailFull?.snapshot_html ? (
                 <>
@@ -1955,7 +1964,7 @@ export default function KnowledgePage() {
             className="mb-4 flex items-center gap-1.5 text-xs text-[#8A8A8A] transition-colors hover:text-black"
           >
             <ArrowLeft className="h-3.5 w-3.5" />
-            返回我的知识库
+            返回知识流
           </button>
           {/* 摘录（阶段4 P2）：同待处理详情，划线监听挂整个 article */}
           <article
@@ -2175,7 +2184,7 @@ export default function KnowledgePage() {
                 <AddTagButton onClick={() => setTagPicker(detail)} />
               </div>
               {/* 笔记正文同样接 Markdown 渲染：存储是纯文本单一事实源，
-                  展示层与我的知识库共用同一套 components 映射 */}
+                  展示层与知识流共用同一套 components 映射 */}
               <div className="mt-5">
                 <ReactMarkdown
                   remarkPlugins={[remarkGfm]}
@@ -2184,7 +2193,7 @@ export default function KnowledgePage() {
                   {currentNote.content}
                 </ReactMarkdown>
               </div>
-              {/* 底部操作：方案 B 的「加入知识库」主入口放这——写完顺手一点，
+              {/* 底部操作：方案 B 的「加入知识流」主入口放这——写完顺手一点，
                   文章就从「只有我能看」变成「AI 能检索」 */}
               <div className="mt-6 flex flex-wrap items-center gap-2 border-t border-[#F0F0F0] pt-4">
                 {!currentNote.id.startsWith("draft-") &&
@@ -2194,7 +2203,7 @@ export default function KnowledgePage() {
                       className="flex h-9 items-center gap-1.5 rounded-[2px] border border-[#D9D9D9] bg-white px-4 text-xs font-medium text-[#4A4A4A] transition-colors hover:border-[#000000] hover:text-black"
                     >
                       <Database className="h-3.5 w-3.5" />
-                      移出知识库
+                      移出知识流
                     </button>
                   ) : (
                     <button
@@ -2202,7 +2211,7 @@ export default function KnowledgePage() {
                       className="flex h-9 items-center gap-1.5 rounded-[2px] bg-[#000000] px-4 text-xs font-medium text-white transition-opacity hover:opacity-85"
                     >
                       <Database className="h-3.5 w-3.5" />
-                      加入知识库
+                      加入知识流
                     </button>
                   ))}
                 <button
@@ -2221,7 +2230,7 @@ export default function KnowledgePage() {
                 </button>
                 {currentNote.inLibrary && (
                   <span className="ml-auto text-xs text-[#A0A8B4]">
-                    已在知识库，AI 可检索
+                    已在知识流，AI 可检索
                   </span>
                 )}
               </div>
@@ -2245,7 +2254,7 @@ export default function KnowledgePage() {
               <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-[#999999]" />
               <input
                 type="text"
-                placeholder="搜索我的知识库（标题 / 正文 / 标签）"
+                placeholder="搜索知识流（标题 / 正文 / 标签）"
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
                 className="h-10 w-full rounded-[2px] border border-[#E5E5E5] bg-white pl-9 pr-3 text-sm text-[#000000] placeholder:text-[#999999] outline-none focus:border-[#000000]"
@@ -2361,7 +2370,7 @@ export default function KnowledgePage() {
             )}
             {loadingKnowledge ? (
               <div className="rounded-[2px] border border-dashed border-[#D9D9D9] bg-white p-12 text-center">
-                <p className="text-sm text-[#A0A8B4]">知识库加载中…</p>
+                <p className="text-sm text-[#A0A8B4]">知识流加载中…</p>
               </div>
             ) : feed.length === 0 ? (
               <div className="rounded-[2px] border border-dashed border-[#D9D9D9] bg-white p-12 text-center">
@@ -2386,7 +2395,7 @@ export default function KnowledgePage() {
                     {item.summary}
                   </p>
                   <div className="mt-2.5 flex flex-wrap items-center gap-1.5">
-                    {/* 标签即筛选入口：点 pill 直接按该标签过滤我的知识库。
+                    {/* 标签即筛选入口：点 pill 直接按该标签过滤知识流。
                         stopPropagation 防止触发卡片的进详情点击 */}
                     {item.tags.map((tag) => {
                       const active = activeTag === tag;
@@ -2437,7 +2446,7 @@ export default function KnowledgePage() {
           <div className="space-y-4">
             <div className="flex flex-wrap items-center justify-between gap-2 px-1">
               <p className="text-xs text-[#A0A8B4]">
-                自己写的文章都在这；点「加入知识库」，AI 才能检索到它
+                自己写的文章都在这；点「加入知识流」，AI 才能检索到它
               </p>
               <div className="flex items-center gap-2">
                 {notes.length > 0 && (
@@ -2479,7 +2488,7 @@ export default function KnowledgePage() {
                 </button>
               </div>
             </div>
-            {/* 批量操作条：本阶段只放「加入知识库 / 删除」两个高频动作 */}
+            {/* 批量操作条：本阶段只放「加入知识流 / 删除」两个高频动作 */}
             {selectMode && (
               <div className="flex flex-wrap items-center gap-2 rounded-[2px] border border-[#E5E5E5] bg-white px-3 py-2 text-xs text-[#4A4A4A]">
                 <span>已选 {selectedIds.size} 篇</span>
@@ -2496,7 +2505,7 @@ export default function KnowledgePage() {
                   disabled={selectedIds.size === 0 || batchBusy}
                   className="ml-auto h-8 rounded-[2px] bg-[#000000] px-3 text-xs font-medium text-white transition-opacity hover:opacity-85 disabled:opacity-30"
                 >
-                  {batchBusy ? "处理中…" : "加入知识库"}
+                  {batchBusy ? "处理中…" : "加入知识流"}
                 </button>
                 <button
                   onClick={askBatchDelete}
@@ -2569,7 +2578,7 @@ export default function KnowledgePage() {
                           }}
                           className="text-xs text-[#A0A8B4] underline-offset-2 transition-colors hover:text-black hover:underline"
                         >
-                          移出知识库
+                          移出知识流
                         </button>
                       ) : (
                         <button
@@ -2579,7 +2588,7 @@ export default function KnowledgePage() {
                           }}
                           className="text-xs font-medium text-[#000000] underline underline-offset-2 transition-opacity hover:opacity-70"
                         >
-                          加入知识库
+                          加入知识流
                         </button>
                       )
                     )}
@@ -2667,7 +2676,7 @@ export default function KnowledgePage() {
             </div>
             <p className="hidden items-center gap-1.5 px-1 text-xs text-[#A0A8B4] md:flex">
               <Sparkles className="h-3.5 w-3.5" />
-              新抓来的先堆这，等你拍板：留下进我的知识库，不要了不再出现（不要了与删除是两件事）
+              新抓来的先堆这，等你拍板：留下进知识流，不要了不再出现（不要了与删除是两件事）
               <span className="ml-2 text-[#C4C4C4]">键盘 j/k 选中 · ← 留下 · → 不要了</span>
             </p>
             {/* 批量操作条：进入选择模式后顶替采集提示行，圈几条批量办几条 */}
@@ -3085,7 +3094,7 @@ export default function KnowledgePage() {
                 </p>
               ) : reviewData.revisit.length === 0 ? (
                 <p className="py-6 text-center text-sm text-[#A0A8B4]">
-                  知识库里还没有沉淀，先去存几条吧
+                  知识流里还没有沉淀，先去存几条吧
                 </p>
               ) : (
                 <div className="mt-2 space-y-2">
@@ -3254,11 +3263,11 @@ export default function KnowledgePage() {
             ))}
           </nav>
 
-          {/* 知识库统计（对齐 Agent 任务区） */}
+          {/* 知识流统计（对齐 Agent 任务区） */}
           <div className="border-t border-[#E5E5E5] p-3">
             <div className="mb-2 flex items-center gap-1.5 px-1 text-xs font-medium text-[#A0A8B4]">
               <Database className="h-3 w-3" />
-              知识库
+              知识流
             </div>
             <div className="space-y-2">
               <div className="rounded-[2px] bg-white px-3 py-2.5">
