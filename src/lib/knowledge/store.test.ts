@@ -133,6 +133,42 @@ describe("knowledge store · listItems", () => {
   });
 });
 
+describe("knowledge store · 全文搜索（FTS5 trigram，阶段3 P1）", () => {
+  beforeEach(() => {
+    createItem(conn, {
+      title: "向量数据库选型指南",
+      content: "Milvus 与 Qdrant 的横向对比测试",
+      status: "kept",
+    });
+  });
+
+  it("≥3 字走 FTS：标题与正文的子串都能命中", () => {
+    // 「数据库选型」是标题中段子串——「只记得半句话」的核心场景
+    expect(listItems(conn, { q: "数据库选型" }).total).toBe(1);
+    // 命中正文子串（标题里没有「横向对比」）
+    expect(listItems(conn, { q: "横向对比" }).items[0]?.title).toBe(
+      "向量数据库选型指南",
+    );
+    // 没有的子串零命中
+    expect(listItems(conn, { q: "图数据库迁移" }).total).toBe(0);
+  });
+
+  it("<3 字回落 LIKE：两字中文词照常可搜（trigram 最短 3 字符的限制被兜住）", () => {
+    expect(listItems(conn, { q: "选型" }).total).toBe(1);
+    expect(listItems(conn, { q: "菜谱" }).total).toBe(0);
+  });
+
+  it("FTS 保留字按字面匹配：整串包成字符串字面量，AND/OR 不是布尔语法", () => {
+    createItem(conn, {
+      title: "AND 与 OR 的区别",
+      content: "逻辑运算符笔记",
+      status: "kept",
+    });
+    // 若不转义，「AND 与」会被 MATCH 解析成布尔表达式，轻则零命中重则语法错
+    expect(listItems(conn, { q: "AND 与" }).total).toBe(1);
+  });
+});
+
 describe("knowledge store · updateItem / setTags", () => {
   it("更新内容并完成 inbox → kept 状态流转", () => {
     const item = createItem(conn, { content: "草稿" });

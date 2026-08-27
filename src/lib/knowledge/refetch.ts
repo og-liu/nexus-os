@@ -12,6 +12,7 @@
 import type Database from "better-sqlite3";
 import { syncEmbedding } from "@/lib/knowledge/embedding-sync";
 import { fetchPage, isHttpUrl } from "@/lib/knowledge/fetch-page";
+import { scheduleInterpret } from "@/lib/knowledge/interpret";
 import { simhash64 } from "@/lib/knowledge/simhash";
 import { getItem, updateItem, type KnowledgeItemRow } from "@/lib/knowledge/store";
 
@@ -57,5 +58,8 @@ export async function refetchItem(
 
   // 正文变了语义指纹也必须重算，否则 AI 检索到的是旧向量（占位文案的向量）
   void syncEmbedding(conn, updated.id, updated.title, updated.content);
+  // 正文补上了，之前没材料解读的欠账现在还上（interpret 内部自带
+  // 「已生成过就跳过」判断，不会重复烧钱；降级期间没生成过，这里必然生效）
+  scheduleInterpret(updated.id);
   return { ok: true, item: updated };
 }

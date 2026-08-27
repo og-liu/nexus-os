@@ -28,6 +28,7 @@ import {
 } from "@/lib/knowledge/dedupe";
 import { simhash64 } from "@/lib/knowledge/simhash";
 import { refetchItem } from "@/lib/knowledge/refetch";
+import { scheduleInterpret } from "@/lib/knowledge/interpret";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic"; // 每次请求都读最新库，不做任何缓存
@@ -235,6 +236,10 @@ export async function POST(req: NextRequest) {
           simhash: fingerprint,
         });
         void syncEmbedding(getDb(), item.id, item.title, item.content);
+        // 自动解读（阶段3 P1）：抓到正文的采集立即排队解读。fire-and-forget——
+        // LLM 要跑几秒，不能让「保存」按钮等它；解读完成前详情页照常打开，
+        // 只是还没有 AI 导读区块，生成完刷新即可见
+        scheduleInterpret(item.id);
         return NextResponse.json({ item }, { status: 201 });
       } catch (e) {
         console.error("[knowledge:create:url]", e);
@@ -327,6 +332,9 @@ export async function POST(req: NextRequest) {
     // 本地常驻进程里 fire-and-forget 是安全的，失败内部只记日志，
     // 缺指纹的条目会被回填脚本认领
     void syncEmbedding(getDb(), item.id, item.title, item.content);
+    // 文本采集同样排队解读；手写文章（note）不解读——自己写的东西自己最清楚，
+    // 「值不值得读」的判断场景不成立，白烧一次 LLM
+    if (!isNote) scheduleInterpret(item.id);
     return NextResponse.json(item, { status: 201 });
   } catch (e) {
     console.error("[knowledge:create]", e);

@@ -143,6 +143,16 @@ export function initSchema(conn: Database.Database): void {
       -- 重试成功后清零。为什么不用 title 文案约定判断：靠文案模式匹配是隐式契约，
       -- 改一版文案识别就漏了，显式标记才可靠
       degraded INTEGER NOT NULL DEFAULT 0,
+      -- 阶段3 P1·自动解读：AI 生成的一页纸导读（摘要 + 关键问题 + 候选标签）。
+      -- 为什么存列而不每次现算：解读是「读一次、看多次」的资产，每次打开
+      -- 详情重调一次 LLM 是纯烧钱；ai_interpreted_at 记生成时间，既当
+      -- 「已生成」判断（防重复跑），也能让 UI 展示导读的新鲜度
+      ai_summary TEXT,
+      -- 关键问题与候选标签：SQLite 没有原生数组类型，存 JSON 数组字符串，
+      -- 应用层读写时序列化/反序列化
+      ai_questions TEXT,
+      ai_tags TEXT,
+      ai_interpreted_at INTEGER,
       created_at INTEGER NOT NULL,
       updated_at INTEGER NOT NULL
     );
@@ -235,6 +245,58 @@ export function initSchema(conn: Database.Database): void {
       `ALTER TABLE knowledge_items ADD COLUMN degraded INTEGER NOT NULL DEFAULT 0`,
     );
   }
+  // 阶段3 P1·自动解读的 4 列（同款 PRAGMA 检测，幂等迁移）
+  if (!itemCols.some((c) => c.name === "ai_summary")) {
+    conn.exec(`ALTER TABLE knowledge_items ADD COLUMN ai_summary TEXT`);
+  }
+  if (!itemCols.some((c) => c.name === "ai_questions")) {
+    conn.exec(`ALTER TABLE knowledge_items ADD COLUMN ai_questions TEXT`);
+  }
+  if (!itemCols.some((c) => c.name === "ai_tags")) {
+    conn.exec(`ALTER TABLE knowledge_items ADD COLUMN ai_tags TEXT`);
+  }
+  if (!itemCols.some((c) => c.name === "ai_interpreted_at")) {
+    conn.exec(
+      `ALTER TABLE knowledge_items ADD COLUMN ai_interpreted_at INTEGER`,
+    );
+  }
+
+  // ── 阶段3 P1·全文搜索：FTS5 虚拟表 ──────────────────────────────
+  // external content 模式：索引表只存倒排索引，正文仍住在 knowledge_items，
+  // 不把几十 KB 的 content 复制一份占磁盘。
+  // 分词器选 trigram 而不是默认 unicode61：unicode61 把连续中文当成一整个
+  // token，搜索「机器学习」匹配不到「机器学习入门」这种正文（整词才相等）；
+  // trigram 按 3 字符滑窗切，中文子串搜索天然成立（英文同样受益）。
+  // 代价：查询串必须 ≥3 字符，两字词（如「笔记」）回落 LIKE 兜底。
+  // 同步机制：三个触发器把 knowledge_items 的增删改实时映射进索引，
+  // 启动时 rebuild 一次全量重建兜底——触发器万一漏（历史数据、异常路径），
+  // 下次启动自愈。个人库几千条 rebuild 是毫秒级，不值得为它做增量标记
+  conn.exec(`
+    CREATE VIRTUAL TABLE IF NOT EXISTS knowledge_fts USING fts5(
+      title, content,
+      tokenize = 'trigram',
+      content = 'knowledge_items',
+      content_rowid = 'rowid'
+    );
+    CREATE TRIGGER IF NOT EXISTS knowledge_fts_ai
+      AFTER INSERT ON knowledge_items BEGIN
+      INSERT INTO knowledge_fts(rowid, title, content)
+        VALUES (new.rowid, new.title, new.content);
+    END;
+    CREATE TRIGGER IF NOT EXISTS knowledge_fts_ad
+      AFTER DELETE ON knowledge_items BEGIN
+      INSERT INTO knowledge_fts(knowledge_fts, rowid, title, content)
+        VALUES ('delete', old.rowid, old.title, old.content);
+    END;
+    CREATE TRIGGER IF NOT EXISTS knowledge_fts_au
+      AFTER UPDATE OF title, content ON knowledge_items BEGIN
+      INSERT INTO knowledge_fts(knowledge_fts, rowid, title, content)
+        VALUES ('delete', old.rowid, old.title, old.content);
+      INSERT INTO knowledge_fts(rowid, title, content)
+        VALUES (new.rowid, new.title, new.content);
+    END;
+    INSERT INTO knowledge_fts(knowledge_fts) VALUES ('rebuild');
+  `);
 }
 
 /**

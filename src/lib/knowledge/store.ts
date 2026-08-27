@@ -72,6 +72,14 @@ export interface KnowledgeItemRow {
   snapshot_html?: string | null;
   /** 1 = 只按链接降级落库（阶段2 P0·失败兜底），重试成功后清零 */
   degraded: number;
+  /** AI 一页纸导读（阶段3 P1·自动解读）：只在详情接口返回，列表查询不拖 */
+  ai_summary?: string | null;
+  /** 关键问题（JSON 数组字符串，如 ["读完能回答什么问题"]） */
+  ai_questions?: string | null;
+  /** 候选标签（JSON 数组字符串，供详情页勾选） */
+  ai_tags?: string | null;
+  /** 解读生成时间：NULL = 还没生成过（防重复跑的判断依据） */
+  ai_interpreted_at?: number | null;
   tags: string[];
   created_at: number;
   updated_at: number;
@@ -92,6 +100,11 @@ interface ItemSqlRow {
   read_at?: number | null;
   snapshot_html?: string | null;
   degraded?: number;
+  /** 自动解读的 4 列：列表显式列查询不取，详情 SELECT * 才带（同 snapshot_html） */
+  ai_summary?: string | null;
+  ai_questions?: string | null;
+  ai_tags?: string | null;
+  ai_interpreted_at?: number | null;
   /** K4：语义指纹二进制与模型名——只在混合检索内部使用，
    *  不进 KnowledgeItemRow 对外暴露（列表/详情没必要拖 4KB 二进制） */
   embedding?: Buffer | null;
@@ -283,11 +296,24 @@ export function listItems(
     conds.push("read_at IS NULL");
   }
   if (opts.q) {
-    conds.push("(title LIKE ? ESCAPE '\\' OR content LIKE ? ESCAPE '\\')");
-    // 用户输入里的 % _ \ 是 LIKE 通配符，转义后才按字面意思匹配
-    const escaped = opts.q.replace(/[\\%_]/g, (c) => `\\${c}`);
-    const like = `%${escaped}%`;
-    params.push(like, like);
+    // 阶段3 P1·全文搜索：≥3 字符走 FTS5（trigram 子串匹配 + 倒排索引加速，
+    // 「只记得正文里一句话」也能搜到）；<3 字符回落 LIKE——trigram 的
+    // 滑窗最短 3 字符，两字中文词（「笔记」「复盘」）FTS 根本建不出索引项
+    const q = opts.q.trim();
+    if (q.length >= 3) {
+      conds.push(
+        `rowid IN (SELECT rowid FROM knowledge_fts WHERE knowledge_fts MATCH ?)`,
+      );
+      // 整串包成 FTS5 字符串字面量：用户输入里的 AND/OR/NEAR/^ 等是
+      // MATCH 语法保留字，裸拼会炸语法或改变语义；双引号转义成两个
+      params.push(`"${q.replace(/"/g, '""')}"`);
+    } else {
+      conds.push("(title LIKE ? ESCAPE '\\' OR content LIKE ? ESCAPE '\\')");
+      // 用户输入里的 % _ \ 是 LIKE 通配符，转义后才按字面意思匹配
+      const escaped = q.replace(/[\\%_]/g, (c) => `\\${c}`);
+      const like = `%${escaped}%`;
+      params.push(like, like);
+    }
   }
   if (opts.tag) {
     conds.push(
@@ -325,6 +351,11 @@ export interface UpdateItemPatch {
   snapshot_html?: string | null;
   simhash?: string | null;
   degraded?: number;
+  /** 自动解读四件套：由 interpret 落库（摘要文本 / 问题与标签的 JSON 字符串） */
+  ai_summary?: string | null;
+  ai_questions?: string | null;
+  ai_tags?: string | null;
+  ai_interpreted_at?: number;
 }
 
 export function updateItem(
@@ -377,6 +408,23 @@ export function updateItem(
   if (patch.degraded !== undefined) {
     sets.push("degraded = ?");
     params.push(patch.degraded);
+  }
+  // 自动解读四件套：字段成组写入（interpret 一次生成全带上），单独 PATCH 某一项没有意义
+  if (patch.ai_summary !== undefined) {
+    sets.push("ai_summary = ?");
+    params.push(patch.ai_summary);
+  }
+  if (patch.ai_questions !== undefined) {
+    sets.push("ai_questions = ?");
+    params.push(patch.ai_questions);
+  }
+  if (patch.ai_tags !== undefined) {
+    sets.push("ai_tags = ?");
+    params.push(patch.ai_tags);
+  }
+  if (patch.ai_interpreted_at !== undefined) {
+    sets.push("ai_interpreted_at = ?");
+    params.push(patch.ai_interpreted_at);
   }
   if (sets.length === 0) return getItem(conn, id); // 空 patch 不白跑一趟 UPDATE
 
@@ -673,19 +721,31 @@ export function searchHybrid(
   }
   const where = conds.join(` AND `);
 
-  // ── 路1 关键词（LIKE 字面匹配），按更新时间排（LIKE 无相关度可言）
-  const kwRows = conn
-    .prepare(
-      `SELECT id FROM knowledge_items WHERE ${where}
-       AND (title LIKE ? ESCAPE '\\' OR content LIKE ? ESCAPE '\\')
-       ORDER BY updated_at DESC LIMIT ?`,
-    )
-    .all(
-      ...params,
-      `%${q.replace(/[\\%_]/g, (c) => `\\${c}`)}%`,
-      `%${q.replace(/[\\%_]/g, (c) => `\\${c}`)}%`,
-      POOL,
-    ) as Array<{ id: string }>;
+  // ── 路1 关键词：≥3 字符走 FTS5 trigram 子串匹配（与 listItems 同一套策略），
+  // <3 字符回落 LIKE；按更新时间排（这路无相关度可言，相关度交给 RRF 融合去算）
+  const kwSql =
+    q.length >= 3
+      ? `SELECT id FROM knowledge_items WHERE ${where}
+         AND rowid IN (SELECT rowid FROM knowledge_fts WHERE knowledge_fts MATCH ?)
+         ORDER BY updated_at DESC LIMIT ?`
+      : `SELECT id FROM knowledge_items WHERE ${where}
+         AND (title LIKE ? ESCAPE '\\' OR content LIKE ? ESCAPE '\\')
+         ORDER BY updated_at DESC LIMIT ?`;
+  const kwRows =
+    q.length >= 3
+      ? (conn
+          .prepare(kwSql)
+          .all(...params, `"${q.replace(/"/g, '""')}"`, POOL) as Array<{
+          id: string;
+        }>)
+      : (conn
+          .prepare(kwSql)
+          .all(
+            ...params,
+            `%${q.replace(/[\\%_]/g, (c) => `\\${c}`)}%`,
+            `%${q.replace(/[\\%_]/g, (c) => `\\${c}`)}%`,
+            POOL,
+          ) as Array<{ id: string }>);
 
   // RRF 记分板：id → 累计分
   const scores = new Map<string, number>();

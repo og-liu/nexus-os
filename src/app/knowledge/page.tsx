@@ -160,6 +160,14 @@ interface KnowledgeRow {
   degraded: number;
   /** 剥净的正文 HTML 快照：只有详情接口（GET /api/knowledge/[id]）返回，列表行没有 */
   snapshot_html?: string | null;
+  /** AI 一页纸导读（阶段3 P1）：同样只有详情接口返回 */
+  ai_summary?: string | null;
+  /** 关键问题（后端存 JSON 数组字符串，渲染前用 parseAiList 解） */
+  ai_questions?: string | null;
+  /** 候选标签（JSON 数组字符串，详情页勾选） */
+  ai_tags?: string | null;
+  /** 解读生成时间：NULL = 还没生成过 */
+  ai_interpreted_at?: number | null;
 }
 
 /** 毫秒时间戳 → 「刚刚 / n 分钟前 / n 小时前 / n 天前 / 具体日期」。
@@ -199,6 +207,20 @@ function toFeedItem(row: KnowledgeRow): FeedItem {
     fresh: false, // 只有拍板「留下」瞬间插入的条目才标 fresh，从库加载的不算
     sourceUrl: row.source_url ?? null,
   };
+}
+
+/** ai_questions / ai_tags 在库里是 JSON 数组字符串，渲染前解一下。
+ *  解析失败按空处理：坏数据不该让详情页崩，最多这一区块不显示 */
+function parseAiList(raw: string | null | undefined): string[] {
+  if (!raw) return [];
+  try {
+    const arr = JSON.parse(raw) as unknown;
+    return Array.isArray(arr)
+      ? arr.filter((x): x is string => typeof x === "string")
+      : [];
+  } catch {
+    return [];
+  }
 }
 
 // store 行 → 待处理拍板卡
@@ -489,7 +511,25 @@ export default function KnowledgePage() {
     fetch(`/api/knowledge/${detail.id}`)
       .then((r) => (r.ok ? r.json() : null))
       .then((row) => {
-        if (alive) setDetailFull(row as KnowledgeRow | null);
+        if (!alive) return;
+        setDetailFull(row as KnowledgeRow | null);
+        // 阶段3 P1：采集条目还没解读时，5 秒后静默重拉一次——自动解读
+        // 正在后台跑（LLM 几秒出结果），等它一下，详情页不用手动刷新
+        // 也能看到导读自己长出来。只补拉这一次，不轮询
+        const r = row as KnowledgeRow | null;
+        if (r && detail.type === "inbox" && !r.ai_interpreted_at && !r.degraded) {
+          setTimeout(() => {
+            if (!alive) return;
+            fetch(`/api/knowledge/${detail.id}`)
+              .then((r2) => (r2.ok ? r2.json() : null))
+              .then((row2) => {
+                if (alive) setDetailFull(row2 as KnowledgeRow | null);
+              })
+              .catch(() => {
+                /* 补拉失败就维持现状，用户还有手动按钮 */
+              });
+          }, 5000);
+        }
       })
       .catch(() => {
         /* 详情回退到列表数据渲染，快照排版缺位但不阻塞阅读 */
@@ -565,6 +605,8 @@ export default function KnowledgePage() {
   const [focusIdx, setFocusIdx] = useState(-1);
   // 重试抓取进行中的条目（按钮转圈防连击）
   const [refetchingId, setRefetchingId] = useState<string | null>(null);
+  // 解读生成进行中的条目（同款防连击）
+  const [interpretingId, setInterpretingId] = useState<string | null>(null);
 
   // 自测
   const [quizMode, setQuizMode] = useState<"flash" | "choice">("flash");
@@ -683,6 +725,49 @@ export default function KnowledgePage() {
     } finally {
       setRefetchingId(null);
     }
+  };
+
+  // AI 解读：没赶上自动触发（RSS 条目 / 自动失败 / 关了开关）在这里手动补，
+  // 对旧解读不满意也可以重跑。响应就是更新后的全行，直接换掉详情数据
+  const interpretInboxItem = async (item: InboxItem) => {
+    if (interpretingId) return;
+    setInterpretingId(item.id);
+    try {
+      const res = await fetch(`/api/knowledge/${item.id}/interpret`, {
+        method: "POST",
+      });
+      if (!res.ok) {
+        const data = await res.json().catch(() => null);
+        throw new Error(data?.error ?? `HTTP ${res.status}`);
+      }
+      const row = (await res.json()) as KnowledgeRow;
+      setDetailFull(row);
+      showToast("AI 看完了");
+    } catch (e) {
+      showToast(e instanceof Error ? e.message : "解读生成失败");
+    } finally {
+      setInterpretingId(null);
+    }
+  };
+
+  // 勾选 AI 候选标签：与手动打标签同一套 PATCH 全量替换语义。乐观更新
+  // detailFull（待处理列表不显示标签，状态留在详情里最直观），失败回滚。
+  // 标签挂上后拍板「留下」，它自然跟着进知识库
+  const toggleAiTag = (tag: string) => {
+    if (!detailFull) return;
+    const current = detailFull.tags ?? [];
+    const next = current.includes(tag)
+      ? current.filter((t) => t !== tag)
+      : [...current, tag];
+    setDetailFull({ ...detailFull, tags: next });
+    fetch(`/api/knowledge/${detailFull.id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ tags: next }),
+    }).catch(() => {
+      setDetailFull((prev) => (prev ? { ...prev, tags: current } : prev));
+      showToast("标签保存失败，已还原");
+    });
   };
 
   // 待处理勾选（带 Shift 连选）：按住 Shift 点第 N 张卡，从上次点的到这次的全选中。
@@ -1431,6 +1516,75 @@ export default function KnowledgePage() {
                   <RotateCw className="h-3.5 w-3.5" />
                   {refetchingId === currentInbox.id ? "抓取中…" : "重新抓取正文"}
                 </button>
+              </div>
+            )}
+            {/* AI 一页纸导读（阶段3 P1）：先看 AI 怎么说，再决定要不要细读。
+                降级条目不显示——没正文可解读，等重试成功后自动补 */}
+            {!currentInbox.degraded && (
+              <div className="mt-4 rounded-[2px] border border-[#E8E8E8] bg-[#FAFAFA] px-4 py-3.5">
+                {detailFull?.ai_summary ? (
+                  <>
+                    <div className="flex items-center gap-1.5 text-xs font-medium text-[#4A4A4A]">
+                      <Sparkles className="h-3.5 w-3.5" />
+                      AI 帮你先看了一眼
+                    </div>
+                    <p className="mt-2 text-[13px] leading-relaxed text-[#4A4A4A]">
+                      {detailFull.ai_summary}
+                    </p>
+                    {parseAiList(detailFull.ai_questions).length > 0 && (
+                      <div className="mt-3">
+                        <p className="text-xs text-[#8A8A8A]">读完这条，你能回答：</p>
+                        <ul className="mt-1.5 space-y-1">
+                          {parseAiList(detailFull.ai_questions).map((q) => (
+                            <li
+                              key={q}
+                              className="flex items-start gap-1.5 text-[13px] leading-relaxed text-[#4A4A4A]"
+                            >
+                              <span className="mt-0.5 text-[#A0A8B4]">·</span>
+                              {q}
+                            </li>
+                          ))}
+                        </ul>
+                      </div>
+                    )}
+                    {parseAiList(detailFull.ai_tags).length > 0 && (
+                      <div className="mt-3 flex flex-wrap items-center gap-1.5">
+                        <span className="text-xs text-[#8A8A8A]">建议标签：</span>
+                        {parseAiList(detailFull.ai_tags).map((tag) => {
+                          const on = (detailFull.tags ?? []).includes(tag);
+                          return (
+                            <button
+                              key={tag}
+                              onClick={() => toggleAiTag(tag)}
+                              className={`h-6 rounded-[2px] border px-2 text-xs transition-colors ${
+                                on
+                                  ? "border-black bg-black text-white"
+                                  : "border-[#D9D9D9] bg-white text-[#4A4A4A] hover:border-black"
+                              }`}
+                            >
+                              {tag}
+                            </button>
+                          );
+                        })}
+                        <span className="text-[11px] text-[#A0A8B4]">点一下就贴上</span>
+                      </div>
+                    )}
+                  </>
+                ) : (
+                  <div className="flex flex-wrap items-center gap-3">
+                    <span className="text-xs text-[#8A8A8A]">
+                      还没有 AI 导读
+                    </span>
+                    <button
+                      onClick={() => interpretInboxItem(currentInbox)}
+                      disabled={interpretingId != null}
+                      className="flex h-7 items-center gap-1.5 rounded-[2px] bg-black px-2.5 text-xs font-medium text-white transition-opacity hover:opacity-85 disabled:cursor-not-allowed disabled:opacity-40"
+                    >
+                      <Sparkles className="h-3.5 w-3.5" />
+                      {interpretingId === currentInbox.id ? "AI 正在看…" : "AI 先帮我看看"}
+                    </button>
+                  </div>
+                )}
               </div>
             )}
             {/* 快照优先渲染（同知识库详情），降级条目自然回落 Markdown 显示链接 */}
