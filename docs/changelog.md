@@ -4,6 +4,22 @@
 
 ---
 
+## 2026-08-27(上午) — 修复 deepseek 发消息挂起 + 前端误导性报错
+
+### 现象
+用 deepseek 发消息，气泡显示「网络错误」，弹窗提示「请检查 DEEPSEEK_API_KEY」。排查实证：服务存活、Key 已配置、依赖齐全、网络通——**配置其实没问题**。
+
+### 根因
+1. **LLM 调用无超时保护，深度思考阶段无限挂起**：`generatePlan` 里 fetch 直连上游，上游长时间不回响应头（深度思考可能几分钟）时请求悬在「零输出」状态。数据库证据：用户消息已落库、assistant 占位行 `status=stopped` 但 content 为空、无新 task_plan 记录——卡死点正是规划阶段的 fetch 挂起。
+2. **重发被同会话并发锁 409 拒绝，前端却吞掉真实原因**：`agent/page.tsx` catch 块不区分 409（「当前会话有任务正在执行」）和真实网络错误，一律套「检查 API_KEY」误导文案，用户越查配置越懵。
+
+### 修复
+1. `openai.ts`：流式调用只锁「建连 + 响应头」30s（`CONNECT_TIMEOUT_MS`），AbortController + setTimeout 保护 fetch 阶段，响应头一返回即 clearTimeout；正文流式读取不设整体超时（深度思考可能数分钟，不能一刀切）。AbortError 此时只可能来自超时，安全转译为 ProviderError「连接超时」。
+2. `planner.ts`：规划器非流式整体超时 120s（`PLAN_TIMEOUT_MS`），`AbortSignal.timeout` + `AbortSignal.any` 合并外部 signal，以 `timeoutSignal.aborted` 区分「超时」与「用户主动取消」。
+3. `page.tsx`：错误透传改用中文检测 `/[\u4e00-\u9fa5]/` 区隔服务端中文原因（透传到气泡+弹窗）与网络层英文 TypeError（走兜底文案），用户能看到真实原因而非误导提示。
+
+---
+
 ## 2026-08-26(傍晚·十) — K5 复审修复三处疏漏（UA / 回填时序 / 查重索引）
 
 K5 上线后做了一次全量代码复审（含翻 rss-parser 源码验证 Atom 兼容性），揪出三个真问题一并修掉；新增 1 个时序锁定测试，**58/58 全绿**。
