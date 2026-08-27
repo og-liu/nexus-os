@@ -6,7 +6,6 @@ import {
   PenLine,
   Inbox,
   Trash2,
-  Rss,
   Search,
   Plus,
   Check,
@@ -38,6 +37,7 @@ interface FeedItem {
   tags: string[];
   time: string;
   source: string;
+  kind: "captured" | "note"; // 出身：决定「移除」时进回收站还是退回草稿
   fresh?: boolean; // 刚刚入库
 }
 
@@ -47,6 +47,7 @@ interface Note {
   content: string;
   tags: string[];
   updatedAt: string; // 渲染时由 formatRelTime 现算的相对时间文案
+  inLibrary: boolean; // 方案 B：是否已加入知识库（status=kept），驱动「加入/移出」按钮
 }
 
 interface InboxItem {
@@ -65,14 +66,7 @@ interface TrashItem {
   daysLeft: number; // 由 deleted_at 现算：距彻底删除还剩几天
 }
 
-interface Source {
-  id: number;
-  name: string;
-  freq: string;
-  on: boolean;
-}
-
-type Section = "feed" | "notes" | "inbox" | "trash" | "sources" | "quiz" | "review";
+type Section = "feed" | "notes" | "inbox" | "trash" | "quiz" | "review";
 // K3 前置起 feed 与 note 都是真库 UUID，详情引用统一 string
 type DetailRef = { type: "feed"; id: string } | { type: "note"; id: string } | null;
 
@@ -124,7 +118,7 @@ const choiceQuestions: ChoiceQuestion[] = [
     options: [
       { key: "A", text: "让笔记更好看" },
       { key: "B", text: "标记过时/失效内容并提示归档", correct: true },
-      { key: "C", text: "自动增加新订阅源" },
+      { key: "C", text: "自动关注更多网站" },
     ],
   },
 ];
@@ -139,7 +133,7 @@ interface KnowledgeRow {
   title: string;
   content: string;
   source: string | null;
-  status: "inbox" | "kept" | "discarded" | "trashed";
+  status: "inbox" | "kept" | "draft" | "discarded" | "trashed";
   kind: "captured" | "note";
   deleted_at: number | null;
   tags: string[];
@@ -170,7 +164,7 @@ function makeSummary(content: string): string {
   return first.length > 80 ? `${first.slice(0, 80)}…` : first || "（无正文）";
 }
 
-// store 行 → 知识流卡片（kept 列表）
+// store 行 → 我的知识库卡片（kept 列表）
 function toFeedItem(row: KnowledgeRow): FeedItem {
   return {
     id: row.id,
@@ -180,11 +174,12 @@ function toFeedItem(row: KnowledgeRow): FeedItem {
     tags: row.tags,
     time: formatRelTime(row.created_at),
     source: row.source ?? "手动采集",
-    fresh: false, // 只有拍板保留瞬间插入的条目才标 fresh，从库加载的不算
+    kind: row.kind,
+    fresh: false, // 只有拍板「留下」瞬间插入的条目才标 fresh，从库加载的不算
   };
 }
 
-// store 行 → 收件箱拍板卡
+// store 行 → 待处理拍板卡
 function toInboxItem(row: KnowledgeRow): InboxItem {
   return {
     id: row.id,
@@ -203,6 +198,7 @@ function toNoteItem(row: KnowledgeRow): Note {
     content: row.content,
     tags: row.tags,
     updatedAt: formatRelTime(row.updated_at),
+    inLibrary: row.status === "kept",
   };
 }
 
@@ -290,13 +286,6 @@ const markdownComponents = {
 
 
 
-const initialSources: Source[] = [
-  { id: 1, name: "技术晨报", freq: "每天 07:00", on: true },
-  { id: 2, name: "前端周报", freq: "每周一 08:00", on: true },
-  { id: 3, name: "AI 日报", freq: "每天 09:00", on: true },
-  { id: 4, name: "个人博客圈", freq: "每天 12:00", on: false },
-];
-
 // ---------- 小组件 ----------
 
 function TagPill({
@@ -349,14 +338,13 @@ export default function KnowledgePage() {
   const [captureInput, setCaptureInput] = useState("");
 
   // K1 起 feed / inbox 接真库；K3 前置起 notes / trash 也接库（与 feed 同表，kind 区分）。
-  // sources 仍是 mock，等自动化采集（K5 RSS）时一并设计
+  // 订阅源管理已整体迁往「自动」页（automation，现叫「自动关注」），这里不再持有 sources 状态
   const [feed, setFeed] = useState<FeedItem[]>([]);
   const [notes, setNotes] = useState<Note[]>([]);
   const [inbox, setInbox] = useState<InboxItem[]>([]);
   const [trash, setTrash] = useState<TrashItem[]>([]);
-  const [sources, setSources] = useState<Source[]>(initialSources);
   const [allTags, setAllTags] = useState<string[]>([]); // 全部标签，从 /api/knowledge/tags 拉取
-  // K2 标签筛选：点知识流里的标签 pill 即按该标签过滤（服务端 tag 参数）
+  // K2 标签筛选：点我的知识库里的标签 pill 即按该标签过滤（服务端 tag 参数）
   const [activeTag, setActiveTag] = useState<string | null>(null);
   // 服务端检索进行中提示（搜索框防抖请求发出后到返回前）
   const [searching, setSearching] = useState(false);
@@ -380,7 +368,7 @@ export default function KnowledgePage() {
 
   // ----- 数据加载（K2：搜索与标签筛选都走服务端） -----
 
-  /** 拉知识流（kept 列表）：关键词 q 与标签 tag 传给服务端组合过滤——
+  /** 拉我的知识库（kept 列表）：关键词 q 与标签 tag 传给服务端组合过滤——
    *  LIKE 检索和标签匹配在 store 层拼 WHERE 条件，前端只负责拼参数。
    *  这取代了 K1 之前「整页拉回来前端 filter」的做法：数据库是唯一真相，
    *  分页/大数据量时也不会把全表拖到浏览器 */
@@ -402,9 +390,10 @@ export default function KnowledgePage() {
     setAllTags((data.tags as Array<{ tag: string; count: number }>).map((t) => t.tag));
   };
 
-  /** 拉我的文章（kind=note 且 kept）。笔记不走搜索/筛选，固定全量拉取 */
+  /** 拉我的文章（kind=note，draft 和 kept 都拉）。方案 B 下草稿和已入库的
+   *  文章都住「我的文章」；不走搜索/筛选，固定全量拉取 */
   const loadNotes = async () => {
-    const res = await fetch("/api/knowledge?status=kept&kind=note&limit=200");
+    const res = await fetch("/api/knowledge?status=draft,kept&kind=note&limit=200");
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const data = await res.json();
     setNotes((data.items as KnowledgeRow[]).map(toNoteItem));
@@ -419,7 +408,7 @@ export default function KnowledgePage() {
     setTrash((data.items as KnowledgeRow[]).map(toTrashItem));
   };
 
-  // 首屏并行拉五路数据：收件箱、知识流、标签、我的文章、回收站。
+  // 首屏并行拉五路数据：待处理、我的知识库、标签、我的文章、回收站。
   // 用 allSettled 而不是 all：一个接口挂了其他照常显示，不至于整页报废
   useEffect(() => {
     let alive = true; // 组件卸载后不再 setState
@@ -432,7 +421,7 @@ export default function KnowledgePage() {
         loadTrash(),
       ]);
       if (!alive) return;
-      // 收件箱那路要单独解析 body；其余四路内部已各自 setState
+      // 待处理那路要单独解析 body；其余四路内部已各自 setState
       let failed = results[0].status === "rejected";
       if (results[0].status === "fulfilled") {
         if (!results[0].value.ok) failed = true;
@@ -488,6 +477,13 @@ export default function KnowledgePage() {
     onOk: () => void;
   } | null>(null);
 
+  // ----- 「我的文章」批量操作 + md 导入（阶段 1 范围：入库 / 删除 / 导入） -----
+  const [selectMode, setSelectMode] = useState(false); // 批量选择模式开关
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set()); // 选中的文章 id
+  const [batchBusy, setBatchBusy] = useState(false); // 批量请求进行中：按钮置灰防连击
+  const [importing, setImporting] = useState(false); // md 文件导入进行中
+  const importInputRef = useRef<HTMLInputElement | null>(null); // 隐藏的 file input，按钮点它触发选择
+
   // 自测
   const [quizMode, setQuizMode] = useState<"flash" | "choice">("flash");
   const [flipped, setFlipped] = useState<Record<number, boolean>>({});
@@ -505,11 +501,11 @@ export default function KnowledgePage() {
     setEditingNoteId(null);
   };
 
-  // ----- 收件箱拍板 -----
+  // ----- 待处理拍板 -----
 
-  // 拍板「保留」：PATCH status=kept，接口确认后才动本地列表——
-  // 流转失败时收件箱保持原样，用户不会误以为拍板成功。
-  // 成功后把后端返回的完整行转成卡片插到知识流顶部，带「刚刚入库」标记，
+  // 拍板「留下」：PATCH status=kept，接口确认后才动本地列表——
+  // 流转失败时待处理保持原样，用户不会误以为拍板成功。
+  // 成功后把后端返回的完整行转成卡片插到我的知识库顶部，带「刚刚入库」标记，
   // 让「存进去」这件事肉眼可见
   const keepItem = async (item: InboxItem) => {
     if (savingId) return; // 已有拍板在途，忽略新点击（防连击重复提交）
@@ -524,7 +520,7 @@ export default function KnowledgePage() {
       const row = (await res.json()) as KnowledgeRow;
       setInbox((prev) => prev.filter((i) => i.id !== item.id));
       setFeed((prev) => [{ ...toFeedItem(row), fresh: true }, ...prev]);
-      showToast("已保留进知识流");
+      showToast("已留下，进我的知识库");
     } catch {
       showToast("操作失败，请重试");
     } finally {
@@ -532,9 +528,9 @@ export default function KnowledgePage() {
     }
   };
 
-  // 拍板「放弃」：PATCH status=discarded。
-  // 注意语义区分：discarded 是「从未保留过」，trashed 才是回收站的「先进站再删」；
-  // 原 mock 把放弃塞进回收站是演示期的混淆行为，K1 按数据层正确状态机走
+  // 拍板「不要了」：PATCH status=discarded。
+  // 注意语义区分：discarded 是「从未留下过」，不再出现在任何列表、也不进回收站；
+  // trashed 才是回收站的「先进站再删」。想反悔的用户走「留下」，而不是删
   const dropItem = async (item: InboxItem) => {
     if (savingId) return;
     setSavingId(item.id);
@@ -546,7 +542,7 @@ export default function KnowledgePage() {
       });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       setInbox((prev) => prev.filter((i) => i.id !== item.id));
-      showToast("已放弃");
+      showToast("已不要了");
     } catch {
       showToast("操作失败，请重试");
     } finally {
@@ -554,25 +550,83 @@ export default function KnowledgePage() {
     }
   };
 
-  // 手动采集：POST 落库进 inbox。必须先等接口返回真实 id 再插入本地列表——
-  // 不能乐观插入（本地造假 id），否则后续拍板的 PATCH 会拿着假 id 打空炮
+  // 手动采集：POST 落库进待处理。必须先等接口返回真实 id 再插入本地列表——
+  // 不能乐观插入（本地造假 id），否则后续拍板的 PATCH 会拿着假 id 打空炮。
+  // 贴链接走服务端智能分流（抓正文 / 认出订阅地址 / 抓不到降级存链接），
+  // 贴文本照旧直接落库；两种输入共用一个入口，用户不用关心区别
   const handleCapture = async () => {
     const text = captureInput.trim();
     if (!text || savingId === "capturing") return;
     setSavingId("capturing"); // "capturing" 是采集动作的占位标记（此刻还没有真实条目 id）
     try {
+      // www. 开头的裸域名补全协议再交给后端识别——少打「https://」也是体验
+      const urlLike = /^(https?:\/\/\S+)$/i.test(text)
+        ? text
+        : /^(www\.\S+)$/i.test(text)
+          ? `https://${text}`
+          : null;
       const res = await fetch("/api/knowledge", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ content: text }),
+        body: JSON.stringify(urlLike ? { url: urlLike } : { content: text }),
       });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const row = (await res.json()) as KnowledgeRow;
+      const data = await res.json();
+      // 订阅地址：后端不落库，引导去「自动」页添加关注（那里才有定时抓取）
+      if (data.rss) {
+        setCaptureInput("");
+        showToast("这是订阅地址，去「自动」页添加关注后会自动抓取更新");
+        return;
+      }
+      // URL 分流返回 { item }（可能带 degraded），文本路径直接返回行本身
+      const row = (data.item ?? data) as KnowledgeRow;
       setCaptureInput("");
       setInbox((prev) => [toInboxItem(row), ...prev]);
-      showToast("已丢进收件箱，等你拍板");
+      // 降级（抓不到正文）时如实相告：这条只有链接，想要正文得自己点开看
+      showToast(
+        data.degraded
+          ? `没抓到正文（${data.degraded}），已先按链接收进来`
+          : urlLike
+            ? "正文已抓回，丢进待处理等你拍板"
+            : "已丢进待处理，等你拍板",
+      );
     } catch {
       showToast("采集失败，请重试");
+    } finally {
+      setSavingId(null);
+    }
+  };
+
+  // 从我的知识库移除（≠删除）：按出身分流——采集来的移进回收站留 7 天反悔期；
+  // 自己写的退回草稿，文章本体永远在「我的文章」。两条路都可逆，不做二次确认
+  const removeFromFeed = async (item: FeedItem) => {
+    if (savingId) return;
+    setSavingId(item.id);
+    try {
+      if (item.kind === "note") {
+        const res = await fetch(`/api/knowledge/${item.id}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ status: "draft" }),
+        });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        setFeed((prev) => prev.filter((f) => f.id !== item.id));
+        await loadNotes(); // 草稿状态变了，重拉「我的文章」的 inLibrary 标记
+        showToast("已移出知识库，文章还在「我的文章」里");
+      } else {
+        const res = await fetch(`/api/knowledge/${item.id}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ action: "trash" }),
+        });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const row = (await res.json()) as KnowledgeRow;
+        setFeed((prev) => prev.filter((f) => f.id !== item.id));
+        setTrash((prev) => [toTrashItem(row), ...prev]);
+        showToast("已移进回收站，7 天内可捞回");
+      }
+    } catch {
+      showToast("操作失败，请重试");
     } finally {
       setSavingId(null);
     }
@@ -626,7 +680,7 @@ export default function KnowledgePage() {
   const createNote = () => {
     const draftId = `draft-${Date.now()}`;
     setNotes((prev) => [
-      { id: draftId, title: "", content: "", tags: [], updatedAt: "刚刚" },
+      { id: draftId, title: "", content: "", tags: [], updatedAt: "刚刚", inLibrary: false },
       ...prev,
     ]);
     setNoteDraft({ title: "", content: "" });
@@ -732,6 +786,202 @@ export default function KnowledgePage() {
           .catch(() => showToast("删除失败，请重试"));
       },
     });
+  };
+
+  // ----- 文章入/出知识库（方案 B 的核心开关） -----
+
+  // 加入知识库：PATCH status=kept，后端会同步生成语义指纹——从这一刻起
+  // AI 检索才能命中这篇文章。局部更新列表，不用整页重拉
+  const addNoteToLibrary = async (note: Note) => {
+    if (savingId) return;
+    setSavingId(note.id);
+    try {
+      const res = await fetch(`/api/knowledge/${note.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ status: "kept" }),
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      setNotes((prev) =>
+        prev.map((n) => (n.id === note.id ? { ...n, inLibrary: true } : n)),
+      );
+      showToast("已加入知识库，AI 也能检索到它了");
+    } catch {
+      showToast("操作失败，请重试");
+    } finally {
+      setSavingId(null);
+    }
+  };
+
+  // 移出知识库：PATCH status=draft。文章本体不动，只是退出 AI 检索范围
+  const removeNoteFromLibrary = async (note: Note) => {
+    if (savingId) return;
+    setSavingId(note.id);
+    try {
+      const res = await fetch(`/api/knowledge/${note.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ status: "draft" }),
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      setNotes((prev) =>
+        prev.map((n) => (n.id === note.id ? { ...n, inLibrary: false } : n)),
+      );
+      showToast("已移出知识库，文章还在「我的文章」里");
+    } catch {
+      showToast("操作失败，请重试");
+    } finally {
+      setSavingId(null);
+    }
+  };
+
+  // ----- 批量操作 -----
+
+  const toggleSelect = (id: string) => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
+  const exitSelectMode = () => {
+    setSelectMode(false);
+    setSelectedIds(new Set());
+  };
+
+  // 全选只圈已落库的文章；本地草稿（draft- 前缀）没有库记录，圈了也发不出请求
+  const setSelectAll = () => {
+    const real = notes.filter((n) => !n.id.startsWith("draft-"));
+    setSelectedIds((prev) =>
+      prev.size === real.length ? new Set() : new Set(real.map((n) => n.id)),
+    );
+  };
+
+  // 批量加入知识库：allSettled 逐条 PATCH——部分失败不影响其余，
+  // 结束按成败数量如实汇报
+  const batchAddToLibrary = async () => {
+    if (selectedIds.size === 0 || batchBusy) return;
+    setBatchBusy(true);
+    const results = await Promise.allSettled(
+      [...selectedIds].map(async (id) => {
+        const res = await fetch(`/api/knowledge/${id}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ status: "kept" }),
+        });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      }),
+    );
+    setBatchBusy(false);
+    const ok = results.filter((r) => r.status === "fulfilled").length;
+    const fail = results.length - ok;
+    await loadNotes();
+    exitSelectMode();
+    showToast(
+      fail === 0
+        ? `已加入知识库 ${ok} 篇，AI 也能检索到它们了`
+        : `成功 ${ok} 篇、失败 ${fail} 篇，失败的可以再试一次`,
+    );
+  };
+
+  const askBatchDelete = () => {
+    if (selectedIds.size === 0 || batchBusy) return;
+    setConfirmState({
+      title: `删除选中的 ${selectedIds.size} 篇文章？`,
+      desc: "文章会进回收站，7 天内可以捞回，之后彻底删除。",
+      okText: "删除",
+      onOk: async () => {
+        setBatchBusy(true);
+        const results = await Promise.allSettled(
+          [...selectedIds].map(async (id) => {
+            const res = await fetch(`/api/knowledge/${id}`, {
+              method: "PATCH",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ action: "trash" }),
+            });
+            if (!res.ok) throw new Error(`HTTP ${res.status}`);
+            const row = (await res.json()) as KnowledgeRow;
+            setTrash((prev) => [toTrashItem(row), ...prev]);
+          }),
+        );
+        setBatchBusy(false);
+        const ok = results.filter((r) => r.status === "fulfilled").length;
+        const fail = results.length - ok;
+        await loadNotes();
+        exitSelectMode();
+        showToast(fail === 0 ? `已删除 ${ok} 篇` : `成功 ${ok} 篇、失败 ${fail} 篇`);
+      },
+    });
+  };
+
+  // ----- md 批量导入 -----
+
+  /** 从 md 文本头部解析 frontmatter 的 title / tags。
+   *  兼容 Obsidian / Typora 常见的两种 tags 写法（行内式 / 列表式），
+   *  没写 frontmatter 或对应字段时按空值处理，由调用方兜底 */
+  function parseFrontmatter(text: string): { title?: string; tags: string[] } {
+    const m = text.match(/^---\r?\n([\s\S]*?)\r?\n---\r?\n?/);
+    if (!m) return { tags: [] };
+    const fm = m[1];
+    const titleLine = fm.match(/^title:\s*(.+)$/m);
+    const title = titleLine?.[1].trim().replace(/^["']|["']$/g, "");
+    const tags: string[] = [];
+    const inline = fm.match(/^tags:\s*\[(.*)\]$/m);
+    if (inline) {
+      for (const t of inline[1].split(",")) {
+        const v = t.trim().replace(/^["']|["']$/g, "");
+        if (v) tags.push(v);
+      }
+    } else {
+      const list = fm.match(/^tags:\s*\n((?:[ \t]*-[ \t]*.+\n?)+)/m);
+      if (list) {
+        for (const line of list[1].split("\n")) {
+          const v = line.replace(/^[ \t]*-[ \t]*/, "").trim().replace(/^["']|["']$/g, "");
+          if (v) tags.push(v);
+        }
+      }
+    }
+    return { title, tags };
+  }
+
+  // 批量导入 md 文件：读文本 → 解析 frontmatter → POST /api/knowledge/import。
+  // 重名文章由后端拦截跳过，这里只负责如实回报 created / skipped
+  const handleImportFiles = async (files: FileList | null) => {
+    if (!files || files.length === 0) return;
+    setImporting(true);
+    try {
+      const payload: Array<{ name: string; title: string; content: string; tags: string[] }> = [];
+      for (const file of Array.from(files)) {
+        const text = await file.text();
+        const { title, tags } = parseFrontmatter(text);
+        payload.push({
+          name: file.name,
+          // frontmatter 没写标题就退回文件名（去掉扩展名）
+          title: title || file.name.replace(/\.(md|markdown)$/i, ""),
+          content: text,
+          tags,
+        });
+      }
+      const res = await fetch("/api/knowledge/import", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ files: payload }),
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const data = (await res.json()) as { created: number; skipped: string[] };
+      await loadNotes();
+      showToast(
+        data.skipped.length > 0
+          ? `导入 ${data.created} 篇，${data.skipped.length} 篇重名被跳过`
+          : `导入成功 ${data.created} 篇，点「加入知识库」让 AI 检索到它们`,
+      );
+    } catch {
+      showToast("导入失败，请重试");
+    } finally {
+      setImporting(false);
+    }
   };
 
   // ----- 标签闭环 -----
@@ -861,16 +1111,10 @@ export default function KnowledgePage() {
   }[] = [
     {
       items: [
-        { key: "feed", label: "知识流", icon: BookOpen, desc: `${feed.length} 条已沉淀` },
+        { key: "feed", label: "我的知识库", icon: BookOpen, desc: `${feed.length} 条已沉淀` },
         { key: "notes", label: "我的文章", icon: PenLine, desc: `${notes.length} 篇内容` },
-        { key: "inbox", label: "收件箱", icon: Inbox, desc: "AI 初筛等你拍板", count: inbox.length },
+        { key: "inbox", label: "待处理", icon: Inbox, desc: "新到的等你拍板", count: inbox.length },
         { key: "trash", label: "回收站", icon: Trash2, desc: "7 天内可捞回", count: trash.length },
-        {
-          key: "sources",
-          label: "订阅源",
-          icon: Rss,
-          desc: `${sources.filter((s) => s.on).length} 个在运行`,
-        },
       ],
     },
     {
@@ -905,7 +1149,7 @@ export default function KnowledgePage() {
             className="mb-4 flex items-center gap-1.5 text-xs text-[#8A8A8A] transition-colors hover:text-black"
           >
             <ArrowLeft className="h-3.5 w-3.5" />
-            返回知识流
+            返回我的知识库
           </button>
           <article className="rounded-[2px] bg-white px-5 py-6 md:px-8 md:py-8">
             <h1 className="text-xl font-semibold leading-snug text-black md:text-2xl">
@@ -1024,7 +1268,7 @@ export default function KnowledgePage() {
                 <AddTagButton onClick={() => setTagPicker(detail)} />
               </div>
               {/* 笔记正文同样接 Markdown 渲染：存储是纯文本单一事实源，
-                  展示层与知识流共用同一套 components 映射 */}
+                  展示层与我的知识库共用同一套 components 映射 */}
               <div className="mt-5">
                 <ReactMarkdown
                   remarkPlugins={[remarkGfm]}
@@ -1033,9 +1277,27 @@ export default function KnowledgePage() {
                   {currentNote.content}
                 </ReactMarkdown>
               </div>
-              {/* 底部操作。「加入知识流」按钮已移除：笔记入库后天然可被
-                  检索/AI 看到（同表 kind=note），原按钮建立在「笔记不在库」的旧前提上 */}
+              {/* 底部操作：方案 B 的「加入知识库」主入口放这——写完顺手一点，
+                  文章就从「只有我能看」变成「AI 能检索」 */}
               <div className="mt-6 flex flex-wrap items-center gap-2 border-t border-[#F0F0F0] pt-4">
+                {!currentNote.id.startsWith("draft-") &&
+                  (currentNote.inLibrary ? (
+                    <button
+                      onClick={() => removeNoteFromLibrary(currentNote)}
+                      className="flex h-9 items-center gap-1.5 rounded-[2px] border border-[#D9D9D9] bg-white px-4 text-xs font-medium text-[#4A4A4A] transition-colors hover:border-[#000000] hover:text-black"
+                    >
+                      <Database className="h-3.5 w-3.5" />
+                      移出知识库
+                    </button>
+                  ) : (
+                    <button
+                      onClick={() => addNoteToLibrary(currentNote)}
+                      className="flex h-9 items-center gap-1.5 rounded-[2px] bg-[#000000] px-4 text-xs font-medium text-white transition-opacity hover:opacity-85"
+                    >
+                      <Database className="h-3.5 w-3.5" />
+                      加入知识库
+                    </button>
+                  ))}
                 <button
                   onClick={() => startEditNote(currentNote)}
                   className="flex h-9 items-center gap-1.5 rounded-[2px] border border-[#D9D9D9] bg-white px-4 text-xs font-medium text-[#4A4A4A] transition-colors hover:border-[#000000] hover:text-black"
@@ -1050,6 +1312,11 @@ export default function KnowledgePage() {
                   <Trash2 className="h-3.5 w-3.5" />
                   删除
                 </button>
+                {currentNote.inLibrary && (
+                  <span className="ml-auto text-xs text-[#A0A8B4]">
+                    已在知识库，AI 可检索
+                  </span>
+                )}
               </div>
             </div>
           )}
@@ -1071,7 +1338,7 @@ export default function KnowledgePage() {
               <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-[#999999]" />
               <input
                 type="text"
-                placeholder="搜索知识流（标题 / 正文 / 标签）"
+                placeholder="搜索我的知识库（标题 / 正文 / 标签）"
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
                 className="h-10 w-full rounded-[2px] border border-[#E5E5E5] bg-white pl-9 pr-3 text-sm text-[#000000] placeholder:text-[#999999] outline-none focus:border-[#000000]"
@@ -1096,7 +1363,7 @@ export default function KnowledgePage() {
             )}
             {loadingKnowledge ? (
               <div className="rounded-[2px] border border-dashed border-[#D9D9D9] bg-white p-12 text-center">
-                <p className="text-sm text-[#A0A8B4]">知识流加载中…</p>
+                <p className="text-sm text-[#A0A8B4]">知识库加载中…</p>
               </div>
             ) : feed.length === 0 ? (
               <div className="rounded-[2px] border border-dashed border-[#D9D9D9] bg-white p-12 text-center">
@@ -1121,7 +1388,7 @@ export default function KnowledgePage() {
                     {item.summary}
                   </p>
                   <div className="mt-2.5 flex flex-wrap items-center gap-1.5">
-                    {/* 标签即筛选入口：点 pill 直接按该标签过滤知识流。
+                    {/* 标签即筛选入口：点 pill 直接按该标签过滤我的知识库。
                         stopPropagation 防止触发卡片的进详情点击 */}
                     {item.tags.map((tag) => {
                       const active = activeTag === tag;
@@ -1147,6 +1414,17 @@ export default function KnowledgePage() {
                     <span className="ml-auto text-xs text-[#A0A8B4]">
                       {item.source} · {item.time}
                     </span>
+                    {/* 移除 ≠ 删除：采集的进回收站（7 天可捞），自己写的退回
+                        「我的文章」草稿；不用进详情就能做 */}
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        removeFromFeed(item);
+                      }}
+                      className="text-xs text-[#A0A8B4] underline-offset-2 transition-colors hover:text-black hover:underline"
+                    >
+                      移除
+                    </button>
                   </div>
                 </article>
               ))
@@ -1157,16 +1435,78 @@ export default function KnowledgePage() {
       case "notes":
         return (
           <div className="space-y-4">
-            <div className="flex items-center justify-between px-1">
-              <p className="text-xs text-[#A0A8B4]">自己写的文章，自动保存到知识库，可编辑、打标签、删除</p>
-              <button
-                onClick={createNote}
-                className="flex h-9 items-center gap-1.5 rounded-[2px] bg-[#000000] px-4 text-xs font-medium text-white transition-opacity hover:opacity-85"
-              >
-                <Plus className="h-3.5 w-3.5" />
-                写文章
-              </button>
+            <div className="flex flex-wrap items-center justify-between gap-2 px-1">
+              <p className="text-xs text-[#A0A8B4]">
+                自己写的文章都在这；点「加入知识库」，AI 才能检索到它
+              </p>
+              <div className="flex items-center gap-2">
+                {notes.length > 0 && (
+                  <button
+                    onClick={() => (selectMode ? exitSelectMode() : setSelectMode(true))}
+                    className="flex h-9 items-center gap-1.5 rounded-[2px] border border-[#D9D9D9] bg-white px-3 text-xs font-medium text-[#4A4A4A] transition-colors hover:border-[#000000] hover:text-black"
+                  >
+                    <ClipboardCheck className="h-3.5 w-3.5" />
+                    {selectMode ? "退出批量" : "批量操作"}
+                  </button>
+                )}
+                {/* md 导入：把别处的旧文章搬进来。frontmatter 里的 title / tags
+                    会被读出来，没写的按文件名兜底 */}
+                <input
+                  ref={importInputRef}
+                  type="file"
+                  multiple
+                  accept=".md,.markdown"
+                  className="hidden"
+                  onChange={(e) => {
+                    void handleImportFiles(e.target.files);
+                    e.target.value = ""; // 清掉选择，同一批文件能再次触发 change
+                  }}
+                />
+                <button
+                  onClick={() => importInputRef.current?.click()}
+                  disabled={importing}
+                  className="flex h-9 items-center gap-1.5 rounded-[2px] border border-[#D9D9D9] bg-white px-3 text-xs font-medium text-[#4A4A4A] transition-colors hover:border-[#000000] hover:text-black disabled:opacity-40"
+                >
+                  <Link2 className="h-3.5 w-3.5" />
+                  {importing ? "导入中…" : "导入文章"}
+                </button>
+                <button
+                  onClick={createNote}
+                  className="flex h-9 items-center gap-1.5 rounded-[2px] bg-[#000000] px-4 text-xs font-medium text-white transition-opacity hover:opacity-85"
+                >
+                  <Plus className="h-3.5 w-3.5" />
+                  写文章
+                </button>
+              </div>
             </div>
+            {/* 批量操作条：本阶段只放「加入知识库 / 删除」两个高频动作 */}
+            {selectMode && (
+              <div className="flex flex-wrap items-center gap-2 rounded-[2px] border border-[#E5E5E5] bg-white px-3 py-2 text-xs text-[#4A4A4A]">
+                <span>已选 {selectedIds.size} 篇</span>
+                <button
+                  onClick={setSelectAll}
+                  className="text-[#8A8A8A] underline-offset-2 transition-colors hover:text-black hover:underline"
+                >
+                  {selectedIds.size === notes.filter((n) => !n.id.startsWith("draft-")).length
+                    ? "取消全选"
+                    : "全选"}
+                </button>
+                <button
+                  onClick={batchAddToLibrary}
+                  disabled={selectedIds.size === 0 || batchBusy}
+                  className="ml-auto h-8 rounded-[2px] bg-[#000000] px-3 text-xs font-medium text-white transition-opacity hover:opacity-85 disabled:opacity-30"
+                >
+                  {batchBusy ? "处理中…" : "加入知识库"}
+                </button>
+                <button
+                  onClick={askBatchDelete}
+                  disabled={selectedIds.size === 0 || batchBusy}
+                  className="h-8 rounded-[2px] border border-[#D9D9D9] bg-white px-3 text-xs font-medium text-[#4A4A4A] transition-colors hover:border-[#000000] hover:text-black disabled:opacity-30"
+                >
+                  删除
+                </button>
+              </div>
+            )}
             {notes.length === 0 ? (
               <div className="rounded-[2px] border border-dashed border-[#D9D9D9] bg-white p-12 text-center">
                 <p className="text-sm text-[#A0A8B4]">还没有文章，点「写文章」开始第一篇</p>
@@ -1175,10 +1515,30 @@ export default function KnowledgePage() {
               notes.map((note) => (
                 <article
                   key={note.id}
-                  onClick={() => setDetail({ type: "note", id: note.id })}
-                  className="cursor-pointer rounded-[2px] bg-white px-4 py-3.5 transition-shadow hover:shadow-[0_1px_4px_rgba(0,0,0,0.06)] md:px-5"
+                  onClick={() =>
+                    selectMode
+                      ? toggleSelect(note.id)
+                      : setDetail({ type: "note", id: note.id })
+                  }
+                  className={cn(
+                    "cursor-pointer rounded-[2px] bg-white px-4 py-3.5 md:px-5",
+                    !selectMode &&
+                      "transition-shadow hover:shadow-[0_1px_4px_rgba(0,0,0,0.06)]",
+                  )}
                 >
                   <h3 className="flex items-center gap-2 text-[15px] font-semibold text-black">
+                    {selectMode && (
+                      <span
+                        className={cn(
+                          "flex h-4 w-4 shrink-0 items-center justify-center rounded-[2px] border",
+                          selectedIds.has(note.id)
+                            ? "border-[#000000] bg-[#000000] text-white"
+                            : "border-[#D9D9D9]",
+                        )}
+                      >
+                        {selectedIds.has(note.id) && <Check className="h-3 w-3" />}
+                      </span>
+                    )}
                     <span className="min-w-0 truncate">
                       {note.title || "无标题文章"}
                     </span>
@@ -1199,6 +1559,30 @@ export default function KnowledgePage() {
                     <span className="ml-auto text-xs text-[#A0A8B4]">
                       最后编辑 {note.updatedAt}
                     </span>
+                    {/* 方案 B：入库开关放列表卡上，写完顺手就能点，不用进详情找 */}
+                    {!selectMode && !note.id.startsWith("draft-") && (
+                      note.inLibrary ? (
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            removeNoteFromLibrary(note);
+                          }}
+                          className="text-xs text-[#A0A8B4] underline-offset-2 transition-colors hover:text-black hover:underline"
+                        >
+                          移出知识库
+                        </button>
+                      ) : (
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            addNoteToLibrary(note);
+                          }}
+                          className="text-xs font-medium text-[#000000] underline underline-offset-2 transition-opacity hover:opacity-70"
+                        >
+                          加入知识库
+                        </button>
+                      )
+                    )}
                   </div>
                 </article>
               ))
@@ -1214,7 +1598,7 @@ export default function KnowledgePage() {
                 <Link2 className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-[#999999]" />
                 <input
                   type="text"
-                  placeholder="粘贴链接或文本，丢给 AI 采集"
+                  placeholder="粘贴链接或文本，正文自动抓回来"
                   value={captureInput}
                   onChange={(e) => setCaptureInput(e.target.value)}
                   onKeyDown={(e) => e.key === "Enter" && handleCapture()}
@@ -1231,15 +1615,15 @@ export default function KnowledgePage() {
             </div>
             <p className="flex items-center gap-1.5 px-1 text-xs text-[#A0A8B4]">
               <Sparkles className="h-3.5 w-3.5" />
-              AI 已按你的口味初筛；保留进知识流，放弃则不再出现（放弃与删除是两件事）
+              新抓来的先堆这，等你拍板：留下进我的知识库，不要了不再出现（不要了与删除是两件事）
             </p>
             {loadingKnowledge ? (
               <div className="rounded-[2px] border border-dashed border-[#D9D9D9] bg-white p-12 text-center">
-                <p className="text-sm text-[#A0A8B4]">收件箱加载中…</p>
+                <p className="text-sm text-[#A0A8B4]">待处理加载中…</p>
               </div>
             ) : inbox.length === 0 ? (
               <div className="rounded-[2px] border border-dashed border-[#D9D9D9] bg-white p-12 text-center">
-                <p className="text-sm text-[#A0A8B4]">收件箱空空如也，去采集吧</p>
+                <p className="text-sm text-[#A0A8B4]">待处理空空如也，去采集吧</p>
               </div>
             ) : (
               inbox.map((item) => (
@@ -1253,7 +1637,7 @@ export default function KnowledgePage() {
                     </span>
                   </div>
                   <p className="mt-1 text-[13.5px] leading-relaxed text-[#8A8A8A]">
-                    <span className="text-[#4A4A4A]">AI 摘要：</span>
+                    <span className="text-[#4A4A4A]">摘要：</span>
                     {item.summary}
                   </p>
                   <div className="mt-3 flex items-center justify-end gap-2">
@@ -1263,7 +1647,7 @@ export default function KnowledgePage() {
                       className="flex h-8 items-center gap-1.5 rounded-[2px] border border-[#D9D9D9] bg-white px-3 text-xs font-medium text-[#4A4A4A] transition-colors hover:border-[#000000] hover:text-black disabled:cursor-not-allowed disabled:opacity-40"
                     >
                       <X className="h-3.5 w-3.5" />
-                      {savingId === item.id ? "处理中…" : "放弃"}
+                      {savingId === item.id ? "处理中…" : "不要了"}
                     </button>
                     <button
                       onClick={() => keepItem(item)}
@@ -1271,7 +1655,7 @@ export default function KnowledgePage() {
                       className="flex h-8 items-center gap-1.5 rounded-[2px] bg-[#000000] px-3 text-xs font-medium text-white transition-opacity hover:opacity-85 disabled:cursor-not-allowed disabled:opacity-40"
                     >
                       <Check className="h-3.5 w-3.5" />
-                      保留
+                      留下
                     </button>
                   </div>
                 </div>
@@ -1289,7 +1673,7 @@ export default function KnowledgePage() {
             {trash.length === 0 ? (
               <div className="rounded-[2px] border border-dashed border-[#D9D9D9] bg-white p-12 text-center">
                 <p className="text-sm text-[#A0A8B4]">
-                  垃圾桶是空的，放弃的东西会暂时躺在这等过期。
+                  垃圾桶是空的，删除的东西会暂时躺在这等过期。
                 </p>
               </div>
             ) : (
@@ -1329,56 +1713,6 @@ export default function KnowledgePage() {
                 </div>
               ))
             )}
-          </div>
-        );
-
-      case "sources":
-        return (
-          <div className="space-y-4">
-            <p className="px-1 text-xs text-[#A0A8B4]">
-              开启后，AI 按频率自动抓取并送进收件箱等你拍板
-            </p>
-            <div className="rounded-[2px] bg-white">
-              {sources.map((source, i) => (
-                <div
-                  key={source.id}
-                  className={cn(
-                    "flex items-center gap-3 px-4 py-3.5 md:px-5",
-                    i > 0 && "border-t border-[#F0F0F0]",
-                  )}
-                >
-                  <div className="min-w-0 flex-1">
-                    <p className="truncate text-sm font-medium text-black">
-                      {source.name}
-                    </p>
-                    <p className="mt-0.5 text-xs text-[#A0A8B4]">{source.freq}</p>
-                  </div>
-                  <button
-                    role="switch"
-                    aria-checked={source.on}
-                    aria-label={`切换订阅源 ${source.name}`}
-                    onClick={() =>
-                      setSources((prev) =>
-                        prev.map((s) =>
-                          s.id === source.id ? { ...s, on: !s.on } : s,
-                        ),
-                      )
-                    }
-                    className={cn(
-                      "relative h-6 w-11 shrink-0 rounded-full transition-colors",
-                      source.on ? "bg-[#000000]" : "bg-[#D9D9D9]",
-                    )}
-                  >
-                    <span
-                      className={cn(
-                        "absolute top-1 h-4 w-4 rounded-full bg-white transition-all",
-                        source.on ? "left-6" : "left-1",
-                      )}
-                    />
-                  </button>
-                </div>
-              ))}
-            </div>
           </div>
         );
 
@@ -1541,7 +1875,7 @@ export default function KnowledgePage() {
                 { num: 5, label: "今日留存" },
                 {
                   num: trash.length,
-                  label: "今日放弃 →",
+                  label: "回收站 →",
                   jump: () => {
                     goList();
                     setSection("trash");
@@ -1549,7 +1883,7 @@ export default function KnowledgePage() {
                 },
                 {
                   num: inbox.length,
-                  label: "待你拍板 →",
+                  label: "待处理 →",
                   jump: () => {
                     goList();
                     setSection("inbox");
@@ -1768,7 +2102,7 @@ export default function KnowledgePage() {
                 </div>
                 <div className="mt-1.5 flex items-center gap-2 text-[11px] text-[#A0A8B4]">
                   <span>本周 +12</span>
-                  <span>待拍板 {inbox.length}</span>
+                  <span>待处理 {inbox.length}</span>
                   <span>回收站 {trash.length}</span>
                 </div>
               </div>

@@ -18,11 +18,21 @@ import {
   vectorToBlob,
 } from "@/lib/embeddings";
 
-/** 知识条目的生命周期状态（语义见 db.ts 建表注释） */
-export type KnowledgeStatus = "inbox" | "kept" | "discarded" | "trashed";
+/** 知识条目的生命周期状态（语义见 db.ts 建表注释）。
+ *  draft 是 2026-08-27 方案 B 新增：手写文章的起点——只在「我的文章」里，
+ *  不进「我的知识库」也不参与 AI 检索；用户主动点「加入知识库」才转 kept。
+ *  采集条目不走 draft（captured 从 inbox 拍板开始） */
+export type KnowledgeStatus =
+  | "draft"
+  | "inbox"
+  | "kept"
+  | "discarded"
+  | "trashed";
 
-/** 状态白名单：store 层唯一权威，写入前必须过这道闸 */
-const KNOWLEDGE_STATUSES: readonly KnowledgeStatus[] = [
+/** 状态白名单：store 层唯一权威，写入前必须过这道闸。
+ *  导出给 route 层做参数校验，避免两处各维护一份清单（漂移即事故） */
+export const KNOWLEDGE_STATUSES: readonly KnowledgeStatus[] = [
+  "draft",
   "inbox",
   "kept",
   "discarded",
@@ -134,7 +144,7 @@ export interface CreateItemInput {
   source_url?: string | null;
   status?: KnowledgeStatus;
   /** 出身：captured（默认，采集流）/ note（手写文章）。默认值放 store，
-   *  route 层显式传参时以 route 为准（如笔记创建传 kind=note + status=kept） */
+   *  route 层显式传参时以 route 为准（如手写文章创建传 kind=note + status=draft） */
   kind?: KnowledgeKind;
   tags?: string[];
 }
@@ -185,6 +195,10 @@ export function getItem(
 
 export interface ListOptions {
   status?: KnowledgeStatus;
+  /** 多状态包含（OR 语义）：「我的文章」要同时看 draft（未入库）与
+   *  kept（已入库）两种文章，单值参数表达不了，加这个数组形态。
+   *  与 status 同传时以 status 为准（单值更具体） */
+  statuses?: KnowledgeStatus[];
   /** 排除某状态：HTTP 列表默认排除 trashed（回收站是独立视图，不混进常规列表），
    *  比「查出来再过滤」正确——分页计数不会错位 */
   notStatus?: KnowledgeStatus;
@@ -213,6 +227,10 @@ export function listItems(
     assertStatus(opts.status);
     conds.push("status = ?");
     params.push(opts.status);
+  } else if (opts.statuses && opts.statuses.length > 0) {
+    opts.statuses.forEach(assertStatus);
+    conds.push(`status IN (${opts.statuses.map(() => "?").join(", ")})`);
+    params.push(...opts.statuses);
   }
   if (opts.notStatus) {
     assertStatus(opts.notStatus);
@@ -399,11 +417,14 @@ export function deleteItem(conn: Database.Database, id: string): boolean {
 // 与 discarded 的语义分野：discarded 是「从未保留过」（拍板放弃），trashed 是
 // 「曾经保留过再删」。回收站只收后者——用户亲手留下的东西才值得给反悔期。
 
-/** 软删除：kept → trashed 并记录 deleted_at。只有保留过的条目能进回收站，
+/** 软删除：kept / draft → trashed 并记录 deleted_at。
+ *  draft（未入库的手写文章）也走回收站——用户写的字是心血，一律给 7 天反悔期；
  *  inbox/discarded 条目没有「反悔」概念（前者还没拍板、后者已经拍板放弃） */
 export function trashItem(conn: Database.Database, id: string): KnowledgeItemRow | null {
   const current = getItem(conn, id);
-  if (!current || current.status !== "kept") return null;
+  if (!current || (current.status !== "kept" && current.status !== "draft")) {
+    return null;
+  }
   const now = Date.now();
   conn
     .prepare(
@@ -413,15 +434,20 @@ export function trashItem(conn: Database.Database, id: string): KnowledgeItemRow
   return getItem(conn, id);
 }
 
-/** 捞回：trashed → kept，清除 deleted_at。条目回到它被删前的位置（知识流或我的文章） */
+/** 捞回：trashed → 回到该条目的「家」，清除 deleted_at。
+ *  采集条目的家是知识库（kept）；手写文章的家是「我的文章」（draft）——
+ *  已入库的文章被删后捞回会回到未入库态，需要再点一次「加入知识库」。
+ *  这是显式取舍：回收站行没记录删除前状态，按出身回落最简单，
+ *  且「捞回的文章先回到我的文章」对用户反而更好理解 */
 export function restoreItem(conn: Database.Database, id: string): KnowledgeItemRow | null {
   const current = getItem(conn, id);
   if (!current || current.status !== "trashed") return null;
+  const back: KnowledgeStatus = current.kind === "note" ? "draft" : "kept";
   conn
     .prepare(
-      `UPDATE knowledge_items SET status = 'kept', deleted_at = NULL, updated_at = ? WHERE id = ?`,
+      `UPDATE knowledge_items SET status = ?, deleted_at = NULL, updated_at = ? WHERE id = ?`,
     )
-    .run(Date.now(), id);
+    .run(back, Date.now(), id);
   return getItem(conn, id);
 }
 
@@ -451,9 +477,11 @@ export function countsByStatus(
   const rows = conn
     .prepare(`SELECT status, COUNT(*) AS c FROM knowledge_items GROUP BY status`)
     .all() as Array<{ status: string; c: number }>;
+  // draft 也要占位：库里有草稿时角标才不会渲染出 undefined
   const result: Record<KnowledgeStatus, number> = {
     inbox: 0,
     kept: 0,
+    draft: 0,
     discarded: 0,
     trashed: 0,
   };

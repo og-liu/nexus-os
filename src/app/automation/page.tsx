@@ -1,9 +1,9 @@
 "use client";
 
-// 自动化页 · RSS 订阅管理。
+// 自动化页 · 自动关注管理（原「RSS 订阅」，2026-08-27 通俗化命名落地）。
 //
-// 职责单一原则：本页只管「订阅源」（从哪抓、开关、退订、手动刷新），
-// 抓回来的文章去哪看？在「知识流」的待拍板队列里——那是内容的主场，
+// 职责单一原则：本页只管「自动关注」（从哪抓、开关、退订、手动刷新），
+// 抓回来的文章去哪看？在「知识」页的待处理里——那是内容的主场，
 // 这里不重复展示文章列表，避免两处维护同一份状态。
 
 import { useCallback, useEffect, useState } from "react";
@@ -53,7 +53,7 @@ export default function AutomationPage() {
       const ff = data.firstFetch as { added: number } | null;
       setNotice(
         ff && ff.added > 0
-          ? `已添加并完成首次抓取：${ff.added} 篇新文章进入待拍板队列`
+          ? `已添加并完成首次抓取：${ff.added} 篇新文章进入待处理`
           : "已添加。首次抓取没有拿到新文章，可稍后点「刷新」重试",
       );
       setUrl("");
@@ -105,7 +105,7 @@ export default function AutomationPage() {
     const name = feed.title || feed.url;
     if (
       !window.confirm(
-        `确定退订「${name}」吗？\n\n已采集进知识库的文章会保留，只是以后不再自动抓取。`,
+        `确定退订「${name}」吗？\n\n已抓取的文章会保留，只是以后不再自动抓取。`,
       )
     )
       return;
@@ -124,7 +124,7 @@ export default function AutomationPage() {
 
   return (
     <>
-      <PageHeader title="自动" description="订阅与定时任务，让机器替你跑腿" />
+      <PageHeader title="自动" description="自动关注与定时任务，让机器替你跑腿" />
       <div className="space-y-6 px-6 py-4">
         {/* ── 全局提示条 ── */}
         {notice && (
@@ -142,9 +142,9 @@ export default function AutomationPage() {
 
         <section className="rounded-lg border border-border bg-white p-5">
           <header className="mb-4">
-            <h2 className="text-sm font-semibold">RSS 订阅</h2>
+            <h2 className="text-sm font-semibold">自动关注</h2>
             <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
-              每小时整点自动抓取一次；抓到的新文章进入「知识流」待拍板队列，由你决定留不留。
+              每小时整点自动抓取一次；抓到的新文章进入「知识」页的待处理，由你决定留不留。
             </p>
           </header>
 
@@ -154,7 +154,7 @@ export default function AutomationPage() {
               value={url}
               onChange={(e) => setUrl(e.target.value)}
               onKeyDown={(e) => e.key === "Enter" && void handleAdd()}
-              placeholder="订阅地址，如 https://example.com/rss.xml"
+              placeholder="网站或订阅地址，如 https://example.com/rss.xml"
               className="min-w-0 flex-1 rounded-md border border-border bg-background px-3 py-2 text-sm outline-none placeholder:text-muted-foreground focus:border-foreground"
             />
             <input
@@ -173,13 +173,13 @@ export default function AutomationPage() {
             </button>
           </div>
 
-          {/* ── 订阅源列表 ── */}
+          {/* ── 自动关注列表 ── */}
           <div className="mt-4">
             {feeds === null ? (
               <p className="py-8 text-center text-sm text-muted-foreground">加载中…</p>
             ) : feeds.length === 0 ? (
               <p className="rounded-lg border border-dashed border-border py-10 text-center text-sm text-muted-foreground">
-                还没有订阅源。粘贴一个 RSS 地址试试，比如你常看的博客。
+                还没有自动关注的网站。粘贴一个地址试试，比如你常看的博客。
               </p>
             ) : (
               <ul className="divide-y divide-border">

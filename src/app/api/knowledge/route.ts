@@ -13,22 +13,33 @@ import { getDb } from "@/lib/db";
 import {
   countsByStatus,
   createItem,
+  KNOWLEDGE_STATUSES,
   listItems,
   purgeExpiredTrash,
   type KnowledgeKind,
   type KnowledgeStatus,
 } from "@/lib/knowledge/store";
 import { syncEmbedding } from "@/lib/knowledge/embedding-sync";
+import { fetchPage } from "@/lib/knowledge/fetch-page";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic"; // 每次请求都读最新库，不做任何缓存
 
-/** 状态白名单校验：非法值在这里拦下返回 400（客户端错），不让它流进 store 变成 500（服务端错） */
-function parseStatus(raw: string | null): KnowledgeStatus | undefined | "invalid" {
+/** 状态白名单校验：支持逗号分隔多值（「我的文章」要同时看 draft+kept）。
+ *  非法值在这里拦下返回 400（客户端错），不让它流进 store 变成 500（服务端错） */
+function parseStatus(
+  raw: string | null,
+): KnowledgeStatus[] | undefined | "invalid" {
   if (raw == null || raw === "") return undefined;
-  return raw === "inbox" || raw === "kept" || raw === "discarded" || raw === "trashed"
-    ? (raw as KnowledgeStatus)
-    : "invalid";
+  const parts = raw
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean);
+  const bad = parts.find(
+    (p) => !KNOWLEDGE_STATUSES.includes(p as KnowledgeStatus),
+  );
+  if (bad) return "invalid";
+  return parts as KnowledgeStatus[];
 }
 
 /** 出身白名单校验：captured（采集）/ note（手写文章） */
@@ -37,13 +48,36 @@ function parseKind(raw: string | null): KnowledgeKind | undefined | "invalid" {
   return raw === "captured" || raw === "note" ? (raw as KnowledgeKind) : "invalid";
 }
 
+/** http/https 判定：贴链接分流的门槛。用 URL 解析而不是 startsWith 硬判——
+ *  「https:evil」这类畸形串会被解析拒绝，不会误入抓取分支白耗一次超时 */
+function isHttpUrl(raw: string): boolean {
+  try {
+    const u = new URL(raw);
+    return u.protocol === "http:" || u.protocol === "https:";
+  } catch {
+    return false;
+  }
+}
+
+/** URL → 域名，解析失败回落原串。isHttpUrl 已过滤过一次，这里是双保险：
+ *  保证降级落库的 title 构造永远不会因为解析失败再抛一次异常 */
+function safeHost(url: string): string {
+  try {
+    return new URL(url).hostname;
+  } catch {
+    return url;
+  }
+}
+
 // GET /api/knowledge?status=inbox&kind=captured&q=关键词&tag=标签&limit=50&offset=0
 // 返回 { items, total, counts }
 export async function GET(req: NextRequest) {
-  const status = parseStatus(req.nextUrl.searchParams.get("status"));
-  if (status === "invalid") {
+  const statuses = parseStatus(req.nextUrl.searchParams.get("status"));
+  if (statuses === "invalid") {
     return NextResponse.json(
-      { error: "status 仅允许 inbox / kept / discarded / trashed" },
+      {
+        error: `status 仅允许 ${KNOWLEDGE_STATUSES.join(" / ")}，多值用逗号分隔`,
+      },
       { status: 400 },
     );
   }
@@ -66,10 +100,11 @@ export async function GET(req: NextRequest) {
     // 这件事养定时任务，过期内容反正不会出现在任何视图里
     purgeExpiredTrash(db);
     const result = listItems(db, {
-      status,
-      // 调用方没点名要回收站时，常规列表不掺已删内容——分页计数才不会错位。
-      // 显式传 status=trashed 的查询（回收站视图）不受影响
-      notStatus: status === undefined ? "trashed" : undefined,
+      status: statuses?.length === 1 ? statuses[0] : undefined,
+      statuses: statuses && statuses.length > 1 ? statuses : undefined,
+      // 调用方没点名状态时，常规列表不掺已删内容——分页计数才不会错位。
+      // 显式点名状态的查询（回收站视图、我的文章）不受影响
+      notStatus: statuses ? undefined : "trashed",
       kind,
       q: sp.get("q") ?? undefined,
       tag: sp.get("tag") ?? undefined,
@@ -83,10 +118,13 @@ export async function GET(req: NextRequest) {
   }
 }
 
-// POST /api/knowledge —— 创建条目，两种出身：
-//   默认（采集）：粘贴文本 / Markdown，落库进 inbox 待拍板
-//   kind=note（手写文章）：创建即 kept——自己写的东西不需要拍板
-// body: { title?, content, tags?, source?, kind? }
+// POST /api/knowledge —— 创建条目，三种入口：
+//   粘贴 URL：智能分流——订阅地址引导去「自动」页；普通网页抓正文进待处理；
+//            抓不到正文也降级存链接，绝不因网络抖动丢掉用户想存的东西
+//   默认（粘贴文本 / Markdown）：落库进待处理等拍板
+//   kind=note（手写文章）：方案 B——创建即 draft 草稿，点「加入知识库」才转
+//            kept 进 AI 检索，写一半的稿子不该被 AI 当成品引用
+// body: { title?, content?, tags?, source?, kind?, url? }
 export async function POST(req: NextRequest) {
   // json() 可能因空 body / 非 JSON 抛异常，catch 成 null 统一走 400
   const body = await req.json().catch(() => null);
@@ -97,6 +135,71 @@ export async function POST(req: NextRequest) {
   const isNote = body.kind === "note";
   const content = typeof body.content === "string" ? body.content.trim() : "";
   let title = typeof body.title === "string" ? body.title.trim() : "";
+
+  // ── URL 智能分流：贴的是链接而不是文本时，先去抓一次页面再落库 ──
+  // 为什么在 POST 做而不是前端直连抓取：分流的结局要么引导要么落库，
+  // 抓取 + 落库在一次请求内闭环，前端拿到手直接是最终状态，无需二次轮询。
+  // isNote 排除在外：手写文章走自己的草稿流程，不掺采集语义
+  if (!isNote && typeof body.url === "string" && isHttpUrl(body.url)) {
+    const url = body.url;
+    const fetched = await fetchPage(url);
+
+    // 订阅地址不是「一篇文章」而是「一个持续更新的源」，语义上属于
+    // 「自动」页的自动关注——不硬存成文章，引导用户去那边添加
+    if (fetched.kind === "feed") {
+      return NextResponse.json(
+        { rss: url, message: "这是订阅地址，去「自动」页添加关注后会自动抓取更新" },
+        { status: 200 },
+      );
+    }
+
+    // 普通网页：抓到正文按采集落库，进待处理等拍板
+    if (fetched.kind === "page") {
+      try {
+        const item = createItem(getDb(), {
+          title: fetched.title || safeHost(url),
+          // 摘要拼在正文最前：拍板前先扫一眼「这页讲什么」，去留决定更快
+          content: fetched.description
+            ? `${fetched.description}\n\n${fetched.text}`
+            : fetched.text,
+          source: safeHost(url),
+          source_url: url,
+          tags: [],
+          kind: "captured",
+          status: "inbox",
+        });
+        void syncEmbedding(getDb(), item.id, item.title, item.content);
+        return NextResponse.json({ item }, { status: 201 });
+      } catch (e) {
+        console.error("[knowledge:create:url]", e);
+        return NextResponse.json({ error: "创建知识条目失败" }, { status: 500 });
+      }
+    }
+
+    // 抓取失败（超时 / 403 / 反爬）：降级落库占位。宁可存一条只有链接的
+    // 条目，也不能因为网络抖动丢掉用户想存的东西——丢链接可以补，
+    // 丢「存进去就放心了」的信任补不回来。前端靠 degraded 标记提示用户
+    try {
+      const host = safeHost(url);
+      const item = createItem(getDb(), {
+        title: `来自 ${host} 的链接（未抓到正文）`,
+        content: `${fetched.reason}\n${url}`,
+        source: host,
+        source_url: url,
+        tags: [],
+        kind: "captured",
+        status: "inbox",
+      });
+      void syncEmbedding(getDb(), item.id, item.title, item.content);
+      return NextResponse.json(
+        { item, degraded: fetched.reason },
+        { status: 201 },
+      );
+    } catch (e) {
+      console.error("[knowledge:create:url-degraded]", e);
+      return NextResponse.json({ error: "创建知识条目失败" }, { status: 500 });
+    }
+  }
 
   if (!title && !content) {
     return NextResponse.json({ error: "标题和正文至少填一项" }, { status: 400 });
@@ -122,9 +225,11 @@ export async function POST(req: NextRequest) {
           : null,
       tags: Array.isArray(body.tags) ? body.tags.map(String) : [],
       kind: isNote ? "note" : undefined,
-      // 出身决定起点状态：采集进待拍板、笔记直接保留。约定写在 route 层，
-      // store 保持通用能力，未来 Agent 工具复用 store 时自行选择语义
-      status: isNote ? "kept" : undefined,
+      // 出身决定起点状态：采集进待处理；手写文章按方案 B 起草——
+      // 创建即 draft（只在「我的文章」可见、不进 AI 检索），点「加入知识库」
+      // 才转 kept。约定写在 route 层，store 保持通用能力，未来 Agent 工具
+      // 复用 store 时自行选择语义
+      status: isNote ? "draft" : undefined,
     });
     // 写入钩子：顺手生成语义指纹（K4）。
     // 用 void 不等待——嵌入要几百毫秒，不该拖慢保存响应；
