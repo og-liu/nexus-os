@@ -73,15 +73,36 @@ export async function streamChatOpenAI(
     }
   }
 
-  const doRequest = () =>
-    fetch(`${provider.baseURL}/chat/completions`, {
+  // 连接超时兜底：只保护「建立连接 + 等待响应头」这一段。上游偶发的网络挂起
+  // 会让 fetch 无限 pending，Agent 循环就此卡死、界面零输出（历史事故）。
+  // 响应头一返回就 clearTimeout，正文的流式读取不受限——深度思考模型完整
+  // 推理可能持续数分钟，不能整体套超时。streamChatOpenAI 没有外部 AbortSignal
+  // 来源，因此这里的 AbortError 只能来自超时定时器，可安全转译成友好报错。
+  const CONNECT_TIMEOUT_MS = 30_000;
+
+  const doRequest = () => {
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), CONNECT_TIMEOUT_MS);
+    return fetch(`${provider.baseURL}/chat/completions`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
         Authorization: `Bearer ${apiKey}`,
       },
       body: JSON.stringify(body),
-    });
+      signal: ctrl.signal,
+    })
+      .catch((e: unknown) => {
+        // 超时触发的中止 → 转成给人看的话；其余错误原样上抛交给上游处理
+        if (e instanceof Error && e.name === "AbortError") {
+          throw new ProviderError(
+            `${provider.name} 连接超时（${CONNECT_TIMEOUT_MS / 1000} 秒未响应），请稍后重试`,
+          );
+        }
+        throw e;
+      })
+      .finally(() => clearTimeout(timer));
+  };
 
   let res = await doRequest();
 

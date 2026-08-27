@@ -97,6 +97,15 @@ export async function generatePlan(
   // openai 方言：不传 reasoning 对象即关闭思考，无需显式处理
 
   // ── 3. 非流式请求 ───────────────────────────────────────────────
+  // 规划器是非流式、要等上游吐完整 JSON，可套整体超时（不像流式正文要留数分钟）。
+  // 外部 signal（用户停止/刷新触发的 abort）与超时任一触发都应中止本次请求，故用
+  // AbortSignal.any 合并两者；timeoutSignal.aborted 用于区分「超时」与「用户主动取消」。
+  const PLAN_TIMEOUT_MS = 120_000;
+  const timeoutSignal = AbortSignal.timeout(PLAN_TIMEOUT_MS);
+  const effectiveSignal = signal
+    ? AbortSignal.any([signal, timeoutSignal])
+    : timeoutSignal;
+
   const res = await fetch(`${provider.baseURL}/chat/completions`, {
     method: "POST",
     headers: {
@@ -104,7 +113,15 @@ export async function generatePlan(
       Authorization: `Bearer ${apiKey}`,
     },
     body: JSON.stringify(body),
-    signal,
+    signal: effectiveSignal,
+  }).catch((e: unknown) => {
+    // 超时导致的 AbortError → 转成明确报错（loop 层 catch 后会回退 directReply 兜底）
+    if (e instanceof Error && e.name === "AbortError" && timeoutSignal.aborted) {
+      throw new ProviderError(
+        `${provider.name} 规划请求超时（${PLAN_TIMEOUT_MS / 1000} 秒），请稍后重试`,
+      );
+    }
+    throw e;
   });
 
   if (!res.ok) {

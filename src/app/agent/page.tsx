@@ -1510,14 +1510,24 @@ export default function AgentPage() {
           showToast("请求超时，请重试", "error");
         }
       } else {
+        // 非 AbortError 的失败分两类：服务端拒绝（400/409，message 是我们自己的
+        // 中文原因文案）与 fetch 网络层异常（TypeError，message 是英文技术描述）。
+        // 之前这里一律弹「检查 DEEPSEEK_API_KEY」，把 409 的真实原因吞掉了、误导人；
+        // 现在优先透传服务端原因，只有网络层失败才走通用兜底文案。
+        const raw = (err as Error)?.message ?? "";
+        const isServerReason = /[\u4e00-\u9fa5]/.test(raw);
+        const bubbleText = isServerReason ? raw : "网络错误，请稍后重试";
         setMessages((prev) =>
           prev.map((m) =>
-            m.id === assistantMsgId
-              ? { ...m, content: "网络错误，请稍后重试" }
-              : m,
+            m.id === assistantMsgId ? { ...m, content: bubbleText } : m,
           ),
         );
-        showToast("发送失败，请检查服务是否启动并已填写 DEEPSEEK_API_KEY", "error");
+        showToast(
+          isServerReason
+            ? `发送失败：${raw}`
+            : "发送失败，请检查服务是否启动并已填写 DEEPSEEK_API_KEY",
+          "error",
+        );
       }
     } finally {
       if (idleTimer) clearTimeout(idleTimer);
