@@ -43,8 +43,9 @@ export async function GET(_req: NextRequest, ctx: Ctx) {
 }
 
 // PATCH /api/knowledge/[id]
-// body: { title?, content?, status?, tags? } 或 { action: "trash" | "restore" }
+// body: { title?, content?, status?, tags?, read? } 或 { action: "trash" | "restore" }
 // tags 走全量替换语义（setTags），与「编辑完整集合后提交」的 UI 交互对齐
+// read=true 标记已读：打开详情时的顺手动作，COALESCE 语义保证只记第一次
 export async function PATCH(req: NextRequest, ctx: Ctx) {
   const { id } = await ctx.params;
   const body = await req.json().catch(() => null);
@@ -91,6 +92,7 @@ export async function PATCH(req: NextRequest, ctx: Ctx) {
   if (typeof body.title === "string") patch.title = body.title;
   if (typeof body.content === "string") patch.content = body.content;
   if (body.status !== undefined) patch.status = body.status as KnowledgeStatus;
+  if (body.read === true) patch.read = true;
 
   try {
     const db = getDb();

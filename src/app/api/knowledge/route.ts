@@ -12,6 +12,7 @@ import { NextResponse, type NextRequest } from "next/server";
 import { getDb } from "@/lib/db";
 import {
   countsByStatus,
+  countUnread,
   createItem,
   KNOWLEDGE_STATUSES,
   listItems,
@@ -20,7 +21,13 @@ import {
   type KnowledgeStatus,
 } from "@/lib/knowledge/store";
 import { syncEmbedding } from "@/lib/knowledge/embedding-sync";
-import { fetchPage } from "@/lib/knowledge/fetch-page";
+import { fetchPage, isHttpUrl } from "@/lib/knowledge/fetch-page";
+import {
+  findDuplicateBySimhash,
+  findDuplicateByUrl,
+} from "@/lib/knowledge/dedupe";
+import { simhash64 } from "@/lib/knowledge/simhash";
+import { refetchItem } from "@/lib/knowledge/refetch";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic"; // 每次请求都读最新库，不做任何缓存
@@ -48,18 +55,8 @@ function parseKind(raw: string | null): KnowledgeKind | undefined | "invalid" {
   return raw === "captured" || raw === "note" ? (raw as KnowledgeKind) : "invalid";
 }
 
-/** http/https 判定：贴链接分流的门槛。用 URL 解析而不是 startsWith 硬判——
- *  「https:evil」这类畸形串会被解析拒绝，不会误入抓取分支白耗一次超时 */
-function isHttpUrl(raw: string): boolean {
-  try {
-    const u = new URL(raw);
-    return u.protocol === "http:" || u.protocol === "https:";
-  } catch {
-    return false;
-  }
-}
-
-/** URL → 域名，解析失败回落原串。isHttpUrl 已过滤过一次，这里是双保险：
+/** http/https 判定挪去了 fetch-page.ts（refetch 也要用），这里 re-export 语义不变。
+ *  URL → 域名，解析失败回落原串。isHttpUrl 已过滤过一次，这里是双保险：
  *  保证降级落库的 title 构造永远不会因为解析失败再抛一次异常 */
 function safeHost(url: string): string {
   try {
@@ -69,8 +66,31 @@ function safeHost(url: string): string {
   }
 }
 
-// GET /api/knowledge?status=inbox&kind=captured&q=关键词&tag=标签&limit=50&offset=0
-// 返回 { items, total, counts }
+// 降级条目的后台自动重试登记表：哪些条目已经排了「45 秒后自动重抓」。
+// 没有这张表，同一条降级条目存两次就会排两个定时器、抓两次——
+// 不是灾难（第二次原地更新幂等），但白耗上游流量且日志难看。
+// 进程内的 Map 就够：dev 重启 / HMR 会丢登记，丢了也只是少一次自动重试，
+// 手动重试按钮永远兜底
+const pendingAutoRefetch = new Set<string>();
+
+/** 降级落库后安排一次延迟自动重抓：很多「抓不到」其实是瞬时的
+ *  （网络抖动 / 站点限流），45 秒后重试一次有可观的自动痊愈率。
+ *  fire-and-forget：请求早就返回了，重试结果只写库不打扰用户；
+ *  失败就失败（条目保持降级态，按钮还在） */
+function scheduleAutoRefetch(id: string) {
+  if (pendingAutoRefetch.has(id)) return;
+  pendingAutoRefetch.add(id);
+  setTimeout(() => {
+    pendingAutoRefetch.delete(id);
+    // 模块级getDb()：Next 路由模块是常驻的，这里拿到的和请求里是同一个连接
+    void refetchItem(getDb(), id).catch((e) =>
+      console.error("[knowledge:auto-refetch]", e),
+    );
+  }, 45_000);
+}
+
+// GET /api/knowledge?status=inbox&kind=captured&q=关键词&tag=标签&unread=1&limit=50&offset=0
+// 返回 { items, total, counts }。unread=1 只返回没读过的（待处理「只看未读」开关）
 export async function GET(req: NextRequest) {
   const statuses = parseStatus(req.nextUrl.searchParams.get("status"));
   if (statuses === "invalid") {
@@ -108,10 +128,17 @@ export async function GET(req: NextRequest) {
       kind,
       q: sp.get("q") ?? undefined,
       tag: sp.get("tag") ?? undefined,
+      // 只看未读：值宽容处理，除了空串和 "0" 都算开启（"1"/"true" 常见形态全接）
+      unreadOnly: ["1", "true"].includes((sp.get("unread") ?? "").toLowerCase()),
       limit: Number.isNaN(parsedLimit) ? undefined : parsedLimit,
       offset: Number.isNaN(parsedOffset) ? undefined : parsedOffset,
     });
-    return NextResponse.json({ ...result, counts: countsByStatus(db) });
+    return NextResponse.json({
+      ...result,
+      // unread 单独给：侧栏角标要的是「还没看过的条数」而不是待处理总数，
+      // 读过的条目不该继续制造紧迫感
+      counts: { ...countsByStatus(db), unread: countUnread(db) },
+    });
   } catch (e) {
     console.error("[knowledge:list]", e);
     return NextResponse.json({ error: "读取知识列表失败" }, { status: 500 });
@@ -142,6 +169,24 @@ export async function POST(req: NextRequest) {
   // isNote 排除在外：手写文章走自己的草稿流程，不掺采集语义
   if (!isNote && typeof body.url === "string" && isHttpUrl(body.url)) {
     const url = body.url;
+
+    // ── 重复检测第一关：URL 归一化查重（抓正文之前先查，省一次抓取）──
+    // 「收藏过又忘了」是高频场景：同一链接带着 utm 参数再存一遍，
+    // 不拦的话待处理和知识库会慢慢堆满同一篇文章
+    const urlDup = findDuplicateByUrl(getDb(), url);
+    if (urlDup) {
+      const where =
+        urlDup.status === "inbox"
+          ? "已在「待处理」里"
+          : urlDup.status === "kept"
+            ? "已在「我的知识库」里"
+            : "已在「我的文章」里";
+      return NextResponse.json(
+        { duplicate: urlDup, message: `这篇${where}，不再重复保存` },
+        { status: 200 },
+      );
+    }
+
     const fetched = await fetchPage(url);
 
     // 订阅地址不是「一篇文章」而是「一个持续更新的源」，语义上属于
@@ -155,6 +200,24 @@ export async function POST(req: NextRequest) {
 
     // 普通网页：抓到正文按采集落库，进待处理等拍板
     if (fetched.kind === "page") {
+      // ── 重复检测第二关：内容指纹查重 ──
+      // 同一篇文章换个链接（转载 / 镜像 / 手动采集撞上 RSS 抓取）拦在这：
+      // URL 不同但正文指纹几乎一致时视为重复
+      const fingerprint = simhash64(`${fetched.title}\n${fetched.text}`);
+      const simDup = findDuplicateBySimhash(getDb(), fingerprint);
+      if (simDup) {
+        const where =
+          simDup.status === "inbox"
+            ? "已在「待处理」里"
+            : simDup.status === "kept"
+              ? "已在「我的知识库」里"
+              : "已在「我的文章」里";
+        return NextResponse.json(
+          { duplicate: simDup, message: `链接不同但这篇${where}（内容一样），不再重复保存` },
+          { status: 200 },
+        );
+      }
+
       try {
         const item = createItem(getDb(), {
           title: fetched.title || safeHost(url),
@@ -167,6 +230,9 @@ export async function POST(req: NextRequest) {
           tags: [],
           kind: "captured",
           status: "inbox",
+          // 永久快照 + 内容指纹：原文 404 后本地仍可读；下次再碰到同文能查重
+          snapshot_html: fetched.html,
+          simhash: fingerprint,
         });
         void syncEmbedding(getDb(), item.id, item.title, item.content);
         return NextResponse.json({ item }, { status: 201 });
@@ -178,7 +244,8 @@ export async function POST(req: NextRequest) {
 
     // 抓取失败（超时 / 403 / 反爬）：降级落库占位。宁可存一条只有链接的
     // 条目，也不能因为网络抖动丢掉用户想存的东西——丢链接可以补，
-    // 丢「存进去就放心了」的信任补不回来。前端靠 degraded 标记提示用户
+    // 丢「存进去就放心了」的信任补不回来。前端靠 degraded 标记提示用户。
+    // 落库后 45 秒自动重抓一次（很多失败是瞬时的），手动重试按钮永远兜底
     try {
       const host = safeHost(url);
       const item = createItem(getDb(), {
@@ -189,8 +256,10 @@ export async function POST(req: NextRequest) {
         tags: [],
         kind: "captured",
         status: "inbox",
+        degraded: 1,
       });
       void syncEmbedding(getDb(), item.id, item.title, item.content);
+      scheduleAutoRefetch(item.id);
       return NextResponse.json(
         { item, degraded: fetched.reason },
         { status: 201 },
@@ -214,6 +283,26 @@ export async function POST(req: NextRequest) {
     title = firstLine.length > 40 ? `${firstLine.slice(0, 40)}…` : firstLine;
   }
 
+  // ── 重复检测（文本路径）：同一篇文字粘两次是高频手误 ──
+  // 只拦采集文本：手写文章创建 draft 语义特殊（用户可能故意重写），
+  // md 批量导入走 import 路由有自己的标题级查重，都不掺和这条
+  const textFingerprint = isNote ? "" : simhash64(`${title}\n${content}`);
+  if (textFingerprint) {
+    const dup = findDuplicateBySimhash(getDb(), textFingerprint);
+    if (dup) {
+      const where =
+        dup.status === "inbox"
+          ? "已在「待处理」里"
+          : dup.status === "kept"
+            ? "已在「我的知识库」里"
+            : "已在「我的文章」里";
+      return NextResponse.json(
+        { duplicate: dup, message: `这段内容${where}，不再重复保存` },
+        { status: 200 },
+      );
+    }
+  }
+
   try {
     const item = createItem(getDb(), {
       title,
@@ -230,6 +319,8 @@ export async function POST(req: NextRequest) {
       // 才转 kept。约定写在 route 层，store 保持通用能力，未来 Agent 工具
       // 复用 store 时自行选择语义
       status: isNote ? "draft" : undefined,
+      // 文本指纹随行落库：它自己将来也是被查重的对象
+      simhash: textFingerprint || null,
     });
     // 写入钩子：顺手生成语义指纹（K4）。
     // 用 void 不等待——嵌入要几百毫秒，不该拖慢保存响应；

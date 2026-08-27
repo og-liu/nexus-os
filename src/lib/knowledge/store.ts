@@ -66,12 +66,20 @@ export interface KnowledgeItemRow {
   kind: KnowledgeKind;
   /** 进入回收站的时间（仅 trashed 有值），7 天懒清理依据 */
   deleted_at: number | null;
+  /** 首次点开阅读的时间（阶段2 P0·未读聚焦），NULL = 未读（蓝点依据） */
+  read_at: number | null;
+  /** 剥净的正文 HTML（阶段2 P0·永久快照），只在详情接口返回；列表查询刻意不拖它 */
+  snapshot_html?: string | null;
+  /** 1 = 只按链接降级落库（阶段2 P0·失败兜底），重试成功后清零 */
+  degraded: number;
   tags: string[];
   created_at: number;
   updated_at: number;
 }
 
-/** SQL 原始行（不含 tags，tags 在关联表中单独查） */
+/** SQL 原始行（不含 tags，tags 在关联表中单独查）。
+ *  embedding / snapshot_html 等大字段标可选：列表查询显式列不含它们（见 listItems），
+ *  只有走 SELECT * 的详情查询会带，两种形态共用这一个类型 */
 interface ItemSqlRow {
   id: string;
   title: string;
@@ -81,10 +89,13 @@ interface ItemSqlRow {
   status: string;
   kind: string;
   deleted_at: number | null;
+  read_at?: number | null;
+  snapshot_html?: string | null;
+  degraded?: number;
   /** K4：语义指纹二进制与模型名——只在混合检索内部使用，
    *  不进 KnowledgeItemRow 对外暴露（列表/详情没必要拖 4KB 二进制） */
-  embedding: Buffer | null;
-  embedding_model: string | null;
+  embedding?: Buffer | null;
+  embedding_model?: string | null;
   created_at: number;
   updated_at: number;
 }
@@ -133,6 +144,9 @@ function attachTags(conn: Database.Database, rows: ItemSqlRow[]): KnowledgeItemR
     ...r,
     status: r.status as KnowledgeStatus,
     kind: r.kind as KnowledgeKind,
+    // 显式列查询必有这两列；?? 兜底是给「SELECT * 之外的手写查询漏列」上保险
+    read_at: r.read_at ?? null,
+    degraded: r.degraded ?? 0,
     tags: tagsByItem.get(r.id) ?? [],
   }));
 }
@@ -147,6 +161,12 @@ export interface CreateItemInput {
    *  route 层显式传参时以 route 为准（如手写文章创建传 kind=note + status=draft） */
   kind?: KnowledgeKind;
   tags?: string[];
+  /** 剥净的正文 HTML（永久快照）：只有 URL 采集抓取成功时才有，文本/降级路径不传 */
+  snapshot_html?: string | null;
+  /** 文本指纹（重复检测）：标题+正文算出的 SimHash，空串落库为 NULL */
+  simhash?: string | null;
+  /** 降级标记：1 = 只按链接落库（没抓到正文），重试成功后清零 */
+  degraded?: number;
 }
 
 export function createItem(
@@ -163,10 +183,23 @@ export function createItem(
 
   conn
     .prepare(
-      `INSERT INTO knowledge_items (id, title, content, source, source_url, status, kind, deleted_at, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, NULL, ?, ?)`,
+      `INSERT INTO knowledge_items (id, title, content, source, source_url, status, kind, deleted_at, snapshot_html, simhash, degraded, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, ?, ?)`,
     )
-    .run(id, input.title?.trim() ?? "", input.content ?? "", input.source ?? null, input.source_url ?? null, status, kind, now, now);
+    .run(
+      id,
+      input.title?.trim() ?? "",
+      input.content ?? "",
+      input.source ?? null,
+      input.source_url ?? null,
+      status,
+      kind,
+      input.snapshot_html ?? null,
+      input.simhash || null, // 空串转 NULL：空指纹没有比对意义，别占着字段
+      input.degraded ?? 0,
+      now,
+      now,
+    );
 
   const tags = normalizeTags(input.tags ?? []);
   if (tags.length > 0) {
@@ -204,6 +237,10 @@ export interface ListOptions {
   notStatus?: KnowledgeStatus;
   /** 出身过滤：知识流只看 captured、我的文章只看 note，由调用方显式指定防串味 */
   kind?: KnowledgeKind;
+  /** 只看未读（read_at IS NULL）：待处理页「只看未读」开关的支撑。
+   *  为什么不在前端过滤列表：服务端过滤后 total 才是未读总数，
+   *  前端过滤拿不到「还剩几条没读」的真实计数 */
+  unreadOnly?: boolean;
   /** 标签精确过滤（单标签起步；多标签 AND/OR 组合留给需要时再加） */
   tag?: string;
   /** 关键词：LIKE 子串匹配 title / content。中文场景够用的最低成本检索，
@@ -242,6 +279,9 @@ export function listItems(
     conds.push("kind = ?");
     params.push(opts.kind);
   }
+  if (opts.unreadOnly) {
+    conds.push("read_at IS NULL");
+  }
   if (opts.q) {
     conds.push("(title LIKE ? ESCAPE '\\' OR content LIKE ? ESCAPE '\\')");
     // 用户输入里的 % _ \ 是 LIKE 通配符，转义后才按字面意思匹配
@@ -259,9 +299,12 @@ export function listItems(
   const where = conds.length > 0 ? `WHERE ${conds.join(" AND ")}` : "";
 
   // rowid 兜底：updated_at 相同（同毫秒批量导入）时按插入序稳定排列（pitfalls #7 教训）
+  // 显式列而不用 SELECT *：embedding（4KB/条）和 snapshot_html（几十 KB/条）
+  // 是详情才需要的大字段，列表一页几十条全拖回来纯属浪费带宽和内存
   const rows = conn
     .prepare(
-      `SELECT * FROM knowledge_items ${where} ORDER BY updated_at DESC, rowid DESC LIMIT ? OFFSET ?`,
+      `SELECT id, title, content, source, source_url, status, kind, deleted_at, read_at, degraded, created_at, updated_at
+       FROM knowledge_items ${where} ORDER BY updated_at DESC, rowid DESC LIMIT ? OFFSET ?`,
     )
     .all(...params, limit, offset) as ItemSqlRow[];
 
@@ -276,6 +319,12 @@ export interface UpdateItemPatch {
   title?: string;
   content?: string;
   status?: KnowledgeStatus;
+  /** true = 标记为已读（记录首次阅读时间，重复标记不覆盖） */
+  read?: boolean;
+  /** 快照 / 指纹 / 降级标记：重试抓取成功时由 refetch 一并更新 */
+  snapshot_html?: string | null;
+  simhash?: string | null;
+  degraded?: number;
 }
 
 export function updateItem(
@@ -297,7 +346,8 @@ export function updateItem(
   }
 
   const sets: string[] = [];
-  const params: Array<string | number> = [];
+  // null 合法绑定：SQLite 写 NULL（清空快照/指纹的更新场景）
+  const params: Array<string | number | null> = [];
   if (patch.title !== undefined) {
     sets.push("title = ?");
     params.push(patch.title.trim());
@@ -309,6 +359,24 @@ export function updateItem(
   if (patch.status !== undefined) {
     sets.push("status = ?");
     params.push(patch.status);
+  }
+  if (patch.read === true) {
+    // COALESCE 保住第一次的阅读时间：已读的重复标记是幂等无害的，
+    // 不该把「三天前读过」刷成「刚刚读过」
+    sets.push("read_at = COALESCE(read_at, ?)");
+    params.push(Date.now());
+  }
+  if (patch.snapshot_html !== undefined) {
+    sets.push("snapshot_html = ?");
+    params.push(patch.snapshot_html);
+  }
+  if (patch.simhash !== undefined) {
+    sets.push("simhash = ?");
+    params.push(patch.simhash || null);
+  }
+  if (patch.degraded !== undefined) {
+    sets.push("degraded = ?");
+    params.push(patch.degraded);
   }
   if (sets.length === 0) return getItem(conn, id); // 空 patch 不白跑一趟 UPDATE
 
@@ -491,6 +559,27 @@ export function countsByStatus(
     }
   }
   return result;
+}
+
+/** 批量标记已读：打开详情时逐条 PATCH 太碎，这里一条语句打一批。
+ *  COALESCE 语义与 updateItem(read) 一致——只记第一次阅读时间 */
+export function markRead(conn: Database.Database, ids: string[]): number {
+  if (ids.length === 0) return 0;
+  const info = conn
+    .prepare(
+      `UPDATE knowledge_items SET read_at = COALESCE(read_at, ?) WHERE id IN (${ids.map(() => "?").join(", ")})`,
+    )
+    .run(Date.now(), ...ids);
+  return info.changes;
+}
+
+/** 待处理里的未读数：侧栏角标显示「还有几条没看过」，比条目总数更贴合
+ *  「待办」心智——读过的即使还没拍板，也不再制造紧迫感 */
+export function countUnread(conn: Database.Database): number {
+  const row = conn
+    .prepare(`SELECT COUNT(*) AS c FROM knowledge_items WHERE status = 'inbox' AND read_at IS NULL`)
+    .get() as { c: number };
+  return row.c;
 }
 // ─── K4 向量检索：语义指纹存取 + 混合检索（关键词路 × 语义路 RRF 融合）───
 

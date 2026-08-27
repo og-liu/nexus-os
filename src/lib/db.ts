@@ -126,6 +126,23 @@ export function initSchema(conn: Database.Database): void {
       -- 不能混着比——靠这一列识别哪些条目需要重算
       embedding BLOB,
       embedding_model TEXT,
+      -- 阶段2 P0·未读聚焦：首次点开阅读的时间戳，NULL = 还没读过（蓝点依据）。
+      -- 为什么不是 is_read 布尔：时间戳本身有信息量（什么时候读的），
+      -- 且 COALESCE(read_at, ?) 能天然保住第一次的阅读时间不被覆盖
+      read_at INTEGER,
+      -- 阶段2 P0·永久快照：抓取成功时存一份剥净的正文 HTML（阅读排版用）。
+      -- 与 content 分工：content 是给 AI 检索/拍板判断的纯文本（单一事实源），
+      -- snapshot_html 只服务「人的阅读体验」（保留链接、图片、结构）；
+      -- 原文 404 后本地仍可读，知识库不做「链接坟场」
+      snapshot_html TEXT,
+      -- 阶段2 P0·重复检测：标题+正文的 SimHash 64 位指纹（16 位 hex）。
+      -- 为什么不存向量算余弦：查重要的是「是否高度相似」的二值判断，
+      -- SimHash 汉明距离 ≤3 的近似判断足够，且纯位运算不需要嵌入 API
+      simhash TEXT,
+      -- 阶段2 P0·失败兜底：1 = 当初只按链接降级落库（没抓到正文），可重试。
+      -- 重试成功后清零。为什么不用 title 文案约定判断：靠文案模式匹配是隐式契约，
+      -- 改一版文案识别就漏了，显式标记才可靠
+      degraded INTEGER NOT NULL DEFAULT 0,
       created_at INTEGER NOT NULL,
       updated_at INTEGER NOT NULL
     );
@@ -201,6 +218,22 @@ export function initSchema(conn: Database.Database): void {
   }
   if (!itemCols.some((c) => c.name === "embedding_model")) {
     conn.exec(`ALTER TABLE knowledge_items ADD COLUMN embedding_model TEXT`);
+  }
+  // 迁移：知识模块阶段 2（P0）补四列——未读时间戳 / HTML 快照 / 相似指纹 / 降级标记。
+  // 新装的库走上面 CREATE TABLE 已带全字段，这里的 ALTER 检测是幂等的，重复执行无副作用
+  if (!itemCols.some((c) => c.name === "read_at")) {
+    conn.exec(`ALTER TABLE knowledge_items ADD COLUMN read_at INTEGER`);
+  }
+  if (!itemCols.some((c) => c.name === "snapshot_html")) {
+    conn.exec(`ALTER TABLE knowledge_items ADD COLUMN snapshot_html TEXT`);
+  }
+  if (!itemCols.some((c) => c.name === "simhash")) {
+    conn.exec(`ALTER TABLE knowledge_items ADD COLUMN simhash TEXT`);
+  }
+  if (!itemCols.some((c) => c.name === "degraded")) {
+    conn.exec(
+      `ALTER TABLE knowledge_items ADD COLUMN degraded INTEGER NOT NULL DEFAULT 0`,
+    );
   }
 }
 

@@ -276,3 +276,64 @@
   max-width: 100%;
   border-radius: 4px;
 }
+
+/* ── 永久快照阅读区（阶段2 P0）──
+   抓取时剥净的外站 HTML 没有自带样式，这里给一套克制的兜底排版：
+   保持站内黑白灰基调，只做可读性（间距/层级/图片约束）不做装饰。
+   危险样式（script/style 标签、事件属性）已在抓取入口清除，此处只管好看 */
+.snapshot-body {
+  font-size: 0.9375rem;
+  line-height: 1.8;
+  color: #2a2a2a;
+  word-break: break-word;
+}
+.snapshot-body h1,
+.snapshot-body h2,
+.snapshot-body h3,
+.snapshot-body h4 {
+  color: #000000;
+  font-weight: 600;
+  line-height: 1.4;
+  margin: 1.6em 0 0.6em;
+}
+.snapshot-body h1 { font-size: 1.25rem; }
+.snapshot-body h2 { font-size: 1.125rem; }
+.snapshot-body h3 { font-size: 1rem; }
+.snapshot-body p { margin: 0.8em 0; }
+.snapshot-body a { color: #2f6bff; text-decoration: none; }
+.snapshot-body a:hover { text-decoration: underline; }
+.snapshot-body ul,
+.snapshot-body ol { padding-left: 1.5em; margin: 0.8em 0; }
+.snapshot-body li { margin: 0.3em 0; }
+.snapshot-body blockquote {
+  border-left: 3px solid #e5e5e5;
+  padding-left: 1em;
+  margin: 1em 0;
+  color: #6b6b6b;
+}
+.snapshot-body img { max-width: 100%; height: auto; border-radius: 4px; }
+.snapshot-body pre {
+  background: #fafafa;
+  border: 1px solid #e5e5e5;
+  border-radius: 4px;
+  padding: 0.8em 1em;
+  overflow-x: auto;
+  font-size: 0.8125rem;
+}
+.snapshot-body code {
+  font-family: "SF Mono", "JetBrains Mono", ui-monospace, Menlo, monospace;
+  font-size: 0.875em;
+}
+.snapshot-body table {
+  border-collapse: collapse;
+  margin: 0.8em 0;
+  width: 100%;
+  font-size: 0.8125rem;
+}
+.snapshot-body th,
+.snapshot-body td {
+  border: 1px solid #e5e5e5;
+  padding: 0.4em 0.7em;
+  text-align: left;
+}
+.snapshot-body hr { border: none; border-top: 1px solid #e5e5e5; margin: 1.5em 0; }

@@ -14,6 +14,7 @@ import { randomUUID } from "node:crypto";
 import Parser from "rss-parser";
 import { createItem } from "@/lib/knowledge/store";
 import { syncEmbedding } from "@/lib/knowledge/embedding-sync";
+import { simhash64 } from "@/lib/knowledge/simhash";
 
 /** 订阅源一行数据的形状（与 feeds 表列一一对应） */
 export interface FeedRow {
@@ -175,6 +176,10 @@ export async function ingestFeedXml(
       source_url: link,
       status: "inbox", // 产品流水线定的语义：自动采集进待拍板，人来决定留不留
       kind: "captured",
+      // 内容指纹（重复检测）：RSS 条目也是查重的比对对象——手动采集撞上
+      // 自动抓取（同一篇文章两个入口进来）全靠指纹拦。RSS 全文即快照
+      // （content 本身就是本地存的正文），不需要额外 snapshot_html
+      simhash: simhash64(`${item.title ?? ""}\n${clipped}`),
     });
     added++;
 

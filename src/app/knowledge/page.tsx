@@ -9,6 +9,7 @@ import {
   Search,
   Plus,
   Check,
+  CheckSquare,
   X,
   Link2,
   Sparkles,
@@ -39,6 +40,8 @@ interface FeedItem {
   source: string;
   kind: "captured" | "note"; // 出身：决定「移除」时进回收站还是退回草稿
   fresh?: boolean; // 刚刚入库
+  /** 原文链接（阶段2 P0）：详情「查看原文」的入口；手写文章没有 */
+  sourceUrl: string | null;
 }
 
 interface Note {
@@ -55,6 +58,12 @@ interface InboxItem {
   title: string;
   source: string;
   summary: string;
+  /** 阶段2 P0·未读聚焦：还没点开读过（蓝点依据） */
+  unread: boolean;
+  /** 阶段2 P0·失败兜底：当初没抓到正文、只按链接落库（可重试） */
+  degraded: boolean;
+  /** 阶段2 P0·永久快照：详情「查看原文」的入口。列表不拖正文与快照 */
+  sourceUrl: string | null;
 }
 
 interface TrashItem {
@@ -67,8 +76,13 @@ interface TrashItem {
 }
 
 type Section = "feed" | "notes" | "inbox" | "trash" | "quiz" | "review";
-// K3 前置起 feed 与 note 都是真库 UUID，详情引用统一 string
-type DetailRef = { type: "feed"; id: string } | { type: "note"; id: string } | null;
+// K3 前置起 feed 与 note 都是真库 UUID，详情引用统一 string。
+// inbox 详情（阶段2 P0）：点开待处理卡片看全文 + 顺手标已读
+type DetailRef =
+  | { type: "feed"; id: string }
+  | { type: "note"; id: string }
+  | { type: "inbox"; id: string }
+  | null;
 
 // ---------- 自测 / 回顾 Mock ----------
 
@@ -133,12 +147,19 @@ interface KnowledgeRow {
   title: string;
   content: string;
   source: string | null;
+  source_url: string | null;
   status: "inbox" | "kept" | "draft" | "discarded" | "trashed";
   kind: "captured" | "note";
   deleted_at: number | null;
   tags: string[];
   created_at: number;
   updated_at: number;
+  /** 首次点开阅读时间，NULL = 未读 */
+  read_at: number | null;
+  /** 1 = 只按链接降级落库（可重试抓取） */
+  degraded: number;
+  /** 剥净的正文 HTML 快照：只有详情接口（GET /api/knowledge/[id]）返回，列表行没有 */
+  snapshot_html?: string | null;
 }
 
 /** 毫秒时间戳 → 「刚刚 / n 分钟前 / n 小时前 / n 天前 / 具体日期」。
@@ -176,6 +197,7 @@ function toFeedItem(row: KnowledgeRow): FeedItem {
     source: row.source ?? "手动采集",
     kind: row.kind,
     fresh: false, // 只有拍板「留下」瞬间插入的条目才标 fresh，从库加载的不算
+    sourceUrl: row.source_url ?? null,
   };
 }
 
@@ -186,6 +208,9 @@ function toInboxItem(row: KnowledgeRow): InboxItem {
     title: row.title,
     source: row.source ?? "手动采集",
     summary: makeSummary(row.content),
+    unread: row.read_at == null,
+    degraded: row.degraded === 1,
+    sourceUrl: row.source_url ?? null,
   };
 }
 
@@ -408,36 +433,80 @@ export default function KnowledgePage() {
     setTrash((data.items as KnowledgeRow[]).map(toTrashItem));
   };
 
+  /** 拉待处理列表。「只看未读」开关切换时带 unread=1 让服务端过滤——
+   *  这样拿到的 total 就是未读总数，蓝点消失一条列表少一条，前端不用自己算 */
+  const loadInbox = async (unreadOnly: boolean) => {
+    const params = new URLSearchParams({ status: "inbox", limit: "100" });
+    if (unreadOnly) params.set("unread", "1");
+    const res = await fetch(`/api/knowledge?${params.toString()}`);
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const data = await res.json();
+    setInbox((data.items as KnowledgeRow[]).map(toInboxItem));
+  };
+
   // 首屏并行拉五路数据：待处理、我的知识库、标签、我的文章、回收站。
   // 用 allSettled 而不是 all：一个接口挂了其他照常显示，不至于整页报废
   useEffect(() => {
     let alive = true; // 组件卸载后不再 setState
     (async () => {
       const results = await Promise.allSettled([
-        fetch("/api/knowledge?status=inbox&limit=100"),
+        loadInbox(false),
         loadFeed("", null),
         loadAllTags(),
         loadNotes(),
         loadTrash(),
       ]);
       if (!alive) return;
-      // 待处理那路要单独解析 body；其余四路内部已各自 setState
-      let failed = results[0].status === "rejected";
-      if (results[0].status === "fulfilled") {
-        if (!results[0].value.ok) failed = true;
-        else {
-          const data = await results[0].value.json();
-          setInbox((data.items as KnowledgeRow[]).map(toInboxItem));
-        }
+      if (results.some((r) => r.status === "rejected")) {
+        showToast("部分数据加载失败，请刷新重试");
       }
-      if (results.slice(1).some((r) => r.status === "rejected")) failed = true;
-      if (failed) showToast("部分数据加载失败，请刷新重试");
       setLoadingKnowledge(false);
     })();
     return () => {
       alive = false;
     };
   }, []);
+
+  // 只看未读开关：服务端过滤（unread=1），开关切换重拉列表。
+  // 声明必须在这组消费它的 useEffect 之前——块级作用域先用后声明，tsc 直接报错
+  const [onlyUnread, setOnlyUnread] = useState(false);
+
+  // 「只看未读」开关切换：重拉待处理列表（服务端过滤）。旧列表先清掉，
+  // 避免开关切回去的瞬间闪一屏旧数据
+  useEffect(() => {
+    if (loadingKnowledge) return; // 首屏那次不算开关变化，主加载已经拉过
+    loadInbox(onlyUnread).catch(() => showToast("待处理加载失败，请重试"));
+  }, [onlyUnread]);
+
+  // 详情全量行（阶段2 P0·永久快照）：列表行刻意不拖 snapshot_html 大字段，
+  // 打开详情时才单拉一次全行。加载失败回落列表数据渲染，只是没有快照排版。
+  // note 详情没有快照概念（正文就是自己写的），不浪费这次请求
+  const [detailFull, setDetailFull] = useState<KnowledgeRow | null>(null);
+  useEffect(() => {
+    setDetailFull(null);
+    if (!detail || detail.type === "note") return;
+    let alive = true;
+    fetch(`/api/knowledge/${detail.id}`)
+      .then((r) => (r.ok ? r.json() : null))
+      .then((row) => {
+        if (alive) setDetailFull(row as KnowledgeRow | null);
+      })
+      .catch(() => {
+        /* 详情回退到列表数据渲染，快照排版缺位但不阻塞阅读 */
+      });
+    return () => {
+      alive = false;
+    };
+  }, [detail]);
+
+  // 离开待处理分区时收摊：批量圈选/键盘焦点都是「待处理内」的临时状态，
+  // 切走再回来不该看到上次的残局
+  useEffect(() => {
+    if (section !== "inbox") {
+      if (inboxSelectMode) exitInboxSelect();
+      setFocusIdx(-1);
+    }
+  }, [section]);
 
   // 搜索 + 标签筛选联动：任一变化后停手 350ms 才发一次请求——连续按键只打
   // 最后一枪，避免每个字符一趟往返。首帧跳过：初值就是空搜索，主加载已拉过
@@ -484,6 +553,19 @@ export default function KnowledgePage() {
   const [importing, setImporting] = useState(false); // md 文件导入进行中
   const importInputRef = useRef<HTMLInputElement | null>(null); // 隐藏的 file input，按钮点它触发选择
 
+  // ----- 待处理：未读聚焦 + 批量拍板 + 快捷键（阶段2 P0） -----
+  // onlyUnread 的声明在上方「只看未读」useEffect 旁边（使用处就近），
+  // 这里是同组的其他状态
+  const [inboxSelectMode, setInboxSelectMode] = useState(false); // 待处理批量选择模式
+  const [inboxSelected, setInboxSelected] = useState<Set<string>>(new Set());
+  const [inboxBatchBusy, setInboxBatchBusy] = useState(false);
+  // Shift 连选锚点：上次点选的卡片下标，Shift 点击时从锚点到当前全选中
+  const lastInboxClick = useRef<number>(-1);
+  // 快捷键焦点：j/k 移动的高亮卡片下标，-1 = 没有焦点（还没开始键盘操作）
+  const [focusIdx, setFocusIdx] = useState(-1);
+  // 重试抓取进行中的条目（按钮转圈防连击）
+  const [refetchingId, setRefetchingId] = useState<string | null>(null);
+
   // 自测
   const [quizMode, setQuizMode] = useState<"flash" | "choice">("flash");
   const [flipped, setFlipped] = useState<Record<number, boolean>>({});
@@ -521,6 +603,8 @@ export default function KnowledgePage() {
       setInbox((prev) => prev.filter((i) => i.id !== item.id));
       setFeed((prev) => [{ ...toFeedItem(row), fresh: true }, ...prev]);
       showToast("已留下，进我的知识库");
+      // 详情里拍的板：办完事回列表，别停在一条已不存在的详情上
+      if (detail?.type === "inbox" && detail.id === item.id) goList();
     } catch {
       showToast("操作失败，请重试");
     } finally {
@@ -543,12 +627,178 @@ export default function KnowledgePage() {
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       setInbox((prev) => prev.filter((i) => i.id !== item.id));
       showToast("已不要了");
+      // 详情里拍的板：办完事回列表
+      if (detail?.type === "inbox" && detail.id === item.id) goList();
     } catch {
       showToast("操作失败，请重试");
     } finally {
       setSavingId(null);
     }
   };
+
+  // ----- 待处理：详情 / 已读 / 重试 / 批量 / 快捷键（阶段2 P0） -----
+
+  // 打开待处理详情：顺手标已读（fire-and-forget，不打断浏览）。
+  // 已读语义 = 「点开看过」，拍板与否是另一回事——读过的条目蓝点消失，
+  // 没读过的继续亮着提醒「还有没看的新东西」
+  const openInboxDetail = (item: InboxItem) => {
+    setDetail({ type: "inbox", id: item.id });
+    if (item.unread) {
+      setInbox((prev) =>
+        prev.map((i) => (i.id === item.id ? { ...i, unread: false } : i)),
+      );
+      fetch(`/api/knowledge/${item.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ read: true }),
+      }).catch(() => {
+        /* 标读失败无伤大雅：本地蓝点已灭，下次打开会再标一次 */
+      });
+    }
+  };
+
+  // 重试抓取：degraded 条目（当初只存了链接）重新抓正文。
+  // 成功就地把卡片换成交互后的新行（标题不再是占位、degraded 清零）
+  const refetchInboxItem = async (item: InboxItem) => {
+    if (refetchingId) return;
+    setRefetchingId(item.id);
+    try {
+      const res = await fetch(`/api/knowledge/${item.id}/refetch`, {
+        method: "POST",
+      });
+      if (!res.ok) {
+        const data = await res.json().catch(() => null);
+        throw new Error(data?.error ?? `HTTP ${res.status}`);
+      }
+      const data = await res.json();
+      const row = data.item as KnowledgeRow;
+      setInbox((prev) => prev.map((i) => (i.id === item.id ? toInboxItem(row) : i)));
+      // 在详情里点的重试：顺手把详情数据也换成新行，正文立刻从链接占位变全文
+      if (detail?.type === "inbox" && detail.id === item.id) {
+        setDetailFull(row);
+      }
+      showToast("正文抓回来了");
+    } catch (e) {
+      showToast(e instanceof Error ? `还是没抓到：${e.message}` : "重试失败");
+    } finally {
+      setRefetchingId(null);
+    }
+  };
+
+  // 待处理勾选（带 Shift 连选）：按住 Shift 点第 N 张卡，从上次点的到这次的全选中。
+  // 邮件客户端的肌肉记忆，几十条积压一口气圈走
+  const toggleInboxSelect = (idx: number, shiftKey: boolean) => {
+    setInboxSelected((prev) => {
+      const next = new Set(prev);
+      const id = inbox[idx].id;
+      if (shiftKey && lastInboxClick.current >= 0) {
+        const from = Math.min(lastInboxClick.current, idx);
+        const to = Math.max(lastInboxClick.current, idx);
+        for (let i = from; i <= to; i++) next.add(inbox[i].id);
+      } else if (next.has(id)) {
+        next.delete(id);
+      } else {
+        next.add(id);
+      }
+      return next;
+    });
+    lastInboxClick.current = idx;
+  };
+
+  const exitInboxSelect = () => {
+    setInboxSelectMode(false);
+    setInboxSelected(new Set());
+    lastInboxClick.current = -1;
+  };
+
+  const setInboxSelectAll = () => {
+    // 已全选 → 反选清空；否则全选（当前过滤视图里的全部，不含被「只看未读」滤掉的）
+    const allIds = inbox.map((i) => i.id);
+    setInboxSelected((prev) =>
+      prev.size === allIds.length ? new Set() : new Set(allIds),
+    );
+  };
+
+  // 批量拍板：allSettled 逐条 PATCH，按成败数量如实汇报——
+  // 中途失败不清空选择，让用户知道还有几条没办成、可以再按一次
+  const batchDecide = async (decision: "kept" | "discarded") => {
+    if (inboxSelected.size === 0 || inboxBatchBusy) return;
+    setInboxBatchBusy(true);
+    const verb = decision === "kept" ? "留下" : "不要了";
+    try {
+      const results = await Promise.allSettled(
+        [...inboxSelected].map(async (id) => {
+          const res = await fetch(`/api/knowledge/${id}`, {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ status: decision }),
+          });
+          if (!res.ok) throw new Error(`HTTP ${res.status}`);
+          return (await res.json()) as KnowledgeRow;
+        }),
+      );
+      const ok = results.filter((r) => r.status === "fulfilled");
+      const failed = results.length - ok.length;
+      const doneIds = new Set(ok.map((r) => (r as PromiseFulfilledResult<KnowledgeRow>).value.id));
+      // 留下的条目插进我的知识库顶部（同单条拍板的体验）；不要了的只从待处理移除
+      setInbox((prev) => prev.filter((i) => !doneIds.has(i.id)));
+      if (decision === "kept") {
+        setFeed((prev) => [
+          ...ok.map(
+            (r) => ({ ...toFeedItem((r as PromiseFulfilledResult<KnowledgeRow>).value), fresh: true }),
+          ),
+          ...prev,
+        ]);
+      }
+      showToast(
+        failed > 0
+          ? `${verb} ${ok.length} 条，失败 ${failed} 条，可再按一次`
+          : `已批量${verb} ${ok.length} 条`,
+      );
+      if (failed === 0) exitInboxSelect();
+    } finally {
+      setInboxBatchBusy(false);
+    }
+  };
+
+  // 键盘快捷键（仅桌面物理键盘有意义，但 keydown 本身就来自物理键盘，无需再判断宽度）：
+  // j/k 上下移动焦点，← 留下 / → 不要了（与原型 v2「左滑留、右滑弃」的手势方向一致，
+  // 移动端和桌面端共用同一套空间心智）。
+  // 输入框聚焦 / 详情打开 / 批量选择模式时停用——打字不该触发拍板
+  useEffect(() => {
+    if (section !== "inbox" || detail || inboxSelectMode) return;
+    const onKey = (e: KeyboardEvent) => {
+      const tag = (e.target as HTMLElement)?.tagName;
+      if (tag === "INPUT" || tag === "TEXTAREA" || (e.target as HTMLElement)?.isContentEditable) {
+        return;
+      }
+      if (e.key === "j" || e.key === "k") {
+        e.preventDefault();
+        setFocusIdx((prev) => {
+          if (inbox.length === 0) return -1;
+          if (prev === -1) return e.key === "j" ? 0 : inbox.length - 1;
+          return e.key === "j"
+            ? Math.min(prev + 1, inbox.length - 1)
+            : Math.max(prev - 1, 0);
+        });
+      } else if (e.key === "ArrowLeft" || e.key === "ArrowRight") {
+        // ← / → 是浏览器默认滚动键，被征用当拍板键要先 preventDefault
+        e.preventDefault();
+        const item = focusIdx >= 0 ? inbox[focusIdx] : null;
+        if (!item) return;
+        if (e.key === "ArrowLeft") keepItem(item);
+        else dropItem(item);
+        // 拍完一张，焦点自动落到下一张（列表短了，原下标正好补位），
+        // 连续 j 已经多余——按住方向键就能一路清下去
+        setFocusIdx((prev) =>
+          prev >= inbox.length - 1 ? Math.max(prev - 1, 0) : prev,
+        );
+      }
+    };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+    // keepItem/dropItem 是组件内闭包，依赖里带上它们防止拿到旧 state
+  }, [section, detail, inboxSelectMode, inbox, focusIdx, keepItem, dropItem]);
 
   // 手动采集：POST 落库进待处理。必须先等接口返回真实 id 再插入本地列表——
   // 不能乐观插入（本地造假 id），否则后续拍板的 PATCH 会拿着假 id 打空炮。
@@ -576,6 +826,13 @@ export default function KnowledgePage() {
       if (data.rss) {
         setCaptureInput("");
         showToast("这是订阅地址，去「自动」页添加关注后会自动抓取更新");
+        return;
+      }
+      // 重复拦截（阶段2 P0）：库里已有同一链接 / 同一篇内容，不再存第二份。
+      // 后端 message 已带「在哪」的上下文，直接透传给 toast
+      if (data.duplicate) {
+        setCaptureInput("");
+        showToast(data.message ?? "这篇已经在库里了，不再重复保存");
         return;
       }
       // URL 分流返回 { item }（可能带 degraded），文本路径直接返回行本身
@@ -1113,7 +1370,7 @@ export default function KnowledgePage() {
       items: [
         { key: "feed", label: "我的知识库", icon: BookOpen, desc: `${feed.length} 条已沉淀` },
         { key: "notes", label: "我的文章", icon: PenLine, desc: `${notes.length} 篇内容` },
-        { key: "inbox", label: "待处理", icon: Inbox, desc: "新到的等你拍板", count: inbox.length },
+        { key: "inbox", label: "待处理", icon: Inbox, desc: "新到的等你拍板", count: inbox.filter((i) => i.unread).length },
         { key: "trash", label: "回收站", icon: Trash2, desc: "7 天内可捞回", count: trash.length },
       ],
     },
@@ -1131,6 +1388,8 @@ export default function KnowledgePage() {
   const currentFeed = detail?.type === "feed" ? feed.find((f) => f.id === detail.id) : null;
   const currentNote =
     detail?.type === "note" ? notes.find((n) => n.id === detail.id) : null;
+  const currentInbox =
+    detail?.type === "inbox" ? inbox.find((i) => i.id === detail.id) : null;
   const isEditing = currentNote && editingNoteId === currentNote.id;
 
   // K2 起搜索走服务端（loadFeed 的 q 参数），不再需要前端 filter 一层——
@@ -1141,6 +1400,94 @@ export default function KnowledgePage() {
   const detailBack = () => goList();
 
   const renderDetail = () => {
+    // 待处理详情（阶段2 P0）：点开看全文帮拍板，打开即标已读（openInboxDetail 已处理）。
+    // 底部拍板按钮与卡片上同一套 keepItem/dropItem——详情只是「放大看」的载体
+    if (currentInbox) {
+      return (
+        <div className="">
+          <button
+            onClick={detailBack}
+            className="mb-4 flex items-center gap-1.5 text-xs text-[#8A8A8A] transition-colors hover:text-black"
+          >
+            <ArrowLeft className="h-3.5 w-3.5" />
+            返回待处理
+          </button>
+          <article className="rounded-[2px] bg-white px-5 py-6 md:px-8 md:py-8">
+            <h1 className="text-xl font-semibold leading-snug text-black md:text-2xl">
+              {currentInbox.title}
+            </h1>
+            <p className="mt-2 text-xs text-[#A0A8B4]">
+              {currentInbox.source}
+            </p>
+            {/* 降级条目提示 + 重试入口：只在「没抓到正文」的条目上出现 */}
+            {currentInbox.degraded && (
+              <div className="mt-4 flex flex-wrap items-center gap-3 rounded-[2px] bg-[#FCF1E4] px-3 py-2.5 text-xs text-[#8A5A1B]">
+                <span>这条当初只存了链接，没抓到正文</span>
+                <button
+                  onClick={() => refetchInboxItem(currentInbox)}
+                  disabled={refetchingId != null}
+                  className="flex h-7 items-center gap-1.5 rounded-[2px] border border-[#E8923A] bg-white px-2.5 font-medium text-[#8A5A1B] transition-opacity hover:opacity-80 disabled:opacity-40"
+                >
+                  <RotateCw className="h-3.5 w-3.5" />
+                  {refetchingId === currentInbox.id ? "抓取中…" : "重新抓取正文"}
+                </button>
+              </div>
+            )}
+            {/* 快照优先渲染（同知识库详情），降级条目自然回落 Markdown 显示链接 */}
+            <div className="mt-5">
+              {detailFull?.snapshot_html ? (
+                <>
+                  <div
+                    className="snapshot-body"
+                    dangerouslySetInnerHTML={{ __html: detailFull.snapshot_html }}
+                  />
+                  {currentInbox.sourceUrl && (
+                    <p className="mt-6 border-t border-[#F0F0F0] pt-3 text-xs text-[#A0A8B4]">
+                      已存本地快照
+                      <a
+                        href={currentInbox.sourceUrl}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="ml-1 text-[#2F6BFF] hover:underline"
+                      >
+                        查看原文
+                      </a>
+                    </p>
+                  )}
+                </>
+              ) : (
+                <ReactMarkdown
+                  remarkPlugins={[remarkGfm]}
+                  components={markdownComponents}
+                >
+                  {detailFull?.content ?? ""}
+                </ReactMarkdown>
+              )}
+            </div>
+            {/* 拍板按钮：看完做决定，这是待处理详情存在的全部意义 */}
+            <div className="mt-6 flex items-center justify-end gap-2 border-t border-[#F0F0F0] pt-4">
+              <button
+                onClick={() => dropItem(currentInbox)}
+                disabled={savingId != null}
+                className="flex h-9 items-center gap-1.5 rounded-[2px] border border-[#D9D9D9] bg-white px-4 text-xs font-medium text-[#4A4A4A] transition-colors hover:border-[#000000] hover:text-black disabled:cursor-not-allowed disabled:opacity-40"
+              >
+                <X className="h-3.5 w-3.5" />
+                不要了
+              </button>
+              <button
+                onClick={() => keepItem(currentInbox)}
+                disabled={savingId != null}
+                className="flex h-9 items-center gap-1.5 rounded-[2px] bg-[#000000] px-4 text-xs font-medium text-white transition-opacity hover:opacity-85 disabled:cursor-not-allowed disabled:opacity-40"
+              >
+                <Check className="h-3.5 w-3.5" />
+                留下
+              </button>
+            </div>
+          </article>
+        </div>
+      );
+    }
+
     if (currentFeed) {
       return (
         <div className="">
@@ -1172,14 +1519,56 @@ export default function KnowledgePage() {
               ))}
               <AddTagButton onClick={() => setTagPicker(detail)} />
             </div>
-            {/* K2 Markdown 渲染：存储始终是纯文本单一事实源，只在展示层解析 */}
+            {/* 阶段2 P0·永久快照：抓取成功时存的正文 HTML 在此渲染（结构/链接/图片都在），
+                快照加载失败或手写文章回落 Markdown。原始 HTML 已在抓取时剥净
+                （script/事件属性/javascript: 全清），渲染侧只信这份产出 */}
             <div className="mt-5">
-              <ReactMarkdown
-                remarkPlugins={[remarkGfm]}
-                components={markdownComponents}
-              >
-                {currentFeed.content}
-              </ReactMarkdown>
+              {detailFull?.snapshot_html ? (
+                <>
+                  <div
+                    className="snapshot-body"
+                    dangerouslySetInnerHTML={{ __html: detailFull.snapshot_html }}
+                  />
+                  <p className="mt-6 border-t border-[#F0F0F0] pt-3 text-xs text-[#A0A8B4]">
+                    已存本地快照，原文可能已更新
+                    {currentFeed.sourceUrl && (
+                      <>
+                        {" · "}
+                        <a
+                          href={currentFeed.sourceUrl}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="text-[#2F6BFF] hover:underline"
+                        >
+                          查看原文
+                        </a>
+                      </>
+                    )}
+                  </p>
+                </>
+              ) : (
+                <>
+                  {/* K2 Markdown 渲染：存储始终是纯文本单一事实源，只在展示层解析 */}
+                  <ReactMarkdown
+                    remarkPlugins={[remarkGfm]}
+                    components={markdownComponents}
+                  >
+                    {currentFeed.content}
+                  </ReactMarkdown>
+                  {currentFeed.sourceUrl && (
+                    <p className="mt-6 border-t border-[#F0F0F0] pt-3 text-xs text-[#A0A8B4]">
+                      <a
+                        href={currentFeed.sourceUrl}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="text-[#2F6BFF] hover:underline"
+                      >
+                        查看原文
+                      </a>
+                    </p>
+                  )}
+                </>
+              )}
             </div>
           </article>
         </div>
@@ -1613,25 +2002,136 @@ export default function KnowledgePage() {
                 丢进来
               </button>
             </div>
-            <p className="flex items-center gap-1.5 px-1 text-xs text-[#A0A8B4]">
+            {/* 工具行：只看未读开关（左）+ 批量操作入口（右）。
+                批量模式切换会关掉「只看未读」之外的一切跳转——批量圈选
+                需要稳定的列表上下文 */}
+            <div className="flex flex-wrap items-center gap-3 px-1">
+              <button
+                onClick={() => setOnlyUnread((v) => !v)}
+                disabled={inboxSelectMode}
+                className="flex h-7 items-center gap-2 rounded-full border border-[#E5E5E5] bg-white px-3 text-xs text-[#4A4A4A] transition-colors hover:border-[#000000] disabled:opacity-40"
+              >
+                {/* 开关芯：自绘小圆点比原生 checkbox 贴极简视觉 */}
+                <span
+                  className={cn(
+                    "h-1.5 w-1.5 rounded-full transition-colors",
+                    onlyUnread ? "bg-[#2F6BFF]" : "bg-[#C4C4C4]",
+                  )}
+                />
+                只看未读
+                {inbox.filter((i) => i.unread).length > 0 && !onlyUnread && (
+                  <span className="text-[#2F6BFF]">
+                    {inbox.filter((i) => i.unread).length} 条没看过
+                  </span>
+                )}
+              </button>
+              <button
+                onClick={() =>
+                  inboxSelectMode ? exitInboxSelect() : setInboxSelectMode(true)
+                }
+                disabled={inbox.length === 0}
+                className="ml-auto flex h-7 items-center gap-1.5 rounded-[2px] border border-[#D9D9D9] bg-white px-3 text-xs font-medium text-[#4A4A4A] transition-colors hover:border-[#000000] hover:text-black disabled:cursor-not-allowed disabled:opacity-40"
+              >
+                <CheckSquare className="h-3.5 w-3.5" />
+                {inboxSelectMode ? "退出批量" : "批量拍板"}
+              </button>
+            </div>
+            <p className="hidden items-center gap-1.5 px-1 text-xs text-[#A0A8B4] md:flex">
               <Sparkles className="h-3.5 w-3.5" />
               新抓来的先堆这，等你拍板：留下进我的知识库，不要了不再出现（不要了与删除是两件事）
+              <span className="ml-2 text-[#C4C4C4]">键盘 j/k 选中 · ← 留下 · → 不要了</span>
             </p>
+            {/* 批量操作条：进入选择模式后顶替采集提示行，圈几条批量办几条 */}
+            {inboxSelectMode && (
+              <div className="flex flex-wrap items-center gap-2 rounded-[2px] border border-[#E5E5E5] bg-white px-4 py-2.5 text-xs">
+                <span className="font-medium text-black">
+                  已选 {inboxSelected.size} 条
+                </span>
+                <button
+                  onClick={setInboxSelectAll}
+                  className="h-7 rounded-[2px] border border-[#D9D9D9] bg-white px-2.5 font-medium text-[#4A4A4A] transition-colors hover:border-[#000000] hover:text-black"
+                >
+                  {inboxSelected.size === inbox.length ? "取消全选" : "全选"}
+                </button>
+                <span className="text-[#C4C4C4]">按住 Shift 可连选</span>
+                <div className="ml-auto flex items-center gap-2">
+                  <button
+                    onClick={() => batchDecide("discarded")}
+                    disabled={inboxSelected.size === 0 || inboxBatchBusy}
+                    className="h-7 rounded-[2px] border border-[#D9D9D9] bg-white px-2.5 font-medium text-[#4A4A4A] transition-colors hover:border-[#000000] hover:text-black disabled:cursor-not-allowed disabled:opacity-40"
+                  >
+                    批量不要了
+                  </button>
+                  <button
+                    onClick={() => batchDecide("kept")}
+                    disabled={inboxSelected.size === 0 || inboxBatchBusy}
+                    className="h-7 rounded-[2px] bg-[#000000] px-2.5 font-medium text-white transition-opacity hover:opacity-85 disabled:cursor-not-allowed disabled:opacity-40"
+                  >
+                    {inboxBatchBusy ? "处理中…" : "批量留下"}
+                  </button>
+                </div>
+              </div>
+            )}
             {loadingKnowledge ? (
               <div className="rounded-[2px] border border-dashed border-[#D9D9D9] bg-white p-12 text-center">
                 <p className="text-sm text-[#A0A8B4]">待处理加载中…</p>
               </div>
             ) : inbox.length === 0 ? (
               <div className="rounded-[2px] border border-dashed border-[#D9D9D9] bg-white p-12 text-center">
-                <p className="text-sm text-[#A0A8B4]">待处理空空如也，去采集吧</p>
+                <p className="text-sm text-[#A0A8B4]">
+                  {onlyUnread ? "没有没看过的了，都读过啦" : "待处理空空如也，去采集吧"}
+                </p>
               </div>
             ) : (
-              inbox.map((item) => (
-                <div key={item.id} className="rounded-[2px] bg-white px-4 py-3.5 md:px-5">
+              inbox.map((item, idx) => (
+                <div
+                  key={item.id}
+                  className={cn(
+                    "rounded-[2px] bg-white px-4 py-3.5 transition-shadow md:px-5",
+                    // 快捷键焦点卡：细描边高亮，j/k 移动时肉眼可辨
+                    focusIdx === idx && "outline outline-1 -outline-offset-1 outline-[#000000]",
+                    inboxSelectMode && "cursor-pointer",
+                  )}
+                  onClick={
+                    inboxSelectMode
+                      ? (e) => toggleInboxSelect(idx, e.shiftKey)
+                      : undefined
+                  }
+                >
                   <div className="flex items-start justify-between gap-3">
-                    <h3 className="text-[15px] font-semibold text-black">
-                      {item.title}
-                    </h3>
+                    <div className="flex min-w-0 items-center gap-2">
+                      {/* 选择模式的勾选框 */}
+                      {inboxSelectMode && (
+                        <span
+                          className={cn(
+                            "flex h-4 w-4 shrink-0 items-center justify-center rounded-[2px] border transition-colors",
+                            inboxSelected.has(item.id)
+                              ? "border-[#000000] bg-[#000000] text-white"
+                              : "border-[#C4C4C4] bg-white",
+                          )}
+                        >
+                          {inboxSelected.has(item.id) && (
+                            <Check className="h-3 w-3" />
+                          )}
+                        </span>
+                      )}
+                      {/* 未读蓝点：还没点开过的新东西。点开详情即熄灭 */}
+                      {item.unread && (
+                        <span className="mt-1.5 h-2 w-2 shrink-0 rounded-full bg-[#2F6BFF]" />
+                      )}
+                      <h3
+                        className={cn(
+                          "truncate text-[15px] font-semibold text-black",
+                          !inboxSelectMode &&
+                            "cursor-pointer hover:underline decoration-[#C4C4C4] underline-offset-4",
+                        )}
+                        onClick={
+                          inboxSelectMode ? undefined : () => openInboxDetail(item)
+                        }
+                      >
+                        {item.title}
+                      </h3>
+                    </div>
                     <span className="shrink-0 pt-0.5 text-xs text-[#A0A8B4]">
                       {item.source}
                     </span>
@@ -1640,18 +2140,41 @@ export default function KnowledgePage() {
                     <span className="text-[#4A4A4A]">摘要：</span>
                     {item.summary}
                   </p>
+                  {/* 降级条目：给个重试入口，抓到正文这条就完整了 */}
+                  {item.degraded && (
+                    <div className="mt-2 flex items-center gap-2 text-xs text-[#8A5A1B]">
+                      <span>没抓到正文，只有链接</span>
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          refetchInboxItem(item);
+                        }}
+                        disabled={refetchingId != null}
+                        className="flex h-6 items-center gap-1 rounded-[2px] border border-[#E8923A] bg-white px-2 font-medium text-[#8A5A1B] transition-opacity hover:opacity-80 disabled:opacity-40"
+                      >
+                        <RotateCw className="h-3 w-3" />
+                        {refetchingId === item.id ? "抓取中…" : "重新抓取"}
+                      </button>
+                    </div>
+                  )}
                   <div className="mt-3 flex items-center justify-end gap-2">
                     <button
-                      onClick={() => dropItem(item)}
-                      disabled={savingId != null}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        dropItem(item);
+                      }}
+                      disabled={savingId != null || inboxSelectMode}
                       className="flex h-8 items-center gap-1.5 rounded-[2px] border border-[#D9D9D9] bg-white px-3 text-xs font-medium text-[#4A4A4A] transition-colors hover:border-[#000000] hover:text-black disabled:cursor-not-allowed disabled:opacity-40"
                     >
                       <X className="h-3.5 w-3.5" />
                       {savingId === item.id ? "处理中…" : "不要了"}
                     </button>
                     <button
-                      onClick={() => keepItem(item)}
-                      disabled={savingId != null}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        keepItem(item);
+                      }}
+                      disabled={savingId != null || inboxSelectMode}
                       className="flex h-8 items-center gap-1.5 rounded-[2px] bg-[#000000] px-3 text-xs font-medium text-white transition-opacity hover:opacity-85 disabled:cursor-not-allowed disabled:opacity-40"
                     >
                       <Check className="h-3.5 w-3.5" />
