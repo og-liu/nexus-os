@@ -4,6 +4,27 @@
 
 ---
 
+## 2026-09-18 — feeds 定时器补冒烟测试（防 K5 漏装事故复发）；新增 Agent 协作模型分配文档
+
+### 冒烟测试：把 instrumentation → scheduler 链路拉进自动化射程
+
+K5 事故（d3f4d52）的教训：当时只装了 `@types/node-cron`（类型包）、漏装 node-cron 本体——tsc 有类型所以绿、单测从没 import 过 scheduler 所以也绿，直到 dev server 启动加载 instrumentation 才炸 MODULE_NOT_FOUND。**从未被执行的模块是 tsc 和单测共同的盲区**，本次补测专门堵这条回归。
+
+- 新增 `src/lib/feeds/scheduler.test.ts`，5 个用例：
+  1. node-cron 运行时依赖在位且导出形状完整（真实 import，漏装即红；附带校验整点表达式合法）；
+  2. `startFeedScheduler` 通过 `cron.schedule` 注册整点任务 `"0 * * * *"`；
+  3. `globalThis` 守卫幂等：重复调用只注册一次，不会定时器翻倍；
+  4. `instrumentation.register` 非 nodejs 运行时静默跳过，不误挂定时器；
+  5. `NEXT_RUNTIME=nodejs` 全链路：register → startFeedScheduler → cron.schedule。
+- 策略：不 mock 掉 node-cron（整体替换会让「依赖在位」验证失效），改用真实加载 + `vi.spyOn(cron, "schedule")` 拦截——不挂真实定时器、回调永不执行、不碰 DB 与嵌入 API、不留进程尾巴。
+- 未改任何业务代码；`pnpm test` 9 文件 95 用例全绿（原 90 + 新增 5），`tsc --noEmit` 零报错。
+
+### 文档
+
+- 新增 `docs/agent-team-model-assignment.md`：多智能体协作的角色 × 模型分配一页纸（统筹/研发/评审/文档/调研五档 + 积分纪律 + 协作铁律），作为后续 Worker 配置的依据。
+
+---
+
 ## 2026-08-27(下午·六) — 修复标签计数未按状态过滤（数字虚高）
 
 用户验收时发现顶部标签筛选项的计数对不上：`test` 标签显示「2」，知识流里实际只有 1 条。排查确认**不是脏数据，是计数口径 bug**。
