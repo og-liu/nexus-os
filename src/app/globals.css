@@ -1,1 +1,10 @@
 @import "tailwindcss";
+
+/*
+ * 字体回退链：中文优先 Noto Sans SC，其次 Geist Sans，最后系统无衬线。
+ * 变量由 src/app/layout.tsx 的 next/font 注入（见《界面设计规范》§4.1）。
+ */
+@theme inline {
+  --font-sans: var(--font-noto-sans-sc), var(--font-geist-sans), sans-serif;
+  --font-mono: var(--font-geist-mono);
+}
