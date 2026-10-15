@@ -42,9 +42,25 @@ log "已创建/已存在：$RUN_USER（运行）、$DEPLOY_USER（部署）"
 
 log "4/7 创建目录结构"
 mkdir -p "$APP_DIR"/{releases,incoming,bin,shared}
+# shared/data 放 SQLite 数据库文件：它跨版本保留，服务运行用户必须能写。
+# 放进 releases/ 会随发布目录更换而「丢库」——standalone 产物的工作目录正是发布目录。
+mkdir -p "$APP_DIR/shared/data"
+chmod 750 "$APP_DIR/shared/data"
 chown -R "$RUN_USER:$RUN_USER" "$APP_DIR"
 # incoming 需要让部署用户能写入
 chown "$DEPLOY_USER:$DEPLOY_USER" "$APP_DIR/incoming"
+
+# 环境变量文件：不存在才写一份最小可用模板，已存在则不动（避免覆盖真实配置）
+if [ ! -f "$APP_DIR/shared/.env.production" ]; then
+  cat > "$APP_DIR/shared/.env.production" <<ENVEOF
+# Nexus OS 生产环境变量 —— 放在 shared/，与代码版本解耦，发布不覆盖本文件
+# 变量登记表见仓库 docs/技术栈说明.md §4.3
+DATABASE_PATH=$APP_DIR/shared/data/nexus-os.db
+SESSION_COOKIE_SECURE=false
+ENVEOF
+  chown root:"$RUN_USER" "$APP_DIR/shared/.env.production"
+  chmod 640 "$APP_DIR/shared/.env.production"
+fi
 
 log "5/7 安装发布脚本与 sudo 授权"
 curl -fsSL "$REPO_RAW/deploy/scripts/release.sh" -o "$APP_DIR/bin/release.sh"
@@ -83,8 +99,10 @@ cat <<'DONE'
        echo "<部署公钥内容>" >> ~deploy/.ssh/authorized_keys
        chmod 700 ~deploy/.ssh && chmod 600 ~deploy/.ssh/authorized_keys
        chown -R deploy:deploy ~deploy/.ssh
-  2) 环境变量（如需要）写到：
-       /opt/nexus-os/shared/.env.production
+  2) 环境变量在 /opt/nexus-os/shared/.env.production（systemd 启动时读取），
+     初始化脚本已给一份最小模板，需要时改它：
+       DATABASE_PATH=/opt/nexus-os/shared/data/nexus-os.db
+       SESSION_COOKIE_SECURE=false     # 上了 HTTPS 再改 true
   3) 去 GitHub 仓库配置 Secrets：SSH_HOST / SSH_USER / SSH_KEY
   4) push 到 main，观察 Actions 自动发布
 

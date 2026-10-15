@@ -51,9 +51,10 @@ jobs:
       - name: 代码规范
         run: pnpm lint
 
-      # 装了测试框架后取消注释；没测试前先跳过，避免流水线红灯掩盖真问题
-      # - name: 单元测试
-      #   run: pnpm test
+      # 有了单元测试就把这一步打开：没测试时跳过是为了避免流水线红灯掩盖真问题，
+      # 现在测试是真的，就该由流水线来守。
+      - name: 单元测试
+        run: pnpm test
 
       - name: 构建
         run: pnpm build
