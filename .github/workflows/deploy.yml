@@ -51,6 +51,23 @@ jobs:
       - name: 代码规范
         run: pnpm lint
 
+      # 原生模块的预编译二进制有 glibc 下限，必须低于生产服务器的 glibc（Alibaba Cloud Linux 3 = 2.32）。
+      # 装错版本的后果是「能启动、一碰数据库就崩」，本地与 CI 全绿也照样漏过去（都栽过一次）。
+      - name: 检查原生模块的 glibc 下限
+        run: |
+          bin=$(find node_modules/better-sqlite3 -name "better_sqlite3.node" | head -1)
+          if [ -z "$bin" ]; then
+            echo "::error::没找到 better-sqlite3 的原生二进制（install 脚本被拦了？）"
+            exit 1
+          fi
+          required=$(strings "$bin" | grep -oE '^GLIBC_2\.[0-9]+$' | sort -V | tail -1)
+          server=GLIBC_2.32
+          echo "预编译二进制要求 $required，服务器提供 $server"
+          if [ "$(printf '%s\n%s\n' "$required" "$server" | sort -V | tail -1)" != "$server" ]; then
+            echo "::error::$required 高于服务器 glibc 的 $server，上线后一碰数据库就会 ERR_DLOPEN_FAILED"
+            exit 1
+          fi
+
       # 有了单元测试就把这一步打开：没测试时跳过是为了避免流水线红灯掩盖真问题，
       # 现在测试是真的，就该由流水线来守。
       - name: 单元测试
