@@ -22,6 +22,7 @@
 
 # misc
 .DS_Store
+.idea/
 *.pem
 
 # debug
@@ -43,3 +44,6 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# 本地打包产物（CI 里生成，不入库）
+release.tar.gz

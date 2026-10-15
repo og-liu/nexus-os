@@ -1,0 +1,134 @@
+name: CI / CD
+
+# 什么时候触发
+on:
+  push:
+    branches: [main]      # 推送到 main 才走发布流程
+  workflow_dispatch:      # 也允许在 GitHub 页面手动点一下触发
+
+# 同一时间只跑一个发布流程，避免两次发布互相踩踏
+concurrency:
+  group: deploy-main
+  cancel-in-progress: false
+
+env:
+  NODE_VERSION: "22.23.2"
+  PNPM_VERSION: "10.34.5"
+
+jobs:
+  # ─────────────────────────────────────────────
+  # 第一段：CI —— 检查 + 构建（这部分叫「持续集成」）
+  # ─────────────────────────────────────────────
+  ci:
+    name: 检查与构建
+    runs-on: ubuntu-latest
+    steps:
+      - name: 拉取代码
+        uses: actions/checkout@v4
+
+      - name: 安装 pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: ${{ env.PNPM_VERSION }}
+
+      - name: 安装 Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+
+      - name: 安装依赖
+        run: pnpm install --frozen-lockfile
+
+      # Next 会把路由/布局的类型写进 .next/types（例如 LayoutProps 就来自这里），
+      # 而这些文件不在仓库里。不先生成，tsc 会直接报 Cannot find name 'LayoutProps'。
+      - name: 生成路由类型
+        run: pnpm exec next typegen
+
+      - name: 类型检查
+        run: pnpm exec tsc --noEmit
+
+      - name: 代码规范
+        run: pnpm lint
+
+      # 装了测试框架后取消注释；没测试前先跳过，避免流水线红灯掩盖真问题
+      # - name: 单元测试
+      #   run: pnpm test
+
+      - name: 构建
+        run: pnpm build
+
+      # next.config.ts 里开了 output: "standalone"，
+      # 产物 .next/standalone 自带运行所需的最小依赖 —— 服务器上不需要装依赖。
+      # 但 public/ 与 .next/static 不在 standalone 里，必须手动补进去。
+      - name: 组装发布包
+        run: |
+          mkdir -p .next/standalone/.next
+          [ -d public ] && cp -r public .next/standalone/public || true
+          cp -r .next/static .next/standalone/.next/static
+          tar -czf release.tar.gz -C .next/standalone .
+          echo "发布包大小：$(du -h release.tar.gz | cut -f1)"
+
+      - name: 上传发布包（供部署阶段取用）
+        uses: actions/upload-artifact@v4
+        with:
+          name: release
+          path: release.tar.gz
+          retention-days: 7
+
+  # ─────────────────────────────────────────────
+  # 第二段：CD —— 把产物发到服务器并重启（这部分叫「持续部署」）
+  # ─────────────────────────────────────────────
+  deploy:
+    name: 部署到 ECS
+    needs: ci                 # CI 全绿才可能执行
+    runs-on: ubuntu-latest
+    steps:
+      - name: 取回发布包
+        uses: actions/download-artifact@v4
+        with:
+          name: release
+
+      # Secrets 还没配好时，让部署步骤整体跳过而不是报错，
+      # 这样先推 workflow 不会让仓库一直红灯。
+      - name: 检查部署密钥是否已配置
+        id: guard
+        env:
+          SSH_HOST: ${{ secrets.SSH_HOST }}
+        run: |
+          if [ -n "$SSH_HOST" ]; then
+            echo "ready=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+            echo "::warning::未配置部署 Secrets（SSH_HOST / SSH_USER / SSH_KEY），本次跳过部署"
+          fi
+
+      - name: 准备 SSH 密钥
+        if: steps.guard.outputs.ready == 'true'
+        env:
+          SSH_KEY: ${{ secrets.SSH_KEY }}
+          SSH_HOST: ${{ secrets.SSH_HOST }}
+        run: |
+          mkdir -p ~/.ssh
+          printf '%s\n' "$SSH_KEY" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          # 首次连接自动记录主机指纹（个人项目可接受；更严格可预置 known_hosts）
+          ssh-keyscan -H "$SSH_HOST" >> ~/.ssh/known_hosts 2>/dev/null
+
+      - name: 上传发布包到服务器
+        if: steps.guard.outputs.ready == 'true'
+        env:
+          SSH_USER: ${{ secrets.SSH_USER }}
+          SSH_HOST: ${{ secrets.SSH_HOST }}
+        run: |
+          scp -i ~/.ssh/deploy_key -o StrictHostKeyChecking=accept-new \
+            release.tar.gz "$SSH_USER@$SSH_HOST:/opt/nexus-os/incoming/release.tar.gz"
+
+      - name: 触发服务器端切换发布
+        if: steps.guard.outputs.ready == 'true'
+        env:
+          SSH_USER: ${{ secrets.SSH_USER }}
+          SSH_HOST: ${{ secrets.SSH_HOST }}
+        run: |
+          ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=accept-new \
+            "$SSH_USER@$SSH_HOST" "sudo /opt/nexus-os/bin/release.sh"

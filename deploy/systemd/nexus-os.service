@@ -1,0 +1,36 @@
+[Unit]
+Description=Nexus OS (Next.js 生产服务)
+Documentation=https://github.com/og-liu/nexus-os
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+
+# 用专用系统用户运行，不用 root
+User=nexus
+Group=nexus
+
+# 始终指向「当前版本」的软链接，发布时由 release.sh 原子切换
+WorkingDirectory=/opt/nexus-os/current
+
+# 环境变量集中放在 shared/，与代码版本解耦（前缀 - 表示文件不存在时不报错）
+EnvironmentFile=-/opt/nexus-os/shared/.env.production
+Environment=NODE_ENV=production
+Environment=PORT=3000
+Environment=HOSTNAME=127.0.0.1
+
+# standalone 产物的入口就是 server.js
+ExecStart=/usr/bin/node server.js
+
+# 进程挂了自动拉起；开机自启由 [Install] 段控制
+Restart=always
+RestartSec=3
+
+# 日志进 journald，用 journalctl -u nexus-os 查看
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=nexus-os
+
+[Install]
+WantedBy=multi-user.target
