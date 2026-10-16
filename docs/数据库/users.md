@@ -1,0 +1,81 @@
+# users —— 账号
+
+> **一行 = 一个人。** 它回答的问题是：「这个账号**存在**吗？密码对不对？」
+
+| 状态 | 建立 | 最近更新 |
+|---|---|---|
+| ✅ 使用中 | 2026-10-15 | 2026-10-16 |
+
+## 一、怎么理解它
+
+不涉及 —— 这张表很直白：一个账号一行，字段名基本就是它的意思。容易误会的地方都放在「常见疑问」一节。
+
+## 二、这张表管什么
+
+- **注册**：加一行（同时算好 `password_hash`）
+- **登录**：**读**它 —— 按 `username_key` 找人、再用 `password_hash` 验密码
+- **改密码 / 改用户名**：改对应的一行（这两个功能现在还没做）
+- 它**不**记录"现在有没有人在用" —— 那是 [`auth_sessions`](./auth_sessions.md) 的事
+
+**注册成功后能直接进首页**，是因为注册流程顺手帮你登录了一次，也就是往 `auth_sessions` 插了一行；`users` 这行本身只说明"这个账号存在了"。
+
+## 三、建表 SQL 原文
+
+```sql
+CREATE TABLE IF NOT EXISTS users (
+  id            INTEGER PRIMARY KEY AUTOINCREMENT,
+  username      TEXT    NOT NULL,          -- 展示用，保留用户输入的大小写
+  username_key  TEXT    NOT NULL UNIQUE,   -- 归一化（小写）后的唯一键
+  password_hash TEXT    NOT NULL,          -- 自描述格式，见 password.ts
+  created_at    INTEGER NOT NULL           -- 毫秒时间戳
+);
+```
+
+## 四、逐字段说明
+
+| 字段 | 类型 | 约束 | 含义（人话） | 为什么这么设计 |
+|---|---|---|---|---|
+| `id` | INTEGER | 主键，自增 | 这个人的**内部编号**，会话表靠它指回来 | 写 `AUTOINCREMENT` 是为了**编号永不复用**：不写的话，SQLite 会把删掉的最大号让给下一个新用户，于是"同一个 id 先后是两个人"，排查时像见鬼 |
+| `username` | TEXT | NOT NULL | 用户**看到**的账号名，原样保留大小写 | 展示归展示：`Alice` 就该显示成 `Alice`，不该被归一化改掉 |
+| `username_key` | TEXT | NOT NULL **UNIQUE** | 归一化后的账号名：去首尾空白 + 转小写。**判重和登录找账号都走这一列** | 唯一约束建在它上面而不是 `username` 上：否则 `Alice` 与 `alice` 会变成两个账号，而没人需要两个只靠大小写区分的账号 |
+| `password_hash` | TEXT | NOT NULL | 密码的**哈希**（不是密码本身） | **永不存明文**；每个账号独立随机盐，所以同一个密码在两个人身上哈希也不同。格式与校验见本目录 README §五 |
+| `created_at` | INTEGER | NOT NULL | 注册时间（毫秒时间戳） | 展示、排序、排查都要用。数值好比较、好相减 |
+
+## 五、索引
+
+| 索引 | 由什么产生 | 服务于哪个查询 |
+|---|---|---|
+| `sqlite_autoindex_users_1` | `username_key UNIQUE` 自动创建 | 登录时按用户名取账号、注册时判重 |
+
+主键 `id` 是另一条：`INTEGER PRIMARY KEY` 本身就是 rowid 的别名，不需要额外索引。
+
+## 六、常用查询
+
+```sql
+-- 看所有账号（Navicat 里最常用的一条）
+select id, username, username_key from users order by id;
+
+-- 只看"有账号、但从没登录过"的人（配合 left join 用）
+select u.id, u.username
+from users u left join auth_sessions s on s.user_id = u.id
+where s.id is null;
+```
+
+## 七、常见疑问
+
+**Q：`username` 和 `username_key` 为什么要存两个？**
+一个给眼睛看，一个给机器比。前者保留你注册时打的字（`Alice`），后者统一成小写（`alice`）用来判重和查找——这样 `Alice` 和 `alice` 才不会被当成两个人。
+
+**Q：为什么 id 删了也不复用？**
+见上表 `id` 行：不复用才不会出现"同一个 id 先后是两个人"。编号大一点没关系。
+
+**Q：密码为什么不直接存？为什么用 scrypt 而不是 md5？**
+见本目录 README §五：库里不允许有可以直接拿去用的秘密。md5/sha256 是为"快"设计的，显卡每秒能算几十亿次，暴力破解只是时间问题；scrypt 故意慢、还吃内存，把每次尝试的成本抬高几个数量级——慢在这里是功能。
+
+**Q：账号删了，它的登录怎么办？**
+会话表上的外键是 `ON DELETE CASCADE`：删这一行，它名下所有会话行一起删，不可能留下"指向空用户的通行证"。
+
+## 变更记录
+
+- 2026-10-16：从 `docs/数据库设计.md` 拆出，成为这张表自己的文件（内容未变，只是换了位置并按统一格式重排）。
+- 2026-10-15：随登录注册功能建立（当时叫 `docs/功能/登录注册.md` 的数据模型一节）。
