@@ -24,7 +24,7 @@ export function RegisterForm() {
 
   return (
     <form action={formAction} onSubmit={clearAll}>
-      <div className="space-y-4">
+      <div className="space-y-5 md:space-y-4">
         <TextField
           id="username"
           name="username"
@@ -74,7 +74,7 @@ export function RegisterForm() {
       <button
         type="submit"
         disabled={pending}
-        className="mt-6 flex w-full items-center justify-center gap-2 rounded-[2px] bg-[#000000] px-4 py-2.5 text-sm font-medium text-white transition-colors hover:bg-[#333333] disabled:cursor-not-allowed disabled:opacity-50"
+        className="mt-6 flex h-12 w-full items-center justify-center gap-2 rounded-[2px] bg-[#000000] px-4 text-sm font-medium text-white transition-colors hover:bg-[#333333] disabled:cursor-not-allowed disabled:opacity-50 md:h-11"
       >
         {pending ? "注册中…" : "注册"}
       </button>

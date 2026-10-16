@@ -32,7 +32,7 @@ export function TextField({
         id={id}
         aria-invalid={error ? true : undefined}
         aria-describedby={messageId}
-        className={`mt-1.5 h-10 w-full rounded-[2px] border bg-white px-3 text-sm text-[#000000] outline-none transition-colors placeholder:text-[#999999] disabled:cursor-not-allowed disabled:opacity-50 ${
+        className={`mt-1.5 h-11 w-full rounded-[2px] border bg-white px-3 text-base text-[#000000] outline-none transition-colors placeholder:text-[#999999] disabled:cursor-not-allowed disabled:opacity-50 md:h-10 md:text-sm ${
           error
             ? "border-[#B91C1C]"
             : "border-[#E5E5E5] focus:border-[#000000]"

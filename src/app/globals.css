@@ -3,8 +3,113 @@
 /*
  * 字体回退链：中文优先 Noto Sans SC，其次 Geist Sans，最后系统无衬线。
  * 变量由 src/app/layout.tsx 的 next/font 注入（见《界面设计规范》§4.1）。
+ *
+ * 动效 token 见《界面设计规范》§12：入口页用作入场，时长一律 < 600ms，
+ * 只负责「东西出现在它该在的位置」，不做循环表演（`drift` 是唯一的慢速背景位移）。
  */
 @theme inline {
   --font-sans: var(--font-noto-sans-sc), var(--font-geist-sans), sans-serif;
   --font-mono: var(--font-geist-mono);
+
+  --animate-rise: rise 0.55s cubic-bezier(0.22, 1, 0.36, 1) both;
+  --animate-fade: fade 0.6s ease-out both;
+  --animate-scale-in: scale-in 0.5s cubic-bezier(0.22, 1, 0.36, 1) both;
+  --animate-grow-x: grow-x 0.9s cubic-bezier(0.22, 1, 0.36, 1) both;
+  --animate-drift: drift 30s ease-in-out infinite alternate;
+}
+
+@keyframes rise {
+  from {
+    opacity: 0;
+    transform: translateY(14px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes fade {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes scale-in {
+  from {
+    opacity: 0;
+    transform: scale(0.97);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes grow-x {
+  from {
+    transform: scaleX(0);
+  }
+  to {
+    transform: scaleX(1);
+  }
+}
+
+@keyframes drift {
+  from {
+    transform: translate3d(-3%, -2%, 0) scale(1);
+  }
+  to {
+    transform: translate3d(3%, 2%, 0) scale(1.1);
+  }
+}
+
+/*
+ * 装饰纹理。全部用 CSS 画出来，不引图片、不引 SVG 文件：
+ * 极细网格给平面一点「工程感」，径向光晕给暗底一点纵深。
+ */
+.bg-grid-fine {
+  background-image:
+    linear-gradient(to right, rgb(255 255 255 / 0.03) 1px, transparent 1px),
+    linear-gradient(to bottom, rgb(255 255 255 / 0.03) 1px, transparent 1px);
+  background-size: 34px 34px;
+}
+
+/* 手机屏幕小，网格密了会像稿纸——拉大间距、再淡一档 */
+@media (max-width: 767px) {
+  .bg-grid-fine {
+    background-image:
+      linear-gradient(to right, rgb(255 255 255 / 0.022) 1px, transparent 1px),
+      linear-gradient(to bottom, rgb(255 255 255 / 0.022) 1px, transparent 1px);
+    background-size: 44px 44px;
+  }
+}
+
+.bg-grid-fine-light {
+  background-image:
+    linear-gradient(to right, rgb(0 0 0 / 0.035) 1px, transparent 1px),
+    linear-gradient(to bottom, rgb(0 0 0 / 0.035) 1px, transparent 1px);
+  background-size: 28px 28px;
+}
+
+.bg-glow-dark {
+  background-image: radial-gradient(
+    120% 90% at 18% 12%,
+    rgb(255 255 255 / 0.12),
+    transparent 60%
+  );
+}
+
+/* 系统开了「减少动态效果」，就优先于我们的一切装饰 */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-delay: 0ms !important;
+    transition-duration: 0.001ms !important;
+  }
 }
