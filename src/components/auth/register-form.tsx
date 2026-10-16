@@ -12,6 +12,9 @@ import { type AuthFormState, registerAction } from "@/lib/auth/actions";
  * 规则没定的时候不写提示，免得凭空造出一条谁也没同意过的要求。
  *
  * 错误提示的生命周期交给 `useDirtyFields`：改过的字段不再显示旧错误，提交时全部清空。
+ *
+ * 注册页的失败目前**全部**是字段级（校验不通过、用户名被占用），所以这里没有表单级提示块
+ * ——真出现归不到某个字段的失败时再加（对比 `login-form.tsx`，那边有「用户名或密码不正确」）。
  */
 const initialState: AuthFormState = {};
 
@@ -20,7 +23,7 @@ export function RegisterForm() {
     registerAction,
     initialState,
   );
-  const { isDirty, anyDirty, markDirty, clearAll } = useDirtyFields();
+  const { isDirty, markDirty, clearAll } = useDirtyFields();
 
   return (
     <form action={formAction} onSubmit={clearAll}>
@@ -61,14 +64,6 @@ export function RegisterForm() {
           }
           onChange={() => markDirty("confirmPassword")}
         />
-        {state.formError && !anyDirty ? (
-          <p
-            role="alert"
-            className="rounded-[2px] border border-[#E5E5E5] bg-[#F5F5F5] px-3 py-2 text-xs text-[#B91C1C]"
-          >
-            {state.formError}
-          </p>
-        ) : null}
       </div>
 
       <button

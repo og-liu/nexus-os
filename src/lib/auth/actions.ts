@@ -88,10 +88,11 @@ export async function registerAction(
   });
 
   if (!user) {
-    // 唯一键冲突 —— 大概率是「用户名已被使用」，也可能是自己连点两次提交
+    // 唯一键冲突 —— 大概率是「用户名已被占用」，也可能是自己连点两次提交。
+    // 提示**只挂在用户名字段上**：这是个字段级问题，报一次就够（《界面设计规范》§7.16
+    // 的「一次失败只出现在一处」），文案陈述事实、不给建议。
     return {
-      formError: "该用户名已被占用",
-      fieldErrors: { username: "换一个用户名试试" },
+      fieldErrors: { username: "该用户名已被占用" },
       username: usernameRaw,
     };
   }
