@@ -20,7 +20,7 @@ CREATE TABLE IF NOT EXISTS users (
   created_at    INTEGER NOT NULL           -- 毫秒时间戳
 );
 
-CREATE TABLE IF NOT EXISTS sessions (
+CREATE TABLE IF NOT EXISTS auth_sessions (
   id         INTEGER PRIMARY KEY AUTOINCREMENT,
   token_hash TEXT    NOT NULL UNIQUE,      -- sha256(cookie 中的原文)
   user_id    INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -28,12 +28,41 @@ CREATE TABLE IF NOT EXISTS sessions (
   expires_at INTEGER NOT NULL
 );
 
-CREATE INDEX IF NOT EXISTS idx_sessions_user_id ON sessions(user_id);
+CREATE INDEX IF NOT EXISTS idx_auth_sessions_user_id ON auth_sessions(user_id);
 `;
 
 /** 建表（幂等）。单独导出，测试可以在任意连接上初始化结构。 */
 export function initSchema(conn: Db): void {
+  // 先迁移表名，再建表 —— 顺序不能反（理由见 migrateLegacyTableNames）
+  migrateLegacyTableNames(conn);
   conn.exec(SCHEMA);
+}
+
+/**
+ * 老库的表名迁移（幂等）。
+ *
+ * 这张登录会话表原来叫 `sessions`。将来做 Agent 相关开发时，「会话」这个词会被用来指
+ * **对话线程**，而裸词 `sessions` 显然该属于对话——所以登录凭证改叫 `auth_sessions`，
+ * 把那个词让出去（`agent_sessions` / `chat_sessions` 以后都不会撞车）。
+ *
+ * **必须在建表之前跑**：如果先 `CREATE TABLE IF NOT EXISTS auth_sessions` 再改名，
+ * 老库的检查会看到「新表已存在」从而跳过迁移，老的行就被留在 `sessions` 里成了孤儿。
+ */
+function migrateLegacyTableNames(conn: Db): void {
+  const legacy = "sessions";
+  const current = "auth_sessions";
+  if (!tableExists(conn, legacy) || tableExists(conn, current)) return;
+
+  conn.exec(`ALTER TABLE ${legacy} RENAME TO ${current}`);
+  // SQLite 改名表时不会跟着改索引名，旧名字会留在新表上；丢掉，由 SCHEMA 按新名字重建
+  conn.exec("DROP INDEX IF EXISTS idx_sessions_user_id");
+}
+
+function tableExists(conn: Db, name: string): boolean {
+  const row = conn
+    .prepare("SELECT 1 AS found FROM sqlite_master WHERE type = 'table' AND name = ?")
+    .get(name) as { found: number } | undefined;
+  return row !== undefined;
 }
 
 /** 在指定文件（或 ":memory:"）上开一个配置好 pragma 的连接，并保证表结构存在。 */
@@ -41,7 +70,7 @@ export function createConnection(file: string): Db {
   const conn = new Database(file);
   // WAL：读写不互斥，读请求不会卡住写请求
   conn.pragma("journal_mode = WAL");
-  // SQLite 默认**关闭**外键约束，不打开则 sessions 的 ON DELETE CASCADE 形同虚设
+  // SQLite 默认**关闭**外键约束，不打开则 auth_sessions 的 ON DELETE CASCADE 形同虚设
   conn.pragma("foreign_keys = ON");
   initSchema(conn);
   return conn;

@@ -27,7 +27,7 @@ function insertUser(db: Db, username = "alice") {
 }
 
 function countSessions(db: Db): number {
-  const row = db.prepare("SELECT COUNT(*) AS count FROM sessions").get() as {
+  const row = db.prepare("SELECT COUNT(*) AS count FROM auth_sessions").get() as {
     count: number;
   };
   return row.count;
@@ -49,7 +49,7 @@ describe("会话生命周期", () => {
     const user = insertUser(db);
     const { token } = createSessionRecord(db, user.id);
 
-    const row = db.prepare("SELECT token_hash FROM sessions").get() as {
+    const row = db.prepare("SELECT token_hash FROM auth_sessions").get() as {
       token_hash: string;
     };
     expect(row.token_hash).toBe(hashToken(token));

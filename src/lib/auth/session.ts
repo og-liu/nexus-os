@@ -42,7 +42,7 @@ export function createSessionRecord(
   const expiresAt = now + SESSION_TTL_MS;
 
   db.prepare(
-    "INSERT INTO sessions (token_hash, user_id, created_at, expires_at) VALUES (?, ?, ?, ?)",
+    "INSERT INTO auth_sessions (token_hash, user_id, created_at, expires_at) VALUES (?, ?, ?, ?)",
   ).run(hashToken(token), userId, now, expiresAt);
 
   // 顺手清理：过期会话没有任何用处，留着只会让表越长越大
@@ -65,7 +65,7 @@ export function findSessionUser(
   const row = db
     .prepare(
       `SELECT u.id AS id, u.username AS username, u.created_at AS created_at, s.expires_at AS expires_at
-       FROM sessions s
+       FROM auth_sessions s
        JOIN users u ON u.id = s.user_id
        WHERE s.token_hash = ?`,
     )
@@ -86,15 +86,15 @@ export function findSessionUser(
 /** 删除一条会话（登出）。返回是否真的删掉了行。 */
 export function deleteSessionRecord(db: Db, token: string): boolean {
   const result = db
-    .prepare("DELETE FROM sessions WHERE token_hash = ?")
+    .prepare("DELETE FROM auth_sessions WHERE token_hash = ?")
     .run(hashToken(token));
   return result.changes > 0;
 }
 
 export function deleteSessionsForUser(db: Db, userId: number): number {
-  return db.prepare("DELETE FROM sessions WHERE user_id = ?").run(userId).changes;
+  return db.prepare("DELETE FROM auth_sessions WHERE user_id = ?").run(userId).changes;
 }
 
 export function deleteExpiredSessions(db: Db, now = Date.now()): number {
-  return db.prepare("DELETE FROM sessions WHERE expires_at <= ?").run(now).changes;
+  return db.prepare("DELETE FROM auth_sessions WHERE expires_at <= ?").run(now).changes;
 }
