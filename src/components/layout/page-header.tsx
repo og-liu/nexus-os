@@ -11,7 +11,7 @@ import { useAppShell } from "@/components/layout/app-shell";
  * 三种断点行为：
  * - 标题：手机显示短标题（与导航名一致），lg 起换成完整描述文案；
  * - 汉堡按钮：仅 < lg 出现，点击打开侧栏抽屉（经 useAppShell 拿 openNav）；
- * - 右侧 children：页面级控件（搜索、筛选…）+ 用户区（UserControl），间距 gap-3。
+ * - 右侧 children：页面级控件（搜索、筛选…），间距 gap-3；账户区不在页头（§7.18 在侧边栏底部）。
  */
 
 interface PageHeaderProps {

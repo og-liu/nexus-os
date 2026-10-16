@@ -14,6 +14,9 @@ import { Sidebar } from "@/components/layout/sidebar";
  * 「打开抽屉」的按钮在页头里、状态却住在外壳上，两者隔着好几层组件树——
  * 用一个 Context 把 `openNav` 传下去（页头里 `useAppShell()` 取用），
  * 避免把这个状态一路用 props 捅下去。
+ *
+ * `username` 由 (app)/layout 取好传进来（侧栏底部用户区显示用，§7.18）——
+ * **纯显示**：登录检查不靠它，仍由各页面自己的 `requireUser()` 承担。
  */
 
 interface AppShellContextValue {
@@ -26,7 +29,13 @@ const AppShellContext = createContext<AppShellContextValue>({
 
 export const useAppShell = () => useContext(AppShellContext);
 
-export function AppShell({ children }: { children: ReactNode }) {
+export function AppShell({
+  username,
+  children,
+}: {
+  username: string;
+  children: ReactNode;
+}) {
   const [navOpen, setNavOpen] = useState(false);
   const openNav = useCallback(() => setNavOpen(true), []);
   const closeNav = useCallback(() => setNavOpen(false), []);
@@ -46,7 +55,7 @@ export function AppShell({ children }: { children: ReactNode }) {
     <AppShellContext.Provider value={{ openNav }}>
       {/* 桌面布局：整页禁止横向滚动，只有主内容区纵向滚动 */}
       <div className="flex h-screen overflow-hidden">
-        <Sidebar variant="desktop" />
+        <Sidebar variant="desktop" username={username} />
         <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
           <main className="flex-1 overflow-y-auto bg-[#ECECEC]">{children}</main>
           <Footer />
@@ -70,7 +79,7 @@ export function AppShell({ children }: { children: ReactNode }) {
             navOpen ? "translate-x-0" : "-translate-x-full"
           }`}
         >
-          <Sidebar variant="mobile" onNavigate={closeNav} />
+          <Sidebar variant="mobile" username={username} onNavigate={closeNav} />
         </div>
       </div>
     </AppShellContext.Provider>

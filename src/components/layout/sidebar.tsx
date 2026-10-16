@@ -15,9 +15,10 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { LogoIcon } from "@/components/layout/logo-icon";
+import { UserMenu } from "@/components/layout/user-menu";
 
 /**
- * 侧边导航（《界面设计规范》§5.2）。
+ * 侧边导航（《界面设计规范》§5.2 / §7.18）。
  *
  * - desktop：≥ lg 的常驻图标栏（w-20），文字藏进原生 title 提示；
  * - mobile：< lg 的抽屉版本，图标 + 文字（抽屉由 AppShell 管）。
@@ -26,6 +27,10 @@ import { LogoIcon } from "@/components/layout/logo-icon";
  * 激活色涟漪播放展开动画，让「点下 → 页面切换」之间有一帧可知的反馈。
  * 涟漪状态放在组件里、而不是布局里——Sidebar 在布局中常驻不卸载，
  * 跨页面导航时动画才能播完（若随页面重挂载，动画会被切断）。
+ *
+ * 底部是账户区（§7.18）：两档触发形态不同、点开同一个用户菜单。
+ * 导航区（min-h-0 + overflow-y-auto）与账户区（shrink-0）分开滚动——
+ * 矮屏（横屏手机 / 小窗口）下导航可以滚，账户块钉在底部不被挤走。
  */
 
 const navItems = [
@@ -41,11 +46,17 @@ const navItems = [
 interface SidebarProps {
   /** desktop：常驻图标栏；mobile：手机抽屉内的完整菜单 */
   variant?: "desktop" | "mobile";
+  /** 当前用户名（底部用户区显示）——由 (app)/layout 取好传下来，纯显示用途 */
+  username: string;
   /** 手机抽屉中点击任一导航后关闭抽屉 */
   onNavigate?: () => void;
 }
 
-export function Sidebar({ variant = "desktop", onNavigate }: SidebarProps) {
+export function Sidebar({
+  variant = "desktop",
+  username,
+  onNavigate,
+}: SidebarProps) {
   const pathname = usePathname();
   const [rippleHref, setRippleHref] = useState<string | null>(null);
 
@@ -88,7 +99,7 @@ export function Sidebar({ variant = "desktop", onNavigate }: SidebarProps) {
           </button>
         </div>
 
-        <nav className="flex-1 space-y-1 px-3 pb-4">
+        <nav className="min-h-0 flex-1 space-y-1 overflow-y-auto px-3 pb-4">
           {navItems.map((item) => {
             const isActive =
               item.href === "/"
@@ -116,6 +127,11 @@ export function Sidebar({ variant = "desktop", onNavigate }: SidebarProps) {
             );
           })}
         </nav>
+
+        {/* 底部账户区（§7.18）：留出手机底部手势条的安全区 */}
+        <div className="shrink-0 px-3 pt-3 pb-[max(12px,env(safe-area-inset-bottom))]">
+          <UserMenu username={username} variant="mobile" />
+        </div>
       </div>
     );
   }
@@ -131,7 +147,7 @@ export function Sidebar({ variant = "desktop", onNavigate }: SidebarProps) {
       </div>
 
       {/* Navigation */}
-      <nav className="mt-2 flex-1 space-y-2 px-3">
+      <nav className="mt-2 min-h-0 flex-1 space-y-2 overflow-y-auto px-3 pb-2">
         {navItems.map((item) => {
           const isActive =
             item.href === "/"
@@ -160,6 +176,11 @@ export function Sidebar({ variant = "desktop", onNavigate }: SidebarProps) {
           );
         })}
       </nav>
+
+      {/* 底部账户区（§7.18）：钉在栏底，与导航区不设分割线 */}
+      <div className="shrink-0 p-3">
+        <UserMenu username={username} variant="desktop" />
+      </div>
     </aside>
   );
 }

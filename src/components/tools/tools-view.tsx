@@ -3,7 +3,6 @@
 import { useMemo, useState } from "react";
 import { ChevronDown, Search, X } from "lucide-react";
 import { PageHeader } from "@/components/layout/page-header";
-import { UserControl } from "@/components/layout/user-control";
 import { CategoryChips } from "@/components/tools/category-chips";
 import { ToolCard } from "@/components/tools/tool-card";
 import { TOOLS } from "@/components/tools/tool-catalog";
@@ -32,7 +31,7 @@ import {
  * - lg ~ xl：搜索收成图标（点开出现输入框）、分类收成黑底下拉；
  * - < lg：只剩搜索图标，分类在内容区顶部以 chips 横滑条呈现。
  */
-export function ToolsView({ username }: { username: string }) {
+export function ToolsView() {
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedCategory, setSelectedCategory] =
     useState<CategoryFilter>(ALL_CATEGORY);
@@ -148,9 +147,6 @@ export function ToolsView({ username }: { username: string }) {
             )}
           </button>
         </div>
-
-        {/* 用户区（§7.10）：排在页面级控件之后 */}
-        <UserControl username={username} />
       </PageHeader>
 
       {/* < lg：搜索条（点开时出现）+ 分类 chips 横滑条 */}
