@@ -106,7 +106,7 @@ main ───●────────────────────●
       worker/<短名> ──②提交──推送──③Lingda 验收──┘
 ```
 
-1. **同步基线并开分支（开发助手）**：在 `~/nexus-os-worker` 里先 `git pull --ff-only && git status`（必须干净），再从最新 `origin/main` 拉出任务分支。
+1. **同步基线并开分支（开发助手）**：在 `~/nexus-os-worker` 里 `git fetch origin` → `git status`（必须干净）→ 比对 `git rev-parse --short HEAD origin/main`。落后就 `git pull --ff-only`；分叉或拉不动就停下报告。然后从最新 `origin/main` 拉出任务分支。
    `git switch -c worker/<短名> origin/main`（`-c` = create：新建并切过去）
    独立 clone 不会自己跟着主线走——不先 pull，就是拿旧基线开工。
 2. **写、提交、推送（开发助手）**：一个逻辑单元一个 `commit`，格式 `type(范围): 中文摘要`；做完推送：
@@ -156,7 +156,7 @@ main ───●────────────────────●
 
 ## 八、写手守则（开发助手执行；Lingda 自查同一套）
 
-1. 开工先 `git status`；工作树不干净就停下问，不 stash、不 checkout。只在 `worker/<短名>` 分支上提交；`main` 不碰。
+1. 开工先确认基线是最新 `main`：`git fetch origin` → `git status`（必须干净）→ 比对 `git rev-parse --short HEAD origin/main`。落后就 `git pull --ff-only`；分叉、冲突或拉不动就**停下报告**，不许 `rebase`、不许强推。只在 `worker/<短名>` 分支上提交；`main` 不碰。
 2. 不合并、不部署；`deploy/`（部署物料）与 `.github/`（CI 配置）不碰，任务卡点名除外。
 3. 只做完成目标必需的改动；顺带发现的问题写进汇报，不顺手改。
 4. 不确定就问：需求有多解、要动架构、要加依赖、要删文件或数据、测试反复修不过 → 停下列问题。
@@ -224,7 +224,8 @@ Lingda 从需求原文翻译成可勾选条目；含糊的标准在验收时一�
 
 | 谁 | 场景 | 命令 |
 |---|---|---|
-| 开发助手 | 开分支 | `git pull --ff-only && git switch -c worker/<短名> origin/main` |
+| 开发助手 | 查基线 | `git fetch origin && git status -sb && git rev-parse --short HEAD origin/main` |
+| 开发助手 | 开分支 | `git switch -c worker/<短名> origin/main` |
 | 开发助手 | 提交并推送 | `git add -A && git commit -m "feat(…): …" && git push -u origin worker/<短名>` |
 | Lingda | 验收 | `git fetch origin` → `git diff origin/main...origin/worker/<短名>` → 在 worker 目录跑门禁 |
 | Lingda | 开 PR | `gh pr create --base main --head worker/<短名>` |
