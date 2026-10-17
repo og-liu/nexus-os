@@ -59,7 +59,7 @@ Git Flow 不是「更专业」，是「为大规模版本发布设计的」—�
 
 | 角色 | 是谁 | 负责 | 不碰 |
 |---|---|---|---|
-| ogliu | 项目所有者（人，GitHub 账号 `og-liu`） | 提需求、转交任务卡、点「合并」、拍板 | — |
+| ogliu | 项目所有者（人，GitHub 账号 `og-liu`） | 提需求、转交任务卡、拍板（回「准了」） | — |
 | Lingda | Hermes（本机） | 写任务卡；验收（跑门禁、看差异、讲设计）；合并后同步本地 | 小鲁干活期间不碰仓库 |
 | 小鲁 | Codex CLI（扣子桌面端） | 在任务分支上写代码、提交、推送、五段汇报 | 不合并、不部署、不碰 `main` |
 
@@ -67,7 +67,7 @@ Git Flow 不是「更专业」，是「为大规模版本发布设计的」—�
 
 1. **AI 之间不直接对话**：所有交接（任务卡、交付、返工）都经 ogliu 手动转交。
 2. **串行**：同一时间只有一个写手。两个写手同改一个仓库，冲突（见术语表）的成本远大于并行的收益。开工信号是「交给小鲁」，收工信号是「小鲁交活了」。
-3. **上线是人的动作**：代码能不能上线由 ogliu 点合并决定，CI 只负责执行。
+3. **上线是人的决策**：代码能不能上线由 ogliu 拍板（回一句「准了」）；合并的**执行**可由 Lingda 代劳（`gh pr merge`），CI 只负责部署。
 
 ## 四、先把词说清楚（术语表）
 
@@ -117,9 +117,9 @@ main ───●────────────────────●
    git diff origin/main...HEAD      # 这条分支相对 main 的全部改动
    ```
    对照任务卡「验收」清单逐条勾；通过就开 PR（`gh pr create`），把验收结论贴成 PR 评论，并把关键设计讲给 ogliu。
-4. **合并（ogliu）**：在 PR 页面点 **Squash and merge**——压扁合并：分支的多个提交在 `main` 上只留一条干净提交，细节仍可在 PR 里查。
+4. **合并（ogliu 拍板 → Lingda 执行）**：Lingda 验收汇报后，ogliu 回「准了」；Lingda 执行 `gh pr merge <PR号> --squash --delete-branch`——压扁合并（分支的多个提交在 `main` 上只留一条干净提交，细节仍可在 PR 里查）+ 删远端分支。
 5. **上线（CI 自动）**：`main` 一更新，流水线自动「检查 → 构建 → 传服务器 → 切版本 → 重启」（见《部署方案》）。
-6. **收尾（Lingda）**：`git switch main && git pull`；旧分支删掉（本地 `git branch -D task/<短名>`；远端可在 PR 合并时勾选 Delete branch）。
+6. **收尾（Lingda）**：`git switch main && git pull`；本地旧分支删掉（`git branch -D task/<短名>`；远端分支已在第 4 步随合并删除）。
 
 ## 六、分支命名
 
@@ -195,6 +195,9 @@ main ───●────────────────────●
 **合并为什么用 squash，不用普通 merge？**
 普通 merge 把分支上的碎提交原样并进 `main`，主线越来越吵；squash 压成一条，主线一条提交 = 一次验收过的需求，细节留在 PR 里。
 
+**为什么由 Lingda 执行合并，而不是 ogliu 自己在网页点？**
+合并在 GitHub 上就是一个执行动作，真正的闸门在「谁决定」：ogliu 说「准了」= 批准，Lingda 用 `gh pr merge --squash --delete-branch` 落地。何况 GitHub 分不清人机——两人用的是同一个账号（记录都显示 `og-liu`），所以决定权留在 ogliu、执行交给机器，两不耽误。
+
 **GitHub 上点合并，和本地敲 `git merge` 是一回事吗？**
 效果一样。选 PR 是为了留记录（谁、何时、改了什么、验收结论）并自动触发 CI；本地 `git merge` 再直推 `main` 也上线，但等于绕过记录与审查——不做。
 
@@ -216,12 +219,14 @@ Lingda 从需求原文翻译成可勾选条目；含糊的标准在验收时一�
 | Lingda | 验收 | `git fetch origin && git switch task/<短名>` → 门禁 → `git diff origin/main...HEAD` |
 | Lingda | 开 PR | `gh pr create --base main --head task/<短名>` |
 | Lingda | 合并后同步 | `git switch main && git pull && git branch -D task/<短名>` |
-| ogliu | 合并 | GitHub PR 页面 → **Squash and merge** → 勾选 Delete branch |
+| ogliu | 拍板合并 | 回一句「准了」 |
+| Lingda | 执行合并 | `gh pr merge <PR号> --squash --delete-branch` |
 
 ---
 
 ## 更新记录
 
+- 2026-10-17 10:59：合并方式定为「拍板 / 执行分离」（B 方案）——ogliu 回「准了」拍板，Lingda 执行 `gh pr merge --squash --delete-branch`；§三 角色表、§五 第 4 步、§十三 命令速查与 FAQ 同步。
 - 2026-10-17 10:55：新增 §二《这套流程的正式名字：GitHub Flow》——官方六环节与本项目的逐条对照、与 Git Flow 的区别、额外三条纪律；其后章节整体顺延一位；术语表补 GitHub Flow 词条、章节引用改用 § 记法。
 - 2026-10-17 10:15：`main` 分支保护**已开启**——必须走 PR（0 批准）、禁 force push / 删除、管理员同限；实测直推被拒（`GH006`）。头部「当前状态」与 §十 同步。
 - 2026-10-17：初版。确立「一需求 = 一分支 = 一 PR；`main` 禁直推；串行写手；PR 验收合并」流程。
