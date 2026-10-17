@@ -47,3 +47,6 @@ next-env.d.ts
 
 # 本地打包产物（CI 里生成，不入库）
 release.tar.gz
+
+# DSH 写手私有工作区（经验沉淀、临时产物；永不入库）
+/.dsh/
