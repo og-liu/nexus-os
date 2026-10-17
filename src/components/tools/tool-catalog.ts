@@ -77,6 +77,7 @@ export const TOOL_CATEGORIES = ["图片", "文件", "文本", "开发", "媒体"
 export type ToolCategory = (typeof TOOL_CATEGORIES)[number];
 
 export interface Tool {
+  slug: string;
   name: string;
   description: string;
   icon: LucideIcon;
@@ -87,6 +88,7 @@ export interface Tool {
 export const TOOLS: Tool[] = [
   // ---------- 图片 ----------
   {
+    slug: "image-compress",
     name: "图片压缩",
     description: "智能压缩图片体积，保持画质",
     icon: Image,
@@ -94,6 +96,7 @@ export const TOOLS: Tool[] = [
     category: "图片",
   },
   {
+    slug: "image-format-convert",
     name: "图片格式转换",
     description: "PNG、JPG、WebP 等格式互转",
     icon: Images,
@@ -101,6 +104,7 @@ export const TOOLS: Tool[] = [
     category: "图片",
   },
   {
+    slug: "background-remove",
     name: "智能抠图",
     description: "一键去除图片背景",
     icon: Scissors,
@@ -108,6 +112,7 @@ export const TOOLS: Tool[] = [
     category: "图片",
   },
   {
+    slug: "image-watermark",
     name: "图片水印",
     description: "批量添加文字或图片水印",
     icon: Sticker,
@@ -115,6 +120,7 @@ export const TOOLS: Tool[] = [
     category: "图片",
   },
   {
+    slug: "image-stitch",
     name: "图片拼接",
     description: "横拼、竖拼、九宫格",
     icon: LayoutGrid,
@@ -122,6 +128,7 @@ export const TOOLS: Tool[] = [
     category: "图片",
   },
   {
+    slug: "gif-maker",
     name: "GIF 制作",
     description: "图片或视频转 GIF",
     icon: Film,
@@ -129,6 +136,7 @@ export const TOOLS: Tool[] = [
     category: "图片",
   },
   {
+    slug: "image-upscale",
     name: "图片放大",
     description: "AI 超分辨率放大",
     icon: ZoomIn,
@@ -136,6 +144,7 @@ export const TOOLS: Tool[] = [
     category: "图片",
   },
   {
+    slug: "color-picker",
     name: "取色器",
     description: "从图片提取主色与调色板",
     icon: Palette,
@@ -143,6 +152,7 @@ export const TOOLS: Tool[] = [
     category: "图片",
   },
   {
+    slug: "favicon-generator",
     name: "Favicon 生成",
     description: "一键生成多尺寸网站图标",
     icon: Globe,
@@ -150,6 +160,7 @@ export const TOOLS: Tool[] = [
     category: "图片",
   },
   {
+    slug: "screenshot-ocr",
     name: "截图 OCR",
     description: "截图后直接识别文字",
     icon: ScanLine,
@@ -157,6 +168,7 @@ export const TOOLS: Tool[] = [
     category: "图片",
   },
   {
+    slug: "qr-code-tool",
     name: "二维码工具",
     description: "生成或解析二维码",
     icon: QrCode,
@@ -164,6 +176,7 @@ export const TOOLS: Tool[] = [
     category: "图片",
   },
   {
+    slug: "reverse-image-search",
     name: "以图找图",
     description: "在目录中定位相似图片",
     icon: Search,
@@ -173,6 +186,7 @@ export const TOOLS: Tool[] = [
 
   // ---------- 文件 ----------
   {
+    slug: "batch-file-process",
     name: "文件批量处理",
     description: "批量重命名、移动、转换",
     icon: FolderOpen,
@@ -180,6 +194,7 @@ export const TOOLS: Tool[] = [
     category: "文件",
   },
   {
+    slug: "duplicate-file-cleaner",
     name: "重复文件清理",
     description: "按哈希查找并清理重复文件",
     icon: CopyX,
@@ -187,6 +202,7 @@ export const TOOLS: Tool[] = [
     category: "文件",
   },
   {
+    slug: "large-file-scan",
     name: "大文件扫描",
     description: "快速定位空间占用大户",
     icon: HardDrive,
@@ -194,6 +210,7 @@ export const TOOLS: Tool[] = [
     category: "文件",
   },
   {
+    slug: "empty-folder-cleaner",
     name: "空文件夹清理",
     description: "一键删除空文件夹",
     icon: FolderX,
@@ -201,6 +218,7 @@ export const TOOLS: Tool[] = [
     category: "文件",
   },
   {
+    slug: "file-rename",
     name: "文件重命名",
     description: "支持正则与序号规则",
     icon: FilePenLine,
@@ -208,6 +226,7 @@ export const TOOLS: Tool[] = [
     category: "文件",
   },
   {
+    slug: "auto-file-sort",
     name: "文件自动分类",
     description: "按日期、类型、扩展名整理",
     icon: FolderTree,
@@ -215,6 +234,7 @@ export const TOOLS: Tool[] = [
     category: "文件",
   },
   {
+    slug: "file-content-search",
     name: "文件内容搜索",
     description: "全文检索文件内容",
     icon: FileSearch,
@@ -222,6 +242,7 @@ export const TOOLS: Tool[] = [
     category: "文件",
   },
   {
+    slug: "file-encrypt",
     name: "文件加密",
     description: "本地文件加密与解密",
     icon: Lock,
@@ -231,6 +252,7 @@ export const TOOLS: Tool[] = [
 
   // ---------- 文本 ----------
   {
+    slug: "text-process",
     name: "文本处理",
     description: "编码转换、大小写、格式清理",
     icon: FileText,
@@ -238,6 +260,7 @@ export const TOOLS: Tool[] = [
     category: "文本",
   },
   {
+    slug: "markdown-editor",
     name: "Markdown 编辑器",
     description: "实时预览与快捷编辑",
     icon: FileCode,
@@ -245,6 +268,7 @@ export const TOOLS: Tool[] = [
     category: "文本",
   },
   {
+    slug: "json-tool",
     name: "JSON 工具",
     description: "格式化、校验、压缩",
     icon: Braces,
@@ -252,6 +276,7 @@ export const TOOLS: Tool[] = [
     category: "文本",
   },
   {
+    slug: "regex-test",
     name: "正则测试",
     description: "在线编写与测试正则",
     icon: Split,
@@ -259,6 +284,7 @@ export const TOOLS: Tool[] = [
     category: "文本",
   },
   {
+    slug: "base64",
     name: "Base64 编解码",
     description: "文本与文件 Base64 转换",
     icon: Binary,
@@ -266,6 +292,7 @@ export const TOOLS: Tool[] = [
     category: "文本",
   },
   {
+    slug: "hash-calculator",
     name: "哈希计算",
     description: "MD5、SHA 系列哈希",
     icon: Hash,
@@ -273,6 +300,7 @@ export const TOOLS: Tool[] = [
     category: "文本",
   },
   {
+    slug: "uuid-generator",
     name: "UUID 生成",
     description: "生成唯一标识符",
     icon: Fingerprint,
@@ -280,6 +308,7 @@ export const TOOLS: Tool[] = [
     category: "文本",
   },
   {
+    slug: "password-generator",
     name: "密码生成",
     description: "高强度随机密码",
     icon: KeyRound,
@@ -287,6 +316,7 @@ export const TOOLS: Tool[] = [
     category: "文本",
   },
   {
+    slug: "text-diff",
     name: "文本对比",
     description: "两段文本差异对比",
     icon: GitCompare,
@@ -294,6 +324,7 @@ export const TOOLS: Tool[] = [
     category: "文本",
   },
   {
+    slug: "word-count",
     name: "字数统计",
     description: "字数、字符、阅读时间",
     icon: TypeOutline,
@@ -303,6 +334,7 @@ export const TOOLS: Tool[] = [
 
   // ---------- 开发 ----------
   {
+    slug: "cron-parser",
     name: "Cron 解析",
     description: "Cron 表达式翻译与校验",
     icon: Clock,
@@ -310,6 +342,7 @@ export const TOOLS: Tool[] = [
     category: "开发",
   },
   {
+    slug: "timestamp-converter",
     name: "时间戳转换",
     description: "Unix 与本地时间互转",
     icon: CalendarClock,
@@ -317,6 +350,7 @@ export const TOOLS: Tool[] = [
     category: "开发",
   },
   {
+    slug: "jwt-parser",
     name: "JWT 解析",
     description: "解析与验证 JWT Token",
     icon: BadgeCheck,
@@ -324,6 +358,7 @@ export const TOOLS: Tool[] = [
     category: "开发",
   },
   {
+    slug: "sql-formatter",
     name: "SQL 格式化",
     description: "SQL 美化与压缩",
     icon: Database,
@@ -331,6 +366,7 @@ export const TOOLS: Tool[] = [
     category: "开发",
   },
   {
+    slug: "html-formatter",
     name: "HTML 格式化",
     description: "HTML / XML 美化",
     icon: Code,
@@ -338,6 +374,7 @@ export const TOOLS: Tool[] = [
     category: "开发",
   },
   {
+    slug: "color-converter",
     name: "颜色转换",
     description: "HEX、RGB、HSL 互转",
     icon: Palette,
@@ -345,6 +382,7 @@ export const TOOLS: Tool[] = [
     category: "开发",
   },
   {
+    slug: "api-request",
     name: "API 请求测试",
     description: "轻量 HTTP 接口调试",
     icon: Send,
@@ -352,6 +390,7 @@ export const TOOLS: Tool[] = [
     category: "开发",
   },
   {
+    slug: "code-snippets",
     name: "代码片段",
     description: "收藏与管理常用代码",
     icon: Bookmark,
@@ -361,6 +400,7 @@ export const TOOLS: Tool[] = [
 
   // ---------- 媒体 ----------
   {
+    slug: "audio-converter",
     name: "音频转换",
     description: "MP3、WAV、FLAC 互转",
     icon: Music,
@@ -368,6 +408,7 @@ export const TOOLS: Tool[] = [
     category: "媒体",
   },
   {
+    slug: "video-to-gif",
     name: "视频转 GIF",
     description: "视频片段转动画",
     icon: Clapperboard,
@@ -375,6 +416,7 @@ export const TOOLS: Tool[] = [
     category: "媒体",
   },
   {
+    slug: "video-compress",
     name: "视频压缩",
     description: "降低视频体积",
     icon: Video,
@@ -382,6 +424,7 @@ export const TOOLS: Tool[] = [
     category: "媒体",
   },
   {
+    slug: "audio-extract",
     name: "音频提取",
     description: "从视频中提取音频",
     icon: AudioLines,
@@ -389,6 +432,7 @@ export const TOOLS: Tool[] = [
     category: "媒体",
   },
   {
+    slug: "voice-recorder",
     name: "录音机",
     description: "快速录制音频",
     icon: Mic,
@@ -396,6 +440,7 @@ export const TOOLS: Tool[] = [
     category: "媒体",
   },
   {
+    slug: "text-to-speech",
     name: "文字转语音",
     description: "文本朗读与导出",
     icon: Volume2,
@@ -405,6 +450,7 @@ export const TOOLS: Tool[] = [
 
   // ---------- AI ----------
   {
+    slug: "text-summarizer",
     name: "文本总结",
     description: "长文一键提炼要点",
     icon: ScrollText,
@@ -412,6 +458,7 @@ export const TOOLS: Tool[] = [
     category: "AI",
   },
   {
+    slug: "translator",
     name: "智能翻译",
     description: "自然流畅的多语言翻译",
     icon: Languages,
@@ -419,6 +466,7 @@ export const TOOLS: Tool[] = [
     category: "AI",
   },
   {
+    slug: "document-qa",
     name: "文档问答",
     description: "上传文档直接提问",
     icon: FileQuestion,
@@ -426,6 +474,7 @@ export const TOOLS: Tool[] = [
     category: "AI",
   },
   {
+    slug: "meeting-notes",
     name: "会议纪要",
     description: "录音或文字生成纪要",
     icon: UsersRound,
@@ -433,6 +482,7 @@ export const TOOLS: Tool[] = [
     category: "AI",
   },
   {
+    slug: "email-polish",
     name: "邮件润色",
     description: "优化邮件措辞与语气",
     icon: Mail,
@@ -442,6 +492,7 @@ export const TOOLS: Tool[] = [
 
   // ---------- 生活 ----------
   {
+    slug: "clipboard-history",
     name: "剪贴板历史",
     description: "记录复制过的内容",
     icon: Clipboard,
@@ -449,6 +500,7 @@ export const TOOLS: Tool[] = [
     category: "生活",
   },
   {
+    slug: "quick-notes",
     name: "快捷笔记",
     description: "随手记录临时想法",
     icon: StickyNote,
@@ -456,6 +508,7 @@ export const TOOLS: Tool[] = [
     category: "生活",
   },
   {
+    slug: "todo-list",
     name: "待办清单",
     description: "简单任务管理",
     icon: CheckSquare,
@@ -463,6 +516,7 @@ export const TOOLS: Tool[] = [
     category: "生活",
   },
   {
+    slug: "habit-tracker",
     name: "习惯打卡",
     description: "每日习惯追踪",
     icon: CalendarCheck,
@@ -470,6 +524,7 @@ export const TOOLS: Tool[] = [
     category: "生活",
   },
   {
+    slug: "expense-tracker",
     name: "记账",
     description: "简单收支记录",
     icon: Receipt,
@@ -477,6 +532,7 @@ export const TOOLS: Tool[] = [
     category: "生活",
   },
   {
+    slug: "reading-list",
     name: "阅读清单",
     description: "稍后读与阅读收藏",
     icon: BookMarked,
@@ -484,6 +540,7 @@ export const TOOLS: Tool[] = [
     category: "生活",
   },
   {
+    slug: "contact-organizer",
     name: "名片整理",
     description: "联系人信息归档",
     icon: Contact,
@@ -491,6 +548,7 @@ export const TOOLS: Tool[] = [
     category: "生活",
   },
   {
+    slug: "sticky-notes",
     name: "便签",
     description: "随手贴便签，首页常驻展示",
     icon: NotepadText,
@@ -498,6 +556,7 @@ export const TOOLS: Tool[] = [
     category: "生活",
   },
   {
+    slug: "daily-quote",
     name: "每日一句",
     description: "每天更新一段正能量文案",
     icon: Quote,
@@ -505,3 +564,8 @@ export const TOOLS: Tool[] = [
     category: "生活",
   },
 ];
+
+/** 按 slug 精确查找（大小写敏感）；找不到返回 undefined，由页面决定走 404。 */
+export function findToolBySlug(slug: string): Tool | undefined {
+  return TOOLS.find((tool) => tool.slug === slug);
+}
