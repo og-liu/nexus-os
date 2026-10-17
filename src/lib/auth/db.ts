@@ -29,6 +29,17 @@ CREATE TABLE IF NOT EXISTS auth_sessions (
 );
 
 CREATE INDEX IF NOT EXISTS idx_auth_sessions_user_id ON auth_sessions(user_id);
+
+CREATE TABLE IF NOT EXISTS sticky_notes (
+  id         INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id    INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  body       TEXT    NOT NULL,
+  pinned     INTEGER NOT NULL DEFAULT 0,   -- 0 / 1，SQLite 没有布尔类型
+  created_at INTEGER NOT NULL,             -- 毫秒时间戳
+  updated_at INTEGER NOT NULL              -- 毫秒时间戳；只有改正文才刷新，置顶不刷新
+);
+
+CREATE INDEX IF NOT EXISTS idx_sticky_notes_user_id ON sticky_notes(user_id);
 `;
 
 /** 建表（幂等）。单独导出，测试可以在任意连接上初始化结构。 */

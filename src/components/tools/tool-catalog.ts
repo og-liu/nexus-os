@@ -552,7 +552,7 @@ export const TOOLS: Tool[] = [
     name: "便签",
     description: "随手贴便签，首页常驻展示",
     icon: NotepadText,
-    status: "开发中",
+    status: "可用",
     category: "生活",
   },
   {
