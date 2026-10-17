@@ -9,7 +9,7 @@
 
 **当前状态**：流程初版（2026-10-17）。`main` 分支保护**已开启**（2026-10-17 10:15）——改 `main` 只能走 PR；禁直推、禁 force push、禁删除，管理员同样受限。
 
-**第二开发已换人**（2026-10-17）：旧写手（Codex CLI + 扣子桌面端）下线，改为「开发助手（DeepSeek Harness 的 `worker` 预设）」。工作方式随之改变——**它只改文件，不碰 git**；提交、推送、开 PR 全部由 Lingda 代做。理由见 §十。
+**第二开发已换人**（2026-10-17）：旧写手（Codex CLI + 扣子桌面端）下线，改为「开发助手（DeepSeek Harness 的 `worker` 预设）」。它在独立工作树 `~/nexus-os-worker` 里干活，自己开 `worker/<短名>` 分支、提交、推送；**不合并、不部署、不碰 `main`**。为什么给它独立工作树，见 §十。
 
 ---
 
@@ -31,7 +31,7 @@ GitHub 官方版是六个环节，我们逐条对应：
 
 | 官方环节 | 我们怎么落 |
 |---|---|
-| ① 建分支 | `lingda/<短名>`（Lingda）。开发助手不建分支——它只改工作树，由 Lingda 把改动落成分支；基线永远是最新 `main` |
+| ① 建分支 | `worker/<短名>`（开发助手）/ `lingda/<短名>`（Lingda），基线永远是最新 `main` |
 | ② 提交 | 小步 commit，`type(范围): 中文摘要` |
 | ③ 开 PR | `gh pr create`——改动对照、讨论、验收结论都留在 PR 里 |
 | ④ 讨论与评审 | Lingda 验收：跑门禁、看差异、逐条勾任务卡的验收清单 |
@@ -62,8 +62,8 @@ Git Flow 不是「更专业」，是「为大规模版本发布设计的」—�
 | 角色 | 是谁 | 负责 | 不碰 |
 |---|---|---|---|
 | ogliu | 项目所有者（人，GitHub 账号 `og-liu`） | 提需求、转交任务卡、拍板（回「准了」） | — |
-| Lingda | Hermes（本机，主仓库 `~/nexus-os`） | 写任务卡；把开发助手的改动落成分支、提交、推送；验收（跑门禁、看差异、讲设计）；合并后同步本地 | 开发助手干活期间不碰同一个工作树 |
-| 开发助手 | DSH 桌面端的 `worker` 预设（独立 clone `~/nexus-os-worker`） | 在任务卡范围内改文件、跑门禁、五段交活 | 不建分支、不 commit、不 push、不合并、不部署、不碰 `main` |
+| Lingda | Hermes（本机，主仓库 `~/nexus-os`） | 写任务卡；验收（看差异、跑门禁、讲设计）；开 PR；合并后同步本地与 worker | 开发助手干活期间不碰同一个工作树 |
+| 开发助手 | DSH 桌面端的 `worker` 预设（独立 clone `~/nexus-os-worker`） | 在 `worker/<短名>` 分支上写代码、提交、推送、五段交活 | 不合并、不部署、不碰 `main` |
 
 三条协作铁律：
 
@@ -99,49 +99,36 @@ Git Flow 不是「更专业」，是「为大规模版本发布设计的」—�
 ## 五、一次需求的全流程
 
 ```
-开发助手（~/nexus-os-worker）        Lingda（~/nexus-os）
-   改文件 ──交活──► 落分支 · 提交 · 推送
-                          │
-main ───●─────────────────●────────────────►  始终可上线
-        │                 ▲
-        ①从最新 main 拉出 ④PR · Squash 合并
-        ▼                 │
-  lingda/<短名> ──②提交──推送──③Lingda 验收──┘
+main ───●────────────────────●──────────►   始终可上线
+        │                    ▲
+        ①从最新 main 拉出    ④PR · Squash 合并
+        ▼                    │
+      worker/<短名> ──②提交──推送──③Lingda 验收──┘
 ```
 
-1. **改文件（开发助手）**：在 `~/nexus-os-worker` 里按任务卡改代码。开工第一步 `git status`，工作树必须干净。它不建分支、不提交、不推送、不切分支——git 状态一律不碰。
-2. **交活（开发助手 → ogliu → Lingda）**：开发助手按五段交活（状态 / 改动 / 关键决策 / 验证命令与结果 / 遗留与风险），并给一条建议的 commit message。ogliu 把交活转给 Lingda。
-3. **落地（Lingda）**：把 worker 的改动搬进主仓库，落成一条分支：
+1. **同步基线并开分支（开发助手）**：在 `~/nexus-os-worker` 里先 `git pull --ff-only && git status`（必须干净），再从最新 `origin/main` 拉出任务分支。
+   `git switch -c worker/<短名> origin/main`（`-c` = create：新建并切过去）
+   独立 clone 不会自己跟着主线走——不先 pull，就是拿旧基线开工。
+2. **写、提交、推送（开发助手）**：一个逻辑单元一个 `commit`，格式 `type(范围): 中文摘要`；做完推送：
+   `git push -u origin worker/<短名>`（`-u`：把本地分支和远端同名分支绑定，之后直接 `git push` 即可）
+3. **验收（Lingda）**：
    ```bash
-   git -C ~/nexus-os-worker add -N .           # 新增文件也要进 diff（intent-to-add）
-   git -C ~/nexus-os-worker diff > /tmp/worker.patch
-   cd ~/nexus-os && git fetch origin && git switch -c lingda/<短名> origin/main
-   git apply --3way /tmp/worker.patch
-   git add -A && git commit -m "<建议的 message>"
-   git push -u origin lingda/<短名>            # -u：绑定同名远端分支，之后直接 git push
+   git fetch origin                                     # 取回远端最新信息
+   git log origin/main..origin/worker/<短名>            # 这条分支比 main 多出的提交
+   git diff origin/main...origin/worker/<短名>          # 这条分支相对 main 的全部改动
+   cd ~/nexus-os-worker && pnpm exec next typegen && pnpm typecheck && pnpm lint && pnpm test && pnpm build
    ```
-   **推完留在该分支上，不要切回 `main`**——ogliu 随时打开本地文件，看到的就应该是待评审的版本。合并完成后在第 7 步再回 `main`。
-4. **验收（Lingda）**：
-   ```bash
-   git log origin/main..HEAD        # 这条分支比 main 多出的提交
-   git diff origin/main...HEAD      # 这条分支相对 main 的全部改动
-   pnpm exec next typegen && pnpm typecheck && pnpm lint && pnpm test   # 门禁
-   ```
-   对照任务卡「验收」清单逐条勾；通过就开 PR（`gh pr create`），把验收结论贴成 PR 评论，并把关键设计讲给 ogliu。
-5. **合并（ogliu 拍板 → Lingda 执行）**：Lingda 验收汇报后，ogliu 回「准了」；Lingda 执行 `gh pr merge <PR号> --squash --delete-branch`——压扁合并（分支的多个提交在 `main` 上只留一条干净提交，细节仍可在 PR 里查）+ 删远端分支。
-6. **上线（CI 自动）**：`main` 一更新，流水线自动「检查 → 构建 → 传服务器 → 切版本 → 重启」（见《部署方案》）。
-7. **收尾（Lingda）**：`git switch main && git pull`；删本地分支（`git branch -D lingda/<短名>`；远端分支已在第 5 步随合并删除）；最后让 worker 跟上主线——先确认改动已落地，清空它的工作树再快进：
-   ```bash
-   git -C ~/nexus-os-worker restore . && git -C ~/nexus-os-worker clean -fd   # 危险：clean -fd 会删未跟踪文件，只在确认落地后跑
-   git -C ~/nexus-os-worker pull --ff-only
-   ```
+   看差异不必切分支——直接看 `origin/` 上的那份就行；门禁在 worker 目录里跑（它已经在该分支上、依赖也装好了），不打断主仓库的工作。对照任务卡「验收」清单逐条勾；通过就开 PR（`gh pr create`），把验收结论贴成 PR 评论，并把关键设计讲给 ogliu。
+4. **合并（ogliu 拍板 → Lingda 执行）**：Lingda 验收汇报后，ogliu 回「准了」；Lingda 执行 `gh pr merge <PR号> --squash --delete-branch`——压扁合并（分支的多个提交在 `main` 上只留一条干净提交，细节仍可在 PR 里查）+ 删远端分支。
+5. **上线（CI 自动）**：`main` 一更新，流水线自动「检查 → 构建 → 传服务器 → 切版本 → 重启」（见《部署方案》）。
+6. **收尾（Lingda）**：`git switch main && git pull`；本地旧分支删掉（`git branch -D worker/<短名>`；远端分支已在第 4 步随合并删除）；再让开发助手跟上主线：`git -C ~/nexus-os-worker switch main && git -C ~/nexus-os-worker pull --ff-only`。
 
 ## 六、分支命名
 
 | 写手 | 前缀 | 例子 |
 |---|---|---|
-| Lingda | `lingda/` | `lingda/forgot-password` |
-| 开发助手 | 不建分支 | — |
+| 开发助手 | `worker/` | `worker/sticky-notes` |
+| Lingda | `lingda/` | `lingda/fix-login-jump` |
 
 - 短名：小写英文或拼音，用连字符 `-` 连接，3~4 个词以内；**不用中文、空格、大写字母**（链接和部分工具对中文分支名不友好）。
 - 一条需求一条分支；需求太大就拆成两张任务卡、两条分支。
@@ -157,8 +144,9 @@ main ───●─────────────────●───
 目标：做什么、为什么（需求原文 + 必要的背景）
 验收：做完后能逐条勾选的验收标准
 工作目录：~/nexus-os-worker
-验证：pnpm exec next typegen → pnpm typecheck / lint / test
-交付：就地改文件（不建分支、不提交、不推送）→ 五段交活 + 建议的 commit message
+分支：worker/<短名>（基线：origin/main 最新）
+验证：pnpm exec next typegen → typecheck → lint → test → build
+交付：提交到分支 → 推送 → 五段交活 + 建议的 commit message
 ```
 
 两个约定：
@@ -168,20 +156,20 @@ main ───●─────────────────●───
 
 ## 八、写手守则（开发助手执行；Lingda 自查同一套）
 
-1. 开工先 `git status`；工作树不干净就停下问，不 stash、不 checkout、不 commit、不 push、不建分支。`main` 不碰。
+1. 开工先 `git status`；工作树不干净就停下问，不 stash、不 checkout。只在 `worker/<短名>` 分支上提交；`main` 不碰。
 2. 不合并、不部署；`deploy/`（部署物料）与 `.github/`（CI 配置）不碰，任务卡点名除外。
-3. 只做完成目标必需的改动；顺带发现的问题写进交活，不顺手改。
-4. 不确定就问：需求有多解、要动架构、要加依赖、要删文件或数据、测试反复修不过 → 停下问。
-5. 「完成」之前真跑门禁（先 `pnpm exec next typegen`）；跑不了（环境缺东西）就明说，别装成功。
-6. 交活五段：状态 / 改动 / 关键决策 / 验证（命令 + 结果）/ 遗留与风险，并附一条建议的 commit message。
+3. 只做完成目标必需的改动；顺带发现的问题写进汇报，不顺手改。
+4. 不确定就问：需求有多解、要动架构、要加依赖、要删文件或数据、测试反复修不过 → 停下列问题。
+5. 「完成」之前真跑门禁；跑不了（环境缺东西）就明说，别装成功。
+6. 小步提交；交活五段：状态 / 改动 / 关键决策 / 验证（命令 + 结果）/ 遗留与风险，并附一条建议的 commit message。
 
 ## 九、四个岔路
 
 - **验收不通过**：不新开分支，就在原分支继续改（PR 未合并前随便提交）；Lingda 重新拉、重新验。返工清单由 Lingda 出、ogliu 转交。
 - **需求中途变化**：装得进同一目标就同分支；装不进就新卡新分支——旧分支要么继续服务旧目标，要么作废删掉。不许「一分支多目标」。
 - **分支作废**：删本地（`git branch -D`）和远端（`git push origin --delete`），重新拉一条；`main` 不受任何影响。
-- **真要并行**：两个写手本来就各用各的工作树（主仓库 / `~/nexus-os-worker`），互不相干；谁后合并，谁先 `git rebase origin/main`（把改动挪到最新 `main` 上重放，消除分叉）再推。默认仍是串行。
-- **兜底（开发助手读不到仓库时）**：让它只交补丁（patch：改动的文本文件），ogliu 转给 Lingda，由她校验后落到分支，后续流程不变。
+- **真要并行**：Lingda 开 `lingda/`、开发助手开 `worker/`，两边本来就是两个工作树，互不相干；谁后合并，谁先 `git rebase origin/main`（把改动挪到最新 `main` 上重放，消除分叉）再推。默认仍是串行。
+- **兜底（开发助手推不了 GitHub 时）**：它交补丁（patch：改动的文本文件），ogliu 转给 Lingda，由她校验后推到同名分支，后续流程不变。
 
 ## 十、为什么这么定（决策表）
 
@@ -194,16 +182,16 @@ main ───●─────────────────●───
 | 串行写手 | 两个写手同改一个仓库，冲突成本 > 并行收益 | 互相覆盖、天天解冲突，净亏 |
 | 验收在合并前 | 上线前拦一道 | 错误直接部署上线 |
 | 分支保护 | 靠设置兜底，不靠自觉 | 纪律总有失效的一天 |
-| 开发助手不碰 git | 工作树保持干净，Lingda 的验收基线永远可复现 | 它一提交，diff 里就混进它的提交，验收失去基线 |
 | 开发助手独立工作树 | 两个 agent 不同目录，不抢 `index.lock`、构建缓存和端口 | 同目录并行 = 互相覆盖、报错莫名其妙 |
+| 开发助手不推 `main` | 上线是人的决策；它只交分支 | 它一推 main 就绕过验收直接上线 |
 
 ## 十一、护栏：分支保护
 
 - **是什么**：GitHub 仓库设置里的规则：禁止直接推送 `main`、必须走 PR 才能改它。
 - **现状（2026-10-17 10:15）**：**已开启**——必须走 PR（0 人批准）、禁 force push、禁删除、管理员同样受限；实测直推被拒（`remote: error: GH006 … Changes must be made through a pull request`）。
 - **为什么暂不勾「要求 CI 检查通过」**：流水线当前只在推 `main` 时触发，PR 阶段没有检查可要求；将来给流水线加 `pull_request` 触发后再勾。
-- **现在起**：ogliu、Lingda 都只能「分支 → PR → 合并」；手滑推不上去，老习惯「改完直接 push main」正式作废。
-- **开发助手的 clone 与主仓库同权**：`~/nexus-os-worker` 用的是同一把 SSH key，能推分支、理论上也能推 `main`（会被保护拒绝）。所以「它不推」靠纪律，不是靠权限。哪天要收紧，就给它换一把没有写权限的部署 key。
+- **现在起**：ogliu、Lingda、开发助手都只能「分支 → PR → 合并」；手滑推不上去，老习惯「改完直接 push main」正式作废。
+- **开发助手的 clone 与主仓库同权**：`~/nexus-os-worker` 用的是同一把 SSH key，能推分支、理论上也能推 `main`（会被保护拒绝）。所以「它不推 main」靠纪律，不是靠权限。要收紧就给它换一把只读 key。
 - **开法**：GitHub 仓库 → Settings → Branches → Add branch protection rule；或让 Lingda 用 `gh api` 代开。
 
 ## 十二、常见问题
@@ -227,25 +215,20 @@ main ───●─────────────────●───
 Lingda 从需求原文翻译成可勾选条目；含糊的标准在验收时一定打架，宁可多写两行。
 
 **开发助手需要读这份文档吗？**
-要。它的工作目录 `~/nexus-os-worker` 就是本仓库的 clone，`docs/` 就在旁边。不过它的常驻约束只来自「预设人设 + `AGENTS.md`」，所以「八、写手守则」的核心几条已经写进 `worker` 预设的 persona；本文是完整版，留给人和 Lingda 查。
-
-**为什么不让开发助手自己提交？**
-两个原因。一是验收需要干净基线：它不提交，`git diff` 看到的就是它这次改的全部，不会混进历史提交。二是它一旦能提交，就能切分支、能 rebase，两个工作树的状态就不再互不干扰。让唯一碰 git 的只有 Lingda，出问题只查一个地方。
+要。它的工作目录 `~/nexus-os-worker` 就是本仓库的 clone，`docs/` 就在旁边。不过它的常驻约束来自「预设人设 + `AGENTS.md`」，本文是完整版，留给人和 Lingda 查。
 
 **两个目录的代码怎么同步？**
-都以 `origin/main` 为唯一真源。主仓库合并后 `git pull`；worker 在主仓库合并后 `git pull --ff-only`。注意 worker 交活后工作树是脏的（改动还在），所以拉取前必须确认改动已落地，再清空工作树（`git restore . && git clean -fd`）。
+都以 `origin/main` 为唯一真源。主仓库合并后 `git pull`；worker 在自己的分支上干活，合并后切回 `main` 再 `git pull --ff-only`。开新分支前拉一次主线就够了，不必全程跟随。
 
 ## 十三、命令速查
 
 | 谁 | 场景 | 命令 |
 |---|---|---|
-| 开发助手 | 开工前自查 | `git status -sb`（必须干净） |
-| Lingda | 导出 worker 改动 | `git -C ~/nexus-os-worker add -N . && git -C ~/nexus-os-worker diff > /tmp/worker.patch` |
-| Lingda | 落分支并应用 | `git fetch origin && git switch -c lingda/<短名> origin/main && git apply --3way /tmp/worker.patch` |
-| Lingda | 提交并推送 | `git add -A && git commit -m "<建议的 message>" && git push -u origin lingda/<短名>` |
-| Lingda | 门禁 | `pnpm exec next typegen && pnpm typecheck && pnpm lint && pnpm test` |
-| Lingda | 开 PR | `gh pr create --base main --head lingda/<短名>` |
-| Lingda | 合并后同步 | `git switch main && git pull && git branch -D lingda/<短名>`，再清空并快进 worker |
+| 开发助手 | 开分支 | `git pull --ff-only && git switch -c worker/<短名> origin/main` |
+| 开发助手 | 提交并推送 | `git add -A && git commit -m "feat(…): …" && git push -u origin worker/<短名>` |
+| Lingda | 验收 | `git fetch origin` → `git diff origin/main...origin/worker/<短名>` → 在 worker 目录跑门禁 |
+| Lingda | 开 PR | `gh pr create --base main --head worker/<短名>` |
+| Lingda | 合并后同步 | `git switch main && git pull && git branch -D worker/<短名>`，再让 worker 切回 main 并 pull |
 | ogliu | 拍板合并 | 回一句「准了」 |
 | Lingda | 执行合并 | `gh pr merge <PR号> --squash --delete-branch` |
 
@@ -253,8 +236,7 @@ Lingda 从需求原文翻译成可勾选条目；含糊的标准在验收时一�
 
 ## 更新记录
 
-- 2026-10-17 16:50：补一条协作习惯——Lingda 提交推送后**留在评审分支**上，直到合并完成再回 `main`（§五 第 3 步）。理由：ogliu 在本地打开文件看到的应当就是待评审版本，不该让他为了看新版去切分支。
-- 2026-10-17 16:45：第二开发从旧写手（Codex CLI + 扣子）换成「开发助手（DSH `worker` 预设，独立 clone `~/nexus-os-worker`）」，协作方式由「自己提交推送」改为「只改文件、Lingda 落 git」；§一 / §二 / §三 / §五 / §六 / §七 / §八 / §九 / §十 / §十一 / §十二 / §十三 同步，新增「为什么不让它提交」「两个目录怎么同步」两条 FAQ 与「worker 的 clone 与主仓库同权」一条护栏说明。
+- 2026-10-17 17:15：**回滚「开发助手不碰 git」这条**——分支本身就是隔离，独立工作树已经把冲突挡在外面，不让它提交只多了一轮 patch 搬运、还让提交历史里看不到谁做的。恢复为：它自己开 `worker/<短名>`、提交、推送；Lingda 只做验收 / 开 PR / 合并。保留的约束：不推 `main`、不合并、不部署、不碰 `deploy/` 与 `.github/`。§一 / §二 / §三 / §五 / §六 / §七 / §八 / §九 / §十 / §十一 / §十二 / §十三 同步。
 - 2026-10-17 10:59：合并方式定为「拍板 / 执行分离」（B 方案）——ogliu 回「准了」拍板，Lingda 执行 `gh pr merge --squash --delete-branch`；§三 角色表、§五 第 4 步、§十三 命令速查与 FAQ 同步。
 - 2026-10-17 10:55：新增 §二《这套流程的正式名字：GitHub Flow》——官方六环节与本项目的逐条对照、与 Git Flow 的区别、额外三条纪律；其后章节整体顺延一位；术语表补 GitHub Flow 词条、章节引用改用 § 记法。
 - 2026-10-17 10:15：`main` 分支保护**已开启**——必须走 PR（0 批准）、禁 force push / 删除、管理员同限；实测直推被拒（`GH006`）。头部「当前状态」与 §十 同步。
