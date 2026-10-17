@@ -1,7 +1,8 @@
 "use client";
 
 import type { ReactNode } from "react";
-import { Menu } from "lucide-react";
+import Link from "next/link";
+import { ChevronLeft, Menu } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useAppShell } from "@/components/layout/app-shell";
 
@@ -11,6 +12,7 @@ import { useAppShell } from "@/components/layout/app-shell";
  * 三种断点行为：
  * - 标题：手机显示短标题（与导航名一致），lg 起换成完整描述文案；
  * - 汉堡按钮：仅 < lg 出现，点击打开侧栏抽屉（经 useAppShell 拿 openNav）；
+ * - 返回按钮：可选，用于详情页；与汉堡并排，不抢标题的宽度；
  * - 右侧 children：页面级控件（搜索、筛选…），间距 gap-3；账户区不在页头（§7.18 在侧边栏底部）。
  */
 
@@ -19,6 +21,8 @@ interface PageHeaderProps {
   title: string;
   /** PC 端完整标题，不传则两端都显示 title */
   description?: string;
+  /** 传入后在标题左侧显示返回按钮（详情页用） */
+  backHref?: string;
   children?: ReactNode;
   className?: string;
 }
@@ -26,6 +30,7 @@ interface PageHeaderProps {
 export function PageHeader({
   title,
   description,
+  backHref,
   children,
   className,
 }: PageHeaderProps) {
@@ -38,7 +43,12 @@ export function PageHeader({
         className,
       )}
     >
-      <div className="flex min-w-0 items-center gap-2">
+      <div
+        className={cn(
+          "flex min-w-0 items-center",
+          backHref ? "gap-1 lg:gap-2" : "gap-2",
+        )}
+      >
         {/* 手机端汉堡按钮（< lg 显示） */}
         <button
           aria-label="打开菜单"
@@ -47,6 +57,15 @@ export function PageHeader({
         >
           <Menu className="h-5 w-5" />
         </button>
+        {backHref ? (
+          <Link
+            href={backHref}
+            aria-label="返回"
+            className="flex h-10 w-10 shrink-0 items-center justify-center rounded-[2px] text-[#1F1F1F] transition-colors hover:bg-[#ECECEC]"
+          >
+            <ChevronLeft className="h-5 w-5" />
+          </Link>
+        ) : null}
         <h1 className="text-base font-semibold leading-tight text-[#000000] md:truncate md:text-xl">
           {/* 手机端显示短标题，lg 及以上显示完整标题 */}
           <span className="lg:hidden">{title}</span>

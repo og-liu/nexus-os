@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { TOOLS, TOOL_CATEGORIES } from "./tool-catalog";
+import { TOOLS, TOOL_CATEGORIES, findToolBySlug } from "./tool-catalog";
 import { filterTools, groupTools } from "./tool-filter";
 
 describe("tool-catalog（《功能/工具中心》数据）", () => {
@@ -7,6 +7,20 @@ describe("tool-catalog（《功能/工具中心》数据）", () => {
     expect(TOOLS).toHaveLength(58);
     const names = TOOLS.map((tool) => tool.name);
     expect(new Set(names).size).toBe(names.length);
+  });
+
+  it("58 个 slug 唯一且格式是全小写连字符", () => {
+    const slugs = TOOLS.map((tool) => tool.slug);
+    expect(new Set(slugs).size).toBe(slugs.length);
+    for (const slug of slugs) {
+      expect(slug).toMatch(/^[a-z0-9]+(?:-[a-z0-9]+)*$/);
+    }
+  });
+
+  it("按 slug 精确查找，大小写不匹配时查不到", () => {
+    expect(findToolBySlug("image-compress")?.name).toBe("图片压缩");
+    expect(findToolBySlug("Image-Compress")).toBeUndefined();
+    expect(findToolBySlug("not-a-real-tool")).toBeUndefined();
   });
 
   it("七个分类都有工具，状态取值合法", () => {
