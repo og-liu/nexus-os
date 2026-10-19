@@ -152,20 +152,19 @@ main ──●──────────────────────
    ```
    **不做这一步会漏什么**：单个功能 A 过了、B 也过了，A 和 B 合在一起却可能互相踩——两个功能都改了同一张表、同一个组件，单看都对，凑一起就崩。**这一步不过就停，不许继续往上合。**
 7. **上线（ogliu 说「上线」→ Lingda 执行）**：
-   - 在 `release` 上改 `package.json` 的 `version`：**默认递增小版本**（`0.1.0 → 0.2.0`），大版本由 ogliu 指定；紧急修复走补丁号（`0.2.0 → 0.2.1`）。
+   - 改 `package.json` 的 `version`：**默认递增小版本**（`0.1.0 → 0.2.0`），大版本由 ogliu 指定；紧急修复走补丁号（`0.2.0 → 0.2.1`）。`release` 有分支保护，所以这一步也走 PR：`lingda/bump-x.y.z` → `--base release` → squash 合入。
    - 再跑一遍门禁（改版本也是改动）。
    - `gh pr create --base main --head release` → **用普通 merge（Create a merge commit），不要 squash**——squash 会把攒的几个功能压成一条提交，出问题只能整批回滚；普通 merge 让每个功能在 `main` 上留自己的合并点，坏哪个撤哪个。
    - 打 tag：`git tag v<版本号> origin/main && git push origin v<版本号>`，tag 名与 `package.json` 一致（`0.2.0` ↔ `v0.2.0`）。
    - CI 自动部署（见《部署方案》）。
-8. **同步两边（Lingda，上线后立刻做）**：
+8. **核对两边一致（Lingda，上线后做）**：
    ```bash
-   git switch main && git pull
-   git merge origin/release          # 把 main 的新提交并回 release
-   git push origin main
+   git fetch origin && git diff origin/release origin/main --stat
    ```
-   **为什么必须做**：`release` → `main` 走普通 merge 后，`main` 比 `release` 多一个合并提交，两边就分叉了。不校准的话，下一次合并要处理一个凭空多出来的冲突。
+   **输出为空就对了。** `main` 只是比 `release` 多一个合并提交，两边文件内容完全一致——那个合并提交不改动任何文件，所以**没有东西需要推回 `release`**。硬要推也推不上去：`release` 有分支保护，禁直推。
+   （原方案写的「把 `main` 并回 `release`」是错的：合并提交不改树，同步它只是凭空制造第二个合并提交。）
 
-> **紧急修复（唯一允许从 `main` 拉分支的情况）**：线上出问题 → 从 `main` 拉 `hotfix/<短名>` → 修 → 改补丁版本号 → 合 `main`（普通 merge）→ 打 tag → 立刻把 `main` 同步回 `release`。这条路径只有在 ogliu 明确说「拉一个紧急修复分支」时才走。
+> **紧急修复（唯一允许从 `main` 拉分支的情况）**：线上出问题 → 从 `main` 拉 `hotfix/<短名>` → 修 → 改补丁版本号 → 合 `main`（普通 merge）→ 打 tag → **这次才需要真同步**：`hotfix` 的改动只进了 `main`，`release` 里没有。从 `release` 拉一个分支把 `main` 合进来，走 PR 合回 `release`（`gh pr create --base release`，`--merge`）。这条路径只有在 ogliu 明确说「拉一个紧急修复分支」时才走。
 
 ## 六、分支命名
 
@@ -308,13 +307,15 @@ Lingda 从需求原文翻译成可勾选条目；含糊的标准在验收时一�
 | Lingda | 改版本号 | 在 `release` 上改 `package.json` 的 `version`（默认小版本 +1） |
 | ogliu | 上线 | 说一句「上线」 |
 | Lingda | 发版 | `gh pr merge <PR号> --merge`（**普通 merge**）→ `git tag v<版本> origin/main && git push origin v<版本>` |
-| Lingda | 上线后校准 | `git switch main && git pull && git merge origin/release && git push origin main` |
-| Lingda | 紧急修复 | `git switch -c hotfix/<短名> origin/main` → 修 + 改补丁号 → 合 `main` + tag → 同步回 `release` |
+| Lingda | 核对上线结果 | `git fetch origin && git diff origin/release origin/main --stat`（应为空） |
+| Lingda | 紧急修复 | `git switch -c hotfix/<短名> origin/main` → 修 + 改补丁号 → 合 `main` + tag → 再从 `release` 拉分支把 `main` 合进来走 PR |
+| Lingda | 版本号改动怎么进 release | `release` 有保护，改 `package.json` 也要走 PR：`lingda/bump-x.y.z` → `--base release` → squash 合入 |
 
 ---
 
 ## 更新记录
 
+- 2026-10-19（v0.2.0 首跑后修正）：**删掉 §五 ⑧「把 `main` 并回 `release`」**——首次上线实测发现它是错的。`release` → `main` 走普通 merge 后，`main` 只多一个合并提交，**两边的树（文件内容）完全相同**（`git diff origin/release origin/main` 为空），那个提交不改任何文件，没有东西需要同步；而且 `release` 有分支保护，这个动作根本推不上去。第 ⑧ 步改为「核对 diff 为空」。**真同步只在 `hotfix/` 之后需要**（那时 `main` 有 `release` 没有的真实代码）。同时补一条：版本号改动也要走 PR，因为 `release` 已受保护。
 - 2026-10-19：**新增 `release` 集成分支，流程从「合并即上线」改为「验过先进 `release`，你说上线才进 `main`」**——起因：改一点东西就走完流程直接上线，上线频率过高，且没有「已验收、未上线」这个中间状态。同一次还补了三个配套规则：① 每次功能 PR 合进 `release` 后在 `release` 上跑**全量门禁**（单功能各自绿、凑到一起互相踩是漏得掉的那类问题）；② `release` → `main` 用**普通 merge**、功能 PR 用 squash，两者目的相反不能混；③ 上线前在 `release` 上递增 `package.json` 版本号（默认小版本，紧急修复走补丁号）并给 `main` 打同名 tag。另开 `hotfix/` 例外路径（唯一允许从 `main` 拉分支），边界是「ogliu 明确说要拉紧急修复分支」。同时下线「准了」这个词：功能合进 `release` 不需要第二句批准，只有 `release` → `main` 才等他说「上线」。改动范围：头部当前状态、§一 / §二 / §三 / §四 / §五（重写为 8 步）/ §六 / §七 / §八 / §九 / §十 / §十一 / §十二 / §十三。
 - 2026-10-19：**新增「联调」闸门（第 ④ 步）**——写手推完分支只说「**请验**」，不再自称「交活了」；ogliu 在 `~/nexus-os-worker` 里跑起来实测，满意才说「可以交活了」，之后 Lingda 才验收。起因：便签那一次写手门禁全绿、自报交活，实际上它连浏览器都没打开过（残留 dev server 还报 `no such table`），功能问题只能靠 #14→#15→#16 三轮 PR 补。**「交活了」三字自此归 ogliu 专用。**
 - 2026-10-17 17:15：**回滚「开发助手不碰 git」这条**——分支本身就是隔离，独立工作树已经把冲突挡在外面，不让它提交只多了一轮 patch 搬运、还让提交历史里看不到谁做的。恢复为：它自己开 `worker/<短名>`、提交、推送；Lingda 只做验收 / 开 PR / 合并。保留的约束：不推 `main`、不合并、不部署、不碰 `deploy/` 与 `.github/`。§一 / §二 / §三 / §五 / §六 / §七 / §八 / §九 / §十 / §十一 / §十二 / §十三 同步。
