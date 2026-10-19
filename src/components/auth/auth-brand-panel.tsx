@@ -1,5 +1,7 @@
 import { LogoIcon } from "@/components/layout/logo-icon";
 
+import packageJson from "../../../package.json";
+
 /**
  * 宽屏（lg 起）的左侧品牌栏（《界面设计规范》§7.16）。
  *
@@ -48,7 +50,7 @@ export function AuthBrandPanel() {
           className="mt-6 animate-fade font-mono text-[11px] tracking-wider text-white/40"
           style={{ animationDelay: "400ms" }}
         >
-          PERSONAL WORKSPACE · V0.1.0
+          PERSONAL WORKSPACE · V{packageJson.version}
         </p>
       </div>
     </div>
