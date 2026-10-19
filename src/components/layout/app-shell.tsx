@@ -70,7 +70,7 @@ export function AppShell({
       >
         <div
           onClick={closeNav}
-          className={`absolute inset-0 bg-black/40 transition-opacity duration-300 ${
+          className={`absolute inset-0 bg-black/25 backdrop-blur-sm transition-opacity duration-300 ${
             navOpen ? "opacity-100" : "opacity-0"
           }`}
         />

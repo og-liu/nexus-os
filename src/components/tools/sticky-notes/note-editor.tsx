@@ -88,7 +88,7 @@ export function NoteEditor({
             type="button"
             onClick={onCancel}
             disabled={busy}
-            className="h-7 rounded-[2px] px-3 text-xs text-[#666666] transition-colors hover:bg-[#F5F5F5] hover:text-[#000000] disabled:cursor-not-allowed disabled:opacity-50"
+            className="h-7 cursor-pointer rounded-[2px] px-3 text-xs text-[#666666] transition-colors hover:bg-[#F5F5F5] hover:text-[#000000] disabled:cursor-not-allowed disabled:opacity-50"
           >
             取消
           </button>
@@ -96,7 +96,7 @@ export function NoteEditor({
             type="button"
             onClick={submit}
             disabled={busy}
-            className="h-7 rounded-[2px] bg-[#000000] px-3 text-xs font-medium text-white transition-colors hover:bg-[#333333] disabled:cursor-not-allowed disabled:opacity-50"
+            className="h-7 cursor-pointer rounded-[2px] bg-[#000000] px-3 text-xs font-medium text-white transition-colors hover:bg-[#333333] disabled:cursor-not-allowed disabled:opacity-50"
           >
             保存
           </button>
