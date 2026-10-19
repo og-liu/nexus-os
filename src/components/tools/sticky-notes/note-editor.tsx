@@ -55,7 +55,7 @@ export function NoteEditor({
   const length = charLength(value);
 
   return (
-    <div className="flex flex-col gap-2">
+    <div className="flex min-h-0 flex-1 flex-col gap-2">
       <textarea
         ref={textareaRef}
         value={value}
@@ -72,7 +72,7 @@ export function NoteEditor({
         placeholder="写点什么…"
         maxLength={NOTE_BODY_MAX_LENGTH}
         aria-label="便签正文"
-        className="min-h-[72px] w-full resize-none bg-white text-[13px] leading-relaxed text-[#000000] placeholder:text-[#999999] outline-none"
+        className="min-h-[160px] w-full flex-1 resize-none overflow-y-auto rounded-[2px] border border-[#E5E5E5] bg-white p-3 text-[13px] leading-relaxed text-[#000000] placeholder:text-[#999999] outline-none focus:border-[#000000] sm:max-h-[50vh] sm:flex-none sm:min-h-[240px]"
       />
 
       {error ? <p className="text-xs text-[#B91C1C]">{error}</p> : null}
