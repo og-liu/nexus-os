@@ -15,40 +15,28 @@ function utc8(
   return Date.UTC(year, month - 1, day, hour, minute) - 8 * 60 * 60 * 1000;
 }
 
-describe("便签时间格式化（UTC+8）", () => {
-  it("今天显示「今天 HH:mm」", () => {
-    expect(
-      formatNoteTime(utc8(2026, 10, 17, 9, 42), utc8(2026, 10, 17, 20, 0)),
-    ).toBe("今天 09:42");
+describe("便签时间格式化（UTC+8，绝对日期时间）", () => {
+  it("统一显示「YYYY-MM-DD HH:mm」", () => {
+    expect(formatNoteTime(utc8(2026, 10, 17, 9, 42))).toBe("2026-10-17 09:42");
   });
 
-  it("昨天显示「昨天 HH:mm」", () => {
-    expect(
-      formatNoteTime(utc8(2026, 10, 16, 21, 15), utc8(2026, 10, 17, 10, 0)),
-    ).toBe("昨天 21:15");
+  it("月 / 日 / 时 / 分补零", () => {
+    expect(formatNoteTime(utc8(2026, 1, 2, 3, 4))).toBe("2026-01-02 03:04");
   });
 
-  it("更早（同年）显示「M月D日」", () => {
-    expect(
-      formatNoteTime(utc8(2026, 8, 11, 10, 0), utc8(2026, 10, 17, 10, 0)),
-    ).toBe("8月11日");
+  it("跨年也带完整年份", () => {
+    expect(formatNoteTime(utc8(2025, 12, 30, 23, 5))).toBe("2025-12-30 23:05");
   });
 
-  it("跨年显示「YYYY年M月D日」", () => {
-    expect(
-      formatNoteTime(utc8(2025, 12, 30, 10, 0), utc8(2026, 1, 1, 1, 0)),
-    ).toBe("2025年12月30日");
+  it("按 UTC+8 换算：UTC 16:30 显示为次日 00:30", () => {
+    expect(formatNoteTime(Date.UTC(2026, 9, 16, 16, 30))).toBe(
+      "2026-10-17 00:30",
+    );
   });
 
-  it("日界按 +8 算：凌晨 0:30 看到的「昨晚 23:50」是昨天", () => {
-    expect(
-      formatNoteTime(utc8(2026, 10, 16, 23, 50), utc8(2026, 10, 17, 0, 30)),
-    ).toBe("昨天 23:50");
-  });
-
-  it("正好 00:00 算「今天」的开始", () => {
-    expect(
-      formatNoteTime(utc8(2026, 10, 17, 0, 0), utc8(2026, 10, 17, 0, 0)),
-    ).toBe("今天 00:00");
+  it("午夜边界：UTC 15:59 是当天 23:59", () => {
+    expect(formatNoteTime(Date.UTC(2026, 9, 16, 15, 59))).toBe(
+      "2026-10-16 23:59",
+    );
   });
 });

@@ -12,6 +12,8 @@ const eslintConfig = defineConfig([
     "out/**",
     "build/**",
     "next-env.d.ts",
+    // DSH 写手私有工作区（本地经验、临时脚本与浏览器验证缓存；不入库）
+    ".dsh/**",
   ]),
 ]);
 
