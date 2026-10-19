@@ -38,7 +38,7 @@ export function StickyNotesCard({ notes }: { notes: StickyNote[] }) {
           </Link>
         </div>
       ) : (
-        <div className="mt-3 space-y-2">
+        <div className="mt-3 grid grid-cols-1 gap-2 md:grid-cols-2 xl:grid-cols-3">
           {notes.map((note) => (
             <Link
               key={note.id}
