@@ -7,7 +7,7 @@
 >
 > 相关文档：《部署方案》（推送 `main` 之后自动化做了什么）、《技术栈说明》（工程门禁的细节）。
 
-**当前状态**：流程初版（2026-10-17）。`main` 分支保护**已开启**（2026-10-17 10:15）——改 `main` 只能走 PR；禁直推、禁 force push、禁删除，管理员同样受限。
+**当前状态**：流程 2.0（2026-10-19）。新增 `release` 集成分支与「联调」闸门，流程从「合并即上线」改为「验过先进 `release`，你说上线才进 `main`」。`main` 分支保护**已开启**（2026-10-17 10:15）——改 `main` 只能走 PR；禁直推、禁 force push、禁删除，管理员同样受限。`release` 需开同样的保护（见 §十一）。
 
 **第二开发已换人**（2026-10-17）：旧写手（Codex CLI + 扣子桌面端）下线，改为「开发助手（DeepSeek Harness 的 `worker` 预设）」。它在独立工作树 `~/nexus-os-worker` 里干活，自己开 `worker/<短名>` 分支、提交、推送；**不合并、不部署、不碰 `main`**。为什么给它独立工作树，见 §十。
 
@@ -15,125 +15,172 @@
 
 ## 一、一句话版本
 
-**一条需求 = 一条分支 = 一个 PR。`main` 只接受合并，不接受直接推送。**
+**一条需求 = 一条分支 = 一个 PR。功能一律先进 `release`；`main` 只接受 `release` 的合并，你说上线才上。**
 
 - 分支（branch）= 仓库的平行时间线：在分支上改代码，不影响主干。
 - PR（Pull Request，合并请求）= GitHub 上的「申请合并」页面：看改动、留讨论，点合并。
+- `release` = 集成分支，攒着「验过但还没上线」的代码（见 §二）。
 - `main` = 主分支，也是**唯一的上线开关**——它一更新，CI 就自动部署（见《部署方案》）。
 
-这套做法的正式名字是 **GitHub Flow**——下一节就是它的完整说明。
+三条长期分支各管一段：
 
-## 二、这套流程的正式名字：GitHub Flow
+```
+main  ←──────  release  ←──────  worker/<短名> · lingda/<短名>
+生产            集成分支              功能分支（干完就删）
+只收 release    攒着待上线            从 release 拉，合回 release
+```
 
-我们走的不是野路子：它有正式名字——**GitHub Flow**（GitHub 官方推广的轻量分支工作流）。信条一句话：**`main` 永远保持可发布；一切改动走短期分支 + PR；合并即部署。**
+**为什么多这一层**：如果没有 `release`，代码合进 `main` 就是上线——想验证只能拿生产验，想控制上线节奏就只能不合并。多这一层，`release` 上的代码是「已验收、未上线」，你说一句话才推上去。
 
-GitHub 官方版是六个环节，我们逐条对应：
+## 二、这套流程的正式名字：GitHub Flow（加一条集成分支）
+
+我们的底子是 **GitHub Flow**（GitHub 官方推广的轻量分支工作流），信条是：**`main` 永远保持可发布；一切改动走短期分支 + PR；合并即部署。** 在此基础上我们改了一条：**`main` 不接受功能分支直接合并，只接受 `release`**——因为本项目要「攒一批、你说了才上线」，而不是「合一个上一个」。
+
+GitHub 官方版是六个环节，我们逐条对应（下表 1~6 是**官方**环节编号，与 §五 本项目的 ①~⑧ 不是同一套）：
 
 | 官方环节 | 我们怎么落 |
 |---|---|
-| ① 建分支 | `worker/<短名>`（开发助手）/ `lingda/<短名>`（Lingda），基线永远是最新 `main` |
-| ② 提交 | 小步 commit，`type(范围): 中文摘要` |
-| ③ 开 PR | `gh pr create`——改动对照、讨论、验收结论都留在 PR 里 |
-| ④ 讨论与评审 | Lingda 验收：跑门禁、看差异、逐条勾任务卡的验收清单 |
-| ⑤ 部署验证 | 我们简化掉了：流水线只在 `main` 上部署，「部署」并进 ⑥（没有预发环境） |
-| ⑥ 合并 | Squash and merge + 删分支；合并触发 CI 自动上线 |
+| 1 建分支 | `worker/<短名>` / `lingda/<短名>`，基线是 `release`（不是 `main`） |
+| 2 提交 | 小步 commit，`type(范围): 中文摘要` |
+| 3 开 PR | `gh pr create --base release`——改动对照、讨论、验收结论都留在 PR 里 |
+| 4 讨论与评审 | 分两道：先 **ogliu 本地联调**（把分支跑起来用一遍，看功能对不对），通过后 **Lingda 验收**（跑门禁、看差异、逐条勾任务卡的验收清单） |
+| 5 部署验证 | 本地联调 + `release` 上跑全量门禁（没有独立预发实例，见下） |
+| 6 合并 | 功能 PR 合进 `release`（Squash）；`release` → `main`（普通 merge，见 §五 ⑦） |
 
-> 官方版的 ⑤ 是「合并**前**先从分支部署一份去验证」——很多公司的预发（staging）环境就是干这个的。本项目没有预发，验证靠 ④ 的本地门禁 + 验收，所以 ⑤ 并进 ⑥。
+> 官方版的 5 是「合并**前**先从分支部署一份去验证」——很多公司的预发（staging）环境就是干这个的。本项目没有独立预发机器：验证靠 ④ 的本地联调 + ⑥ 里 `release` 的整体门禁。
 
 **和 Git Flow 的区别**（为什么没选它）：
 
-| | GitHub Flow（本项目） | Git Flow |
+| | 本项目 | Git Flow |
 |---|---|---|
-| 长期分支 | 只有 `main` | `main` + `develop` + `release/*` + `hotfix/*` |
-| 发布节奏 | 随时可发，合并即上线 | 按版本批量发布，像「发布列车」 |
-| 复杂度 | 一条分支 + 一个 PR | 多层分支、多套合并规则 |
-| 适合谁 | 有 CI/CD、人少的项目 | 大团队、按版本交付的产品 |
+| 长期分支 | `main` + `release` | `main` + `develop` + `release/*` + `hotfix/*` |
+| `release` 的寿命 | 一直存在，是个滚动集成分支 | 每次发版新建一条，发完删掉 |
+| 发布节奏 | 攒一批，你说上线才发 | 按版本列车定时发 |
+| 复杂度 | 两条长期分支 | 多层分支、多套合并规则 |
 
-Git Flow 不是「更专业」，是「为大规模版本发布设计的」——我们没有版本列车，用它只会多几层要维护的分支。
+Git Flow 不是「更专业」，是「为大规模版本发布设计的」。我们只要它「先集成分支、再上生产」这一个想法，不要它的版本列车和多层分支。
 
-**我们额外加的三条**（GitHub Flow 没规定，本项目需要）：
+**我们额外加的四条**（GitHub Flow 没规定，本项目需要）：
 
 1. **串行写手**：同一时间只有一个写手（见 §三）；
-2. **验收在合并前**：必过 Lingda 的验收清单（见 §五）；
-3. **任务卡驱动**：开发助手只从任务卡接活（见 §七）。
+2. **联调在验收之前**：写手自报完成不算数，ogliu 先在本地把功能用一遍（见 §五 ④）；
+3. **验收在合并前**：必过 Lingda 的验收清单（见 §五 ⑤）；
+4. **任务卡驱动**：开发助手只从任务卡接活（见 §七）。
 
 ## 三、角色与串行原则
 
 | 角色 | 是谁 | 负责 | 不碰 |
 |---|---|---|---|
-| ogliu | 项目所有者（人，GitHub 账号 `og-liu`） | 提需求、转交任务卡、拍板（回「准了」） | — |
+| ogliu | 项目所有者（人，GitHub 账号 `og-liu`） | 提需求、转交任务卡、**本地联调**（跑分支、点功能）、说一句「上线」决定发布 | — |
 | Lingda | Hermes（本机，主仓库 `~/nexus-os`） | 写任务卡；验收（看差异、跑门禁、讲设计）；开 PR；合并后同步本地与 worker | 开发助手干活期间不碰同一个工作树 |
-| 开发助手 | DSH 桌面端的 `worker` 预设（独立 clone `~/nexus-os-worker`） | 在 `worker/<短名>` 分支上写代码、提交、推送、五段交活 | 不合并、不部署、不碰 `main` |
+| 开发助手 | DSH 桌面端的 `worker` 预设（独立 clone `~/nexus-os-worker`） | 在 `worker/<短名>` 分支上写代码、提交、推送、五段汇报并**报「请验」** | 不合并、不部署、不碰 `main` 与 `release` |
 
 三条协作铁律：
 
 1. **AI 之间不直接对话**：所有交接（任务卡、交付、返工）都经 ogliu 手动转交。
-2. **串行**：同一时间只有一个写手。两个写手同改一个仓库，冲突（见术语表）的成本远大于并行的收益。开工信号是「交给开发助手」，收工信号是「开发助手交活了」——认的是动作，不认名字，沿用旧叫法也能懂。
-3. **上线是人的决策**：代码能不能上线由 ogliu 拍板（回一句「准了」）；合并的**执行**可由 Lingda 代劳（`gh pr merge`），CI 只负责部署。
+2. **串行**：同一时间只有一个写手。两个写手同改一个仓库，冲突（见术语表）的成本远大于并行的收益。开工信号是「交给开发助手」。收工是**两级**的：写手推完分支只说「**请验**」，ogliu 本地联调满意后说「**可以交活了**」，才算真交活——**「交活了」这三个字归 ogliu 专用**，写手不自己宣布交活。
+3. **上线是人的决策**：代码什么时候上生产由 ogliu 拍板（说一句「上线」）；合并的**执行**可由 Lingda 代劳（`gh pr merge`），CI 只负责部署。
 
 ## 四、先把词说清楚（术语表）
 
-后文用到这些词时不再逐一解释，回这里查。（「①~⑥」指第五节流程图里的步骤编号；「§x」指章节。）
+后文用到这些词时不再逐一解释，回这里查。（「①~⑦」指第五节流程图里的步骤编号；「§x」指章节。）
 
 | 词 | 大白话 | 在流程里的位置 |
 |---|---|---|
 | 仓库（repo） | 代码文件夹 + 它的全部历史；项目仓库在 GitHub 上是 `og-liu/nexus-os` | 全程 |
 | `origin` | 远端仓库（GitHub 上那份）在本机命令里的默认称呼 | 全程 |
-| `main` | 主干分支；**推它 = 上线** | ④⑤ |
-| 分支（branch） | 平行时间线：在分支上改，主干不受影响 | ① |
-| 基线（base） | 分支从哪个提交点开始长出来 | ① |
-| 提交（commit） | 存档点：一批改动 + 一句说明，存进历史 | ② |
-| 推送（push） | 把本地提交上传到 GitHub | ② |
-| 拉取（fetch / pull） | `fetch` = 取回远端最新信息、不动本地；`pull` = fetch + 并进当前分支 | ③⑥ |
-| 差异（diff） | 两份代码的逐行对照；验收看的就是它 | ③ |
-| 门禁 | 项目规定必须全过的检查：`typecheck` / `lint` / `test` / `build` | ③ |
-| PR（Pull Request） | 合并申请页面：改动对照 + 讨论 + 合并按钮 | ③④ |
-| 合并（merge） | 把分支的改动并回主干 | ④ |
-| Squash merge | 「压扁合并」：分支上的多个提交压成 `main` 上一条 | ④ |
+| `main` | 主干分支；**推它 = 上线** | ⑦ |
+| **`release`** | 集成分支（长期，只有一条）：攒着「验过了、但还没上线」的代码。功能都合到这里，等你说了才往 `main` 推 | ①⑥⑦ |
+| 分支（branch） | 平行时间线：在分支上改，主干不受影响 | ② |
+| 基线（base） | 分支从哪个提交点开始长出来；本项目功能分支的基线是 `release`，不是 `main` | ② |
+| 提交（commit） | 存档点：一批改动 + 一句说明，存进历史 | ③ |
+| 推送（push） | 把本地提交上传到 GitHub | ③ |
+| 拉取（fetch / pull） | `fetch` = 取回远端最新信息、不动本地；`pull` = fetch + 并进当前分支 | ②⑧ |
+| 差异（diff） | 两份代码的逐行对照；验收看的就是它 | ⑤ |
+| 门禁 | 项目规定必须全过的检查：`typecheck` / `lint` / `test` / `build` | ⑤⑥ |
+| **联调** | 联合调试：ogliu 把写手那条分支在自己机器上跑起来，按需求亲手点一遍，看功能对不对、手感对不对。不写代码、也不读代码——只看用起来的样子 | ④ |
+| **请验** | 写手做完后那句「我做完了，请你验一下」。**它不是交活**，只是写手单方面的完成声明，随时可能被打回 | ③ |
+| **交活了** | **ogliu 专用词**：他联调满意后说的那句「可以交活了」。这句话一出口，代码才进到 Lingda 的验收入口 | ④ |
+| PR（Pull Request） | 合并申请页面：改动对照 + 讨论 + 合并按钮 | ⑤⑦ |
+| 合并（merge） | 把分支的改动并回主干 | ⑤⑦ |
+| Squash merge | 「压扁合并」：分支上的多个提交压成一条 | ⑤ |
+| **tag（标签）** | 给某个提交起个永久名字，比如 `v0.2.0`。以后问「线上跑的是哪版」直接查它 | ⑦ |
+| **版本号** | `0.2.1` 三段 = 大版本.小版本.补丁号。本项目默认每次上线小版本 +1，紧急修复补丁号 +1 | ⑦ |
 | 冲突（conflict） | 同一处代码被两个写手改过，Git 不知道听谁的，要人决定 | §九 |
-| rebase | 「换基底」：把分支上的改动挪到最新 `main` 之上重放一遍 | §九 |
-| CI（持续集成） | 自动检查、构建、部署的流水线（由 GitHub Actions 提供） | ⑤ |
+| rebase | 「换基底」：把分支上的改动挪到最新 `release` 之上重放一遍 | §九 |
+| CI（持续集成） | 自动检查、构建、部署的流水线（由 GitHub Actions 提供） | ⑦ |
 | 分支保护 | GitHub 设置：禁止直推 `main`、只收 PR；手滑也推不上去 | §十一 |
 | GitHub Flow | 特性分支 + PR + 合并即部署的轻量分支工作流（本项目用的就是它） | §二 |
 
 ## 五、一次需求的全流程
 
 ```
-main ───●────────────────────●──────────►   始终可上线
-        │                    ▲
-        ①从最新 main 拉出    ④PR · Squash 合并
-        ▼                    │
-      worker/<短名> ──②提交──推送──③Lingda 验收──┘
+main ──●──────────────────────────●──►   生产（合并即上线）
+       │ ①建 release（一次性）      ▲
+       ▼ ⑦你说「上线」才合并        │
+   release ──●────●────●───────────┘     集成分支（攒「验过、没上线」的功能）
+             ▲    ▲    ▲
+   worker/<短名> · lingda/<短名>          ②从 release 拉 · ③写推 · ④联调 · ⑤验收合回 · ⑥整体门禁
 ```
 
-1. **同步基线并开分支（开发助手）**：在 `~/nexus-os-worker` 里 `git fetch origin` → `git status`（必须干净）→ 比对 `git rev-parse --short HEAD origin/main`。落后就 `git pull --ff-only`；分叉或拉不动就停下报告。然后从最新 `origin/main` 拉出任务分支。
-   `git switch -c worker/<短名> origin/main`（`-c` = create：新建并切过去）
-   独立 clone 不会自己跟着主线走——不先 pull，就是拿旧基线开工。
-2. **写、提交、推送（开发助手）**：一个逻辑单元一个 `commit`，格式 `type(范围): 中文摘要`；做完推送：
-   `git push -u origin worker/<短名>`（`-u`：把本地分支和远端同名分支绑定，之后直接 `git push` 即可）
-3. **验收（Lingda）**：
+1. **建 `release`（Lingda，只做一次）**：`git switch -c release origin/main && git push -u origin release`。之后它一直在，不删、不重建。
+2. **同步基线并开功能分支（开发助手）**：在 `~/nexus-os-worker` 里
    ```bash
-   git fetch origin                                     # 取回远端最新信息
-   git log origin/main..origin/worker/<短名>            # 这条分支比 main 多出的提交
-   git diff origin/main...origin/worker/<短名>          # 这条分支相对 main 的全部改动
+   git fetch origin
+   git status -sb                                   # 必须干净
+   git rev-parse --short HEAD origin/release        # 两个 hash 必须一致
+   git switch -c worker/<短名> origin/release       # 从 release 拉，不是 main
+   ```
+   落后就 `git pull --ff-only`；分叉或拉不动就**停下报告**，不许 `rebase`、不许强推。独立 clone 不会自己跟着主线走——不先 pull，就是拿旧基线开工。
+3. **写、提交、推送、报请验（开发助手）**：一个逻辑单元一个 `commit`，格式 `type(范围): 中文摘要`；做完 `git push -u origin worker/<短名>`。推完写五段汇报，**最后一句是「我做完了，请你验」——不是「交活了」**。
+4. **联调（ogliu）**：把这条分支在 `~/nexus-os-worker` 里跑起来，按需求亲手用一遍。
+   - 不满意 → 要改什么直接告诉 Lingda，由她整理成返工清单转交，回到第 3 步。**同一分支继续改，不新开分支**。
+   - 满意 → 回一句「**可以交活了**」。这是交活唯一的触发词。
+   - **为什么这一步不能省**：写手的门禁只能证明「代码不炸」（类型没塌、构建通过、测试没红），证明不了「功能对不对、手感对不对」。这两件事没有共同的信号，只能靠人亲手过一遍。
+5. **验收并合入 `release`（Lingda，收到「可以交活了」之后）**：
+   ```bash
+   git fetch origin
+   git log origin/release..origin/worker/<短名>          # 这条分支比 release 多出的提交
+   git diff origin/release...origin/worker/<短名>        # 相对 release 的全部改动
    cd ~/nexus-os-worker && pnpm exec next typegen && pnpm typecheck && pnpm lint && pnpm test && pnpm build
    ```
-   看差异不必切分支——直接看 `origin/` 上的那份就行；门禁在 worker 目录里跑（它已经在该分支上、依赖也装好了），不打断主仓库的工作。对照任务卡「验收」清单逐条勾；通过就开 PR（`gh pr create`），把验收结论贴成 PR 评论，并把关键设计讲给 ogliu。
-4. **合并（ogliu 拍板 → Lingda 执行）**：Lingda 验收汇报后，ogliu 回「准了」；Lingda 执行 `gh pr merge <PR号> --squash --delete-branch`——压扁合并（分支的多个提交在 `main` 上只留一条干净提交，细节仍可在 PR 里查）+ 删远端分支。
-5. **上线（CI 自动）**：`main` 一更新，流水线自动「检查 → 构建 → 传服务器 → 切版本 → 重启」（见《部署方案》）。
-6. **收尾（Lingda）**：`git switch main && git pull`；本地旧分支删掉（`git branch -D worker/<短名>`；远端分支已在第 4 步随合并删除）；再让开发助手跟上主线：`git -C ~/nexus-os-worker switch main && git -C ~/nexus-os-worker pull --ff-only`。
+   看差异不必切分支——直接看 `origin/` 上的那份；门禁在 worker 目录跑（它已在该分支、依赖现成），不打断主仓库。对照任务卡「验收」清单逐条勾，结论贴成 PR 评论。通过就 `gh pr create --base release --head worker/<短名>`，然后 `gh pr merge <PR号> --squash --delete-branch`（功能 PR 用 squash：一个功能在 `release` 上留一条干净提交）。
+6. **`release` 整体门禁（Lingda，每次合完必做）**：功能进 `release` 之后，**在 `release` 上再跑一遍全量门禁**：
+   ```bash
+   git -C ~/nexus-os-worker fetch origin && git -C ~/nexus-os-worker switch release && git -C ~/nexus-os-worker pull --ff-only
+   cd ~/nexus-os-worker && pnpm exec next typegen && pnpm typecheck && pnpm lint && pnpm test && pnpm build
+   ```
+   **不做这一步会漏什么**：单个功能 A 过了、B 也过了，A 和 B 合在一起却可能互相踩——两个功能都改了同一张表、同一个组件，单看都对，凑一起就崩。**这一步不过就停，不许继续往上合。**
+7. **上线（ogliu 说「上线」→ Lingda 执行）**：
+   - 在 `release` 上改 `package.json` 的 `version`：**默认递增小版本**（`0.1.0 → 0.2.0`），大版本由 ogliu 指定；紧急修复走补丁号（`0.2.0 → 0.2.1`）。
+   - 再跑一遍门禁（改版本也是改动）。
+   - `gh pr create --base main --head release` → **用普通 merge（Create a merge commit），不要 squash**——squash 会把攒的几个功能压成一条提交，出问题只能整批回滚；普通 merge 让每个功能在 `main` 上留自己的合并点，坏哪个撤哪个。
+   - 打 tag：`git tag v<版本号> origin/main && git push origin v<版本号>`，tag 名与 `package.json` 一致（`0.2.0` ↔ `v0.2.0`）。
+   - CI 自动部署（见《部署方案》）。
+8. **同步两边（Lingda，上线后立刻做）**：
+   ```bash
+   git switch main && git pull
+   git merge origin/release          # 把 main 的新提交并回 release
+   git push origin main
+   ```
+   **为什么必须做**：`release` → `main` 走普通 merge 后，`main` 比 `release` 多一个合并提交，两边就分叉了。不校准的话，下一次合并要处理一个凭空多出来的冲突。
+
+> **紧急修复（唯一允许从 `main` 拉分支的情况）**：线上出问题 → 从 `main` 拉 `hotfix/<短名>` → 修 → 改补丁版本号 → 合 `main`（普通 merge）→ 打 tag → 立刻把 `main` 同步回 `release`。这条路径只有在 ogliu 明确说「拉一个紧急修复分支」时才走。
 
 ## 六、分支命名
 
 | 写手 | 前缀 | 例子 |
 |---|---|---|
+| 集成分支（长期，只有一条） | `release` | `release` |
 | 开发助手 | `worker/` | `worker/sticky-notes` |
 | Lingda | `lingda/` | `lingda/fix-login-jump` |
+| 紧急修复 | `hotfix/` | `hotfix/login-cookie` |
 
 - 短名：小写英文或拼音，用连字符 `-` 连接，3~4 个词以内；**不用中文、空格、大写字母**（链接和部分工具对中文分支名不友好）。
 - 一条需求一条分支；需求太大就拆成两张任务卡、两条分支。
+- **功能分支的基线是 `release`，不是 `main`**；`main` 只在两种情况被写：`release` 合上去，或 `hotfix/` 合上去。
 - `task/` 是旧写手时代的前缀，新流程不再产生；仓库里见到 `task/` 开头的分支，认作历史遗留即可。
-- 分支名写进任务卡；开分支前先取到最新（`git fetch origin main`），基线永远是最新 `main`。
+- 分支名写进任务卡；开分支前先 `git fetch origin`，基线永远是最新 `release`。
 
 ## 七、任务卡模板
 
@@ -144,32 +191,40 @@ main ───●────────────────────●
 目标：做什么、为什么（需求原文 + 必要的背景）
 验收：做完后能逐条勾选的验收标准
 工作目录：~/nexus-os-worker
-分支：worker/<短名>（基线：origin/main 最新）
+分支：worker/<短名>（基线：origin/release 最新）
 验证：pnpm exec next typegen → typecheck → lint → test → build
-交付：提交到分支 → 推送 → 五段交活 + 建议的 commit message
+交付：提交到分支 → 推送 → 五段汇报 + 建议的 commit message
+     结尾报「请验」——不要说「交活了」
+注意：报「请验」不等于交付完成。之后还有 ogliu 的本地联调，他说「可以交活了」才算过；
+     联调打回的返工，在同一分支继续改，不新开分支
+     就算联调通过，代码也是合进 release，不是 main——上不上线由 ogliu 单独说
 ```
 
-两个约定：
+三个约定：
 
 - **不写「范围」**：该改哪些文件由写手判断——写代码的人比写任务卡的人更清楚代码，隔着一层去圈定范围只会圈错。防越界靠两条：「只做完成目标必需的改动」+ 验收把关。
 - **验收必须能勾选**：把需求翻译成「能看到 / 能点出 / 能测出」的条目；「做好看一点」这种没法判定的标准，验收时一定扯皮。
+- **「交活了」归 ogliu，写手只会「请验」**：卡里写清这一点，写手才不会把自报完成当成交付完成。三个词各归各位——写手做完 = **请验**；ogliu 联调满意 = **可以交活了**；ogliu 要发布 = **上线**。注意「上线」管的是 `release` → `main`，功能合进 `release` 不等他说第二句话：他说「可以交活了」就代表这个功能他已经认可。
 
 ## 八、写手守则（开发助手执行；Lingda 自查同一套）
 
-1. 开工先确认基线是最新 `main`：`git fetch origin` → `git status`（必须干净）→ 比对 `git rev-parse --short HEAD origin/main`。落后就 `git pull --ff-only`；分叉、冲突或拉不动就**停下报告**，不许 `rebase`、不许强推。只在 `worker/<短名>` 分支上提交；`main` 不碰。
+1. 开工先确认基线是最新 `release`：`git fetch origin` → `git status`（必须干净）→ 比对 `git rev-parse --short HEAD origin/release`。落后就 `git pull --ff-only`；分叉、冲突或拉不动就**停下报告**，不许 `rebase`、不许强推。只在 `worker/<短名>`（或 ogliu 指定的 `hotfix/<短名>`）上提交；`main` 和 `release` 都不直接推。
 2. 不合并、不部署；`deploy/`（部署物料）与 `.github/`（CI 配置）不碰，任务卡点名除外。
 3. 只做完成目标必需的改动；顺带发现的问题写进汇报，不顺手改。
 4. 不确定就问：需求有多解、要动架构、要加依赖、要删文件或数据、测试反复修不过 → 停下列问题。
 5. 「完成」之前真跑门禁；跑不了（环境缺东西）就明说，别装成功。
-6. 小步提交；交活五段：状态 / 改动 / 关键决策 / 验证（命令 + 结果）/ 遗留与风险，并附一条建议的 commit message。
+6. 小步提交；完成汇报五段：状态 / 改动 / 关键决策 / 验证（命令 + 结果）/ 遗留与风险，并附一条建议的 commit message。汇报结尾说「**请验**」，不要说「交活了」——那三个字是 ogliu 的判断，不是写手的结论。
 
-## 九、四个岔路
+## 九、九个岔路
 
+- **联调不通过**：ogliu 用着不对 → 他把要改的点告诉 Lingda → Lingda 整理成返工清单转交写手 → 写手在**原分支**继续改、继续推 → ogliu 再跑一遍。来回几轮都正常，别急着开 PR。
 - **验收不通过**：不新开分支，就在原分支继续改（PR 未合并前随便提交）；Lingda 重新拉、重新验。返工清单由 Lingda 出、ogliu 转交。
+- **`release` 整体门禁不过**：说明这个功能和 `release` 上已有的东西冲突。**停下，不许继续往上合**；由 Lingda 定位是哪个功能、怎么冲，报给 ogliu 决定是改还是撤。撤销就是把刚合的那个 PR revert 掉（`git revert`），不留半截在 `release` 上。
+- **线上紧急修复**：ogliu 说「拉一个紧急修复分支」→ 从 `main` 拉 `hotfix/<短名>` → 修 → 改补丁版本号 → 合 `main`（普通 merge）→ 打 tag → 立刻把 `main` 同步回 `release`。这是唯一允许从 `main` 拉分支的路径。
 - **需求中途变化**：装得进同一目标就同分支；装不进就新卡新分支——旧分支要么继续服务旧目标，要么作废删掉。不许「一分支多目标」。
-- **分支作废**：删本地（`git branch -D`）和远端（`git push origin --delete`），重新拉一条；`main` 不受任何影响。
+- **分支作废**：删本地（`git branch -D`）和远端（`git push origin --delete`），重新拉一条；`release` 和 `main` 不受任何影响。
 - **附带的基础设施改动**：一行 `.gitignore`、一个目录忽略这类配套改动，可以并入当单分支，但必须**独立 commit**，并在 PR 描述里单列一节——不单独拆 PR（流程成本大于收益），也不混进功能 commit（回滚时找不到它）。
-- **真要并行**：Lingda 开 `lingda/`、开发助手开 `worker/`，两边本来就是两个工作树，互不相干；谁后合并，谁先 `git rebase origin/main`（把改动挪到最新 `main` 上重放，消除分叉）再推。默认仍是串行。
+- **真要并行**：Lingda 开 `lingda/`、开发助手开 `worker/`，两边本来就是两个工作树，互不相干；谁后合并，谁先 `git rebase origin/release`（把改动挪到最新 `release` 上重放，消除分叉）再推。默认仍是串行。
 - **兜底（开发助手推不了 GitHub 时）**：它交补丁（patch：改动的文本文件），ogliu 转给 Lingda，由她校验后推到同名分支，后续流程不变。
 
 ## 十、为什么这么定（决策表）
@@ -177,14 +232,19 @@ main ───●────────────────────●
 | 规矩 | 为什么 | 不这么做会怎样 |
 |---|---|---|
 | `main` 禁直推 | 它是上线开关，直推 = 跳过所有检查直接见用户 | 一次手滑就是线上事故，且只能整版回滚 |
+| **多一条 `release` 集成分支** | 把「验过」和「上线」拆成两件事：想控制节奏就控制「什么进 `main`」，而不是「不许合并」 | 功能合进 `main` 就等于上线，想验只能拿生产验；不敢合并 → 活攒在功能分支上烂掉 |
+| **`main` 只收 `release`（`hotfix/` 例外）** | `main` 永远是 `release` 的祖先，两条长期分支不会分叉 | 谁能往 `main` 合都能合，`release` 迟早落后一堆提交，每次合并都在解冲突 |
+| **`release` → `main` 用普通 merge，不用 squash** | 每个功能在 `main` 上留自己的合并点，坏哪个 `git revert` 哪个 | 攒 5 个功能压成 1 条提交，出问题只能整批回滚，等于白攒 |
+| **每次合完 `release` 跑整体门禁** | A 过了、B 过了，A+B 可能互相踩（同表结构、同组件） | 单功能全绿，合到 `release` 上是坏的，一路带到线上 |
+| **上线前改版本号 + 打 tag** | 线上跑的是哪一版，一查就知道；回滚有明确目标 | 只剩一堆 commit hash，回滚靠猜 |
 | 一需求一分支 | 隔离：出了问题能单独撤，不牵连别的改动 | 改动混在一起，回滚像拆炸弹 |
 | PR 合并 | 留记录：改了什么、谁验的、结论如何 | 改动无痕，学习复盘断线 |
-| Squash 合并 | 主线一提交 = 一次验收过的需求 | 主线被碎提交淹没，历史没法读 |
 | 串行写手 | 两个写手同改一个仓库，冲突成本 > 并行收益 | 互相覆盖、天天解冲突，净亏 |
 | 验收在合并前 | 上线前拦一道 | 错误直接部署上线 |
+| 联调在验收前，且由人做 | 门禁证明「代码不炸」，联调证明「功能对」；这两件事没有共同信号。人是唯一能判断「用起来对不对」的一方 | 写手自报完成直接进验收，界面类问题只能等上线后才暴露，一轮一个补丁 |
 | 分支保护 | 靠设置兜底，不靠自觉 | 纪律总有失效的一天 |
 | 开发助手独立工作树 | 两个 agent 不同目录，不抢 `index.lock`、构建缓存和端口 | 同目录并行 = 互相覆盖、报错莫名其妙 |
-| 开发助手不推 `main` | 上线是人的决策；它只交分支 | 它一推 main 就绕过验收直接上线 |
+| 开发助手不推 `main` / `release` | 上线是人的决策；它只交功能分支 | 它一推就绕过验收直接上线 |
 
 ## 十一、护栏：分支保护
 
@@ -192,25 +252,35 @@ main ───●────────────────────●
 - **现状（2026-10-17 10:15）**：**已开启**——必须走 PR（0 人批准）、禁 force push、禁删除、管理员同样受限；实测直推被拒（`remote: error: GH006 … Changes must be made through a pull request`）。
 - **为什么暂不勾「要求 CI 检查通过」**：流水线当前只在推 `main` 时触发，PR 阶段没有检查可要求；将来给流水线加 `pull_request` 触发后再勾。
 - **现在起**：ogliu、Lingda、开发助手都只能「分支 → PR → 合并」；手滑推不上去，老习惯「改完直接 push main」正式作废。
-- **开发助手的 clone 与主仓库同权**：`~/nexus-os-worker` 用的是同一把 SSH key，能推分支、理论上也能推 `main`（会被保护拒绝）。所以「它不推 main」靠纪律，不是靠权限。要收紧就给它换一把只读 key。
-- **开法**：GitHub 仓库 → Settings → Branches → Add branch protection rule；或让 Lingda 用 `gh api` 代开。
+- **开发助手的 clone 与主仓库同权**：`~/nexus-os-worker` 用的是同一把 SSH key，能推分支、理论上也能推 `main` / `release`（会被保护拒绝）。所以「它不推 main」靠纪律，不是靠权限。要收紧就给它换一把只读 key。
+- **`release` 也要开同样的保护**（2026-10-19 起）：禁直推、只收 PR。理由和 `main` 一样——它是上线前的最后一道集成分支，谁都能往里直推，就等于没验就上线了。
+- **开法**：GitHub 仓库 → Settings → Branches → Add branch protection rule（`main` 已有，再加一条 `release`）；或让 Lingda 用 `gh api` 代开。
 
 ## 十二、常见问题
 
 **为什么不直接 push `main`？**
 `main` 是部署开关，推一下线上立即换版本；没有审查，出了问题也没法只撤其中一条需求。分支 + PR 把「做」和「上线」拆成两步，做完先被看一遍。
 
-**合并为什么用 squash，不用普通 merge？**
-普通 merge 把分支上的碎提交原样并进 `main`，主线越来越吵；squash 压成一条，主线一条提交 = 一次验收过的需求，细节留在 PR 里。
+**为什么合并时功能 PR 用 squash，而 `release` → `main` 不用？**
+两种合并的目的相反。功能 PR 合进 `release`：一个功能在集成分支上留**一条**干净提交就够了，过程细节留在 PR 里。`release` 合进 `main`：必须保留**每个功能各自的合并点**，否则攒的五个功能压成一条，线上出问题只能整批回滚。同一个词，两种用法，别混。
+
+**为什么多一条 `release`，直接往 `main` 合不行吗？**
+直接往 `main` 合 = 合并即上线。这样你只有两个选择：拿生产当测试环境，或者不敢合并、让做完的活烂在功能分支上。`release` 把「验过了」和「上线了」拆开：代码可以先攒在那儿，等你说一句再推上生产。
+
+**版本号怎么定？**
+在 `release` 上改 `package.json` 的 `version`，合进 `main` 之前改。默认递增小版本（`0.1.0 → 0.2.0`），大版本由 ogliu 指定，紧急修复用补丁号（`0.2.0 → 0.2.1`）。发布同时打 tag，tag 名和版本号一致（`v0.2.0`）。
 
 **为什么由 Lingda 执行合并，而不是 ogliu 自己在网页点？**
-合并在 GitHub 上就是一个执行动作，真正的闸门在「谁决定」：ogliu 说「准了」= 批准，Lingda 用 `gh pr merge --squash --delete-branch` 落地。何况 GitHub 分不清人机——两人用的是同一个账号（记录都显示 `og-liu`），所以决定权留在 ogliu、执行交给机器，两不耽误。
+合并在 GitHub 上就是一个执行动作，真正的闸门在「谁决定」：ogliu 说「上线」= 批准发布，Lingda 用 `gh pr merge` 落地。何况 GitHub 分不清人机——两人用的是同一个账号（记录都显示 `og-liu`），所以决定权留在 ogliu、执行交给机器，两不耽误。
 
 **GitHub 上点合并，和本地敲 `git merge` 是一回事吗？**
 效果一样。选 PR 是为了留记录（谁、何时、改了什么、验收结论）并自动触发 CI；本地 `git merge` 再直推 `main` 也上线，但等于绕过记录与审查——不做。
 
 **合并后部署失败怎么办？**
 那是部署问题，按《部署方案》的回滚处理（`release.sh --rollback`）；修复照样走新分支 + PR，不慌。
+
+**开发助手跑完门禁就算做完了吗？**
+不算。门禁只回答「代码炸没炸」，不回答「功能对不对」。所以它推完分支只能说「请验」，要等 ogliu 在自己机器上把它那条分支跑起来、按需求点一遍，说「可以交活了」，才轮到 Lingda 验收。写手自己没有宣布交活的权力——它最容易把「编译过了」误当成「做对了」。
 
 **验收标准谁定？可以含糊吗？**
 Lingda 从需求原文翻译成可勾选条目；含糊的标准在验收时一定打架，宁可多写两行。
@@ -219,25 +289,34 @@ Lingda 从需求原文翻译成可勾选条目；含糊的标准在验收时一�
 要。它的工作目录 `~/nexus-os-worker` 就是本仓库的 clone，`docs/` 就在旁边。不过它的常驻约束来自「预设人设 + `AGENTS.md`」，本文是完整版，留给人和 Lingda 查。
 
 **两个目录的代码怎么同步？**
-都以 `origin/main` 为唯一真源。主仓库合并后 `git pull`；worker 在自己的分支上干活，合并后切回 `main` 再 `git pull --ff-only`。开新分支前拉一次主线就够了，不必全程跟随。
+`origin/release` 是大家汇总的地方，`origin/main` 是线上那份。功能分支从 `release` 拉、合回 `release`；`release` 只在你说「上线」时合进 `main`，合完立刻把 `main` 并回 `release`（§五 ⑧）。主仓库和 worker 里的 `release` 用 `git pull --ff-only` 保持同步，开新分支前拉一次就够。
 
 ## 十三、命令速查
 
 | 谁 | 场景 | 命令 |
 |---|---|---|
-| 开发助手 | 查基线 | `git fetch origin && git status -sb && git rev-parse --short HEAD origin/main` |
-| 开发助手 | 开分支 | `git switch -c worker/<短名> origin/main` |
+| Lingda | 建 `release`（一次性） | `git switch -c release origin/main && git push -u origin release` |
+| 开发助手 | 查基线 | `git fetch origin && git status -sb && git rev-parse --short HEAD origin/release` |
+| 开发助手 | 开功能分支 | `git switch -c worker/<短名> origin/release` |
 | 开发助手 | 提交并推送 | `git add -A && git commit -m "feat(…): …" && git push -u origin worker/<短名>` |
-| Lingda | 验收 | `git fetch origin` → `git diff origin/main...origin/worker/<短名>` → 在 worker 目录跑门禁 |
-| Lingda | 开 PR | `gh pr create --base main --head worker/<短名>` |
-| Lingda | 合并后同步 | `git switch main && git pull && git branch -D worker/<短名>`，再让 worker 切回 main 并 pull |
-| ogliu | 拍板合并 | 回一句「准了」 |
-| Lingda | 执行合并 | `gh pr merge <PR号> --squash --delete-branch` |
+| 开发助手 | 报请验 | 五段汇报，结尾写「我做完了，请你验」 |
+| ogliu | 联调 | 在 `~/nexus-os-worker` 切到 `worker/<短名>`，跑起来按需求点一遍 |
+| ogliu | 交活 / 上线 | 联调满意回「可以交活了」；要发布时说「上线」 |
+| Lingda | 验收 | `git fetch origin` → `git diff origin/release...origin/worker/<短名>` → 在 worker 目录跑门禁 |
+| Lingda | 合功能进 `release` | `gh pr create --base release --head worker/<短名>` → `gh pr merge <PR号> --squash --delete-branch` |
+| Lingda | `release` 整体门禁 | `git -C ~/nexus-os-worker switch release && git -C ~/nexus-os-worker pull --ff-only` → 跑五项 |
+| Lingda | 改版本号 | 在 `release` 上改 `package.json` 的 `version`（默认小版本 +1） |
+| ogliu | 上线 | 说一句「上线」 |
+| Lingda | 发版 | `gh pr merge <PR号> --merge`（**普通 merge**）→ `git tag v<版本> origin/main && git push origin v<版本>` |
+| Lingda | 上线后校准 | `git switch main && git pull && git merge origin/release && git push origin main` |
+| Lingda | 紧急修复 | `git switch -c hotfix/<短名> origin/main` → 修 + 改补丁号 → 合 `main` + tag → 同步回 `release` |
 
 ---
 
 ## 更新记录
 
+- 2026-10-19：**新增 `release` 集成分支，流程从「合并即上线」改为「验过先进 `release`，你说上线才进 `main`」**——起因：改一点东西就走完流程直接上线，上线频率过高，且没有「已验收、未上线」这个中间状态。同一次还补了三个配套规则：① 每次功能 PR 合进 `release` 后在 `release` 上跑**全量门禁**（单功能各自绿、凑到一起互相踩是漏得掉的那类问题）；② `release` → `main` 用**普通 merge**、功能 PR 用 squash，两者目的相反不能混；③ 上线前在 `release` 上递增 `package.json` 版本号（默认小版本，紧急修复走补丁号）并给 `main` 打同名 tag。另开 `hotfix/` 例外路径（唯一允许从 `main` 拉分支），边界是「ogliu 明确说要拉紧急修复分支」。同时下线「准了」这个词：功能合进 `release` 不需要第二句批准，只有 `release` → `main` 才等他说「上线」。改动范围：头部当前状态、§一 / §二 / §三 / §四 / §五（重写为 8 步）/ §六 / §七 / §八 / §九 / §十 / §十一 / §十二 / §十三。
+- 2026-10-19：**新增「联调」闸门（第 ④ 步）**——写手推完分支只说「**请验**」，不再自称「交活了」；ogliu 在 `~/nexus-os-worker` 里跑起来实测，满意才说「可以交活了」，之后 Lingda 才验收。起因：便签那一次写手门禁全绿、自报交活，实际上它连浏览器都没打开过（残留 dev server 还报 `no such table`），功能问题只能靠 #14→#15→#16 三轮 PR 补。**「交活了」三字自此归 ogliu 专用。**
 - 2026-10-17 17:15：**回滚「开发助手不碰 git」这条**——分支本身就是隔离，独立工作树已经把冲突挡在外面，不让它提交只多了一轮 patch 搬运、还让提交历史里看不到谁做的。恢复为：它自己开 `worker/<短名>`、提交、推送；Lingda 只做验收 / 开 PR / 合并。保留的约束：不推 `main`、不合并、不部署、不碰 `deploy/` 与 `.github/`。§一 / §二 / §三 / §五 / §六 / §七 / §八 / §九 / §十 / §十一 / §十二 / §十三 同步。
 - 2026-10-17 10:59：合并方式定为「拍板 / 执行分离」（B 方案）——ogliu 回「准了」拍板，Lingda 执行 `gh pr merge --squash --delete-branch`；§三 角色表、§五 第 4 步、§十三 命令速查与 FAQ 同步。
 - 2026-10-17 10:55：新增 §二《这套流程的正式名字：GitHub Flow》——官方六环节与本项目的逐条对照、与 Git Flow 的区别、额外三条纪律；其后章节整体顺延一位；术语表补 GitHub Flow 词条、章节引用改用 § 记法。
