@@ -1,6 +1,7 @@
 import type { ReactNode } from "react";
 import { AuthBrandCompact } from "@/components/auth/auth-brand-compact";
 import { AuthBrandPanel } from "@/components/auth/auth-brand-panel";
+import { BeianLink } from "@/components/layout/footer";
 
 /**
  * 登录 / 注册页的外壳（《界面设计规范》§7.16）。
@@ -27,8 +28,14 @@ export default function AuthLayout({ children }: { children: ReactNode }) {
       <AuthBrandPanel />
 
       <div className="flex flex-1 flex-col">
-        <div className="pb-14 pt-8 md:px-8 md:pb-16 md:pt-12 lg:flex lg:flex-1 lg:items-center lg:justify-center lg:px-6 lg:py-12">
+        <div className="flex-1 pb-14 pt-8 md:px-8 md:pb-16 md:pt-12 lg:flex lg:flex-1 lg:items-center lg:justify-center lg:px-6 lg:py-12">
           {children}
+        </div>
+
+        {/* 备案号：未登录用户看到的第一个页面（登录/注册）也得挂上，
+            这是 ICP 备案的展示要求；样式与应用外壳页脚保持一致。 */}
+        <div className="pb-6 text-center text-xs text-[#A0A8B4] lg:pb-8">
+          <BeianLink />
         </div>
       </div>
     </div>
