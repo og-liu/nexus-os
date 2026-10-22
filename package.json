@@ -1,6 +1,6 @@
 {
   "name": "nexus-os",
-  "version": "0.8.2",
+  "version": "0.8.3",
   "description": "Nexus OS 是一个面向个人用户打造的智能工作空间，将日常工具、自动化流程、知识管理以及 AI Agent 能力整合到统一的平台中。让工具成为能力，让 AI 成为助手，让个人数据真正服务于自己。",
   "private": true,
   "scripts": {
