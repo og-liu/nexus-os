@@ -1,5 +1,6 @@
 import type { ReactNode } from "react";
 import { AppShell } from "@/components/layout/app-shell";
+import { ToastProvider } from "@/components/ui/toast";
 import { getCurrentUser } from "@/lib/auth/current-user";
 
 /**
@@ -18,5 +19,10 @@ import { getCurrentUser } from "@/lib/auth/current-user";
  */
 export default async function AppLayout({ children }: { children: ReactNode }) {
   const user = await getCurrentUser();
-  return <AppShell username={user?.username ?? ""}>{children}</AppShell>;
+  return (
+    /* ToastProvider 包在外壳外面：外壳里的每个客户端组件都能 useToast() */
+    <ToastProvider>
+      <AppShell username={user?.username ?? ""}>{children}</AppShell>
+    </ToastProvider>
+  );
 }

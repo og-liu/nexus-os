@@ -23,6 +23,8 @@
   --animate-scale-in: scale-in 0.5s cubic-bezier(0.22, 1, 0.36, 1) both;
   --animate-grow-x: grow-x 0.9s cubic-bezier(0.22, 1, 0.36, 1) both;
   --animate-drift: drift 30s ease-in-out infinite alternate;
+  /* §7.13：PC 端通知从右侧滑入（手机上仍是淡入，见 toast.tsx 的响应式类） */
+  --animate-slide-in-right: slide-in-right 0.28s cubic-bezier(0.22, 1, 0.36, 1) both;
   /* §12.4：侧栏导航涟漪 */
   --animate-ripple: ripple-expand 580ms ease-out forwards;
 
@@ -109,6 +111,17 @@
   }
   to {
     transform: scaleX(1);
+  }
+}
+
+@keyframes slide-in-right {
+  from {
+    opacity: 0;
+    transform: translateX(100%);
+  }
+  to {
+    opacity: 1;
+    transform: none;
   }
 }
 
