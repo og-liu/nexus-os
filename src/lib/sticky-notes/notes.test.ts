@@ -26,7 +26,7 @@ function createTestUser(db: Db, username: string) {
 }
 
 describe("便签数据访问", () => {
-  it("排序：置顶优先 → 更新时间倒序 → id 兜底", () => {
+  it("排序：置顶优先 → 置顶时间倒序 → 更新时间倒序 → id 兜底", () => {
     const { db, alice } = setup();
     const first = createNote(db, alice.id, "A", 1_000);
     createNote(db, alice.id, "B", 2_000);
@@ -50,6 +50,50 @@ describe("便签数据访问", () => {
       "C",
       "B",
       "A",
+    ]);
+  });
+
+  it("置顶组内按置顶时间倒序：后置顶的排最前，与更新时间无关", () => {
+    const { db, alice } = setup();
+    const newestUpdated = createNote(db, alice.id, "更新时间最新", 9_000);
+    const oldestUpdated = createNote(db, alice.id, "更新时间最旧", 1_000);
+    createNote(db, alice.id, "未置顶但更新最新", 50_000);
+
+    // 先置顶更新最旧的，再置顶更新最新的：后者在前
+    setNotePinned(db, alice.id, oldestUpdated.id, true, 10_000);
+    setNotePinned(db, alice.id, newestUpdated.id, true, 20_000);
+    expect(listNotes(db, alice.id).map((note) => note.body)).toEqual([
+      "更新时间最新",
+      "更新时间最旧",
+      "未置顶但更新最新",
+    ]);
+
+    // 一条「更新时间很旧」的便签刚被置顶：它跳到所有置顶的第一条
+    const justPinned = createNote(db, alice.id, "刚置顶的老便签", 500);
+    setNotePinned(db, alice.id, justPinned.id, true, 30_000);
+    expect(listNotes(db, alice.id).map((note) => note.body)).toEqual([
+      "刚置顶的老便签",
+      "更新时间最新",
+      "更新时间最旧",
+      "未置顶但更新最新",
+    ]);
+
+    // 取消置顶：回到未置顶组，按更新时间该在哪就在哪
+    setNotePinned(db, alice.id, oldestUpdated.id, false, 40_000);
+    expect(listNotes(db, alice.id).map((note) => note.body)).toEqual([
+      "刚置顶的老便签",
+      "更新时间最新",
+      "未置顶但更新最新",
+      "更新时间最旧",
+    ]);
+
+    // 再置顶一次：按新的置顶时刻排到最前
+    setNotePinned(db, alice.id, oldestUpdated.id, true, 60_000);
+    expect(listNotes(db, alice.id).map((note) => note.body)).toEqual([
+      "更新时间最旧",
+      "刚置顶的老便签",
+      "更新时间最新",
+      "未置顶但更新最新",
     ]);
   });
 

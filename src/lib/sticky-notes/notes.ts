@@ -38,7 +38,11 @@ function toNote(row: StickyNoteRow): StickyNote {
 }
 
 /**
- * 按界面顺序取便签：**置顶优先 → 更新时间倒序 → id 倒序**。
+ * 按界面顺序取便签：**置顶优先 → 置顶时间倒序 → 更新时间倒序 → id 倒序**。
+ *
+ * 置顶组内按 `pinned_at`（什么时候置顶的）倒序，而不是 `updated_at`：
+ * 置顶不刷新更新时间，若按更新时间排，刚置顶的旧便签会沉到置顶区末尾，找都找不到。
+ * 未置顶的 `pinned_at` 为 NULL，组内仍按更新时间倒序。
  *
  * 排序规则只写在这里一处：工具页（不传 `limit`）与首页（`limit: 3`）共用，
  * 两边各写一条 SQL 迟早会不一致。
@@ -51,7 +55,7 @@ export function listNotes(
 ): StickyNote[] {
   const base = `SELECT ${SELECT_COLUMNS} FROM sticky_notes
      WHERE user_id = ?
-     ORDER BY pinned DESC, updated_at DESC, id DESC`;
+     ORDER BY pinned DESC, pinned_at DESC, updated_at DESC, id DESC`;
 
   const rows =
     limit === undefined
@@ -107,7 +111,11 @@ export function updateNoteBody(
 /**
  * 置顶 / 取消置顶。
  *
- * **只写 `pinned`，不碰 `updated_at`**：否则「更新时间」会变成谎话，
+ * 置顶时写 `pinned_at = now`（置顶组内按「最近置顶的在前」排），取消置顶写回 NULL。
+ * `pinned` 与 `pinned_at` 是同一件事的两面（是不是 / 什么时候），**只在这里一起写**；
+ * 因为老库已经有 `pinned`、界面与查询也都在用它，本版不做删列迁移。
+ *
+ * **不碰 `updated_at`**：否则「更新时间」会变成谎话，
  * 取消置顶后便签还会莫名其妙跳到最前（《功能/便签》已知的坑）。
  */
 export function setNotePinned(
@@ -115,10 +123,19 @@ export function setNotePinned(
   userId: number,
   noteId: number,
   pinned: boolean,
+  now = Date.now(),
 ): boolean {
-  const result = db
-    .prepare("UPDATE sticky_notes SET pinned = ? WHERE id = ? AND user_id = ?")
-    .run(pinned ? 1 : 0, noteId, userId);
+  const result = pinned
+    ? db
+        .prepare(
+          "UPDATE sticky_notes SET pinned = 1, pinned_at = ? WHERE id = ? AND user_id = ?",
+        )
+        .run(now, noteId, userId)
+    : db
+        .prepare(
+          "UPDATE sticky_notes SET pinned = 0, pinned_at = NULL WHERE id = ? AND user_id = ?",
+        )
+        .run(noteId, userId);
   return result.changes > 0;
 }
 

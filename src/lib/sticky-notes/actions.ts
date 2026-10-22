@@ -44,31 +44,46 @@ function revalidateStickyNotes(): void {
   revalidatePath("/");
 }
 
+/**
+ * 新建便签。
+ *
+ * `pin` 是弹窗里的「置顶保存」：保存与置顶是用户的一个动作，
+ * 所以放进同一个事务，不会出现「存进去了但没置顶」的半成品。
+ */
 export async function createNoteAction(
   rawBody: string,
+  pin = false,
 ): Promise<StickyNotesActionResult> {
   const user = await requireUser();
   const parsed = validateNoteBody(rawBody);
   if (!parsed.ok) return fail(parsed.error);
 
   const db = getDb();
-  createNote(db, user.id, parsed.body);
+  db.transaction(() => {
+    const note = createNote(db, user.id, parsed.body);
+    if (pin) setNotePinned(db, user.id, note.id, true);
+  })();
   revalidateStickyNotes();
   return ok(listNotes(db, user.id));
 }
 
+/** 改正文；`pin` 为 true 时同时置顶（编辑完成直接排到置顶区第一位）。 */
 export async function updateNoteAction(
   noteId: number,
   rawBody: string,
+  pin = false,
 ): Promise<StickyNotesActionResult> {
   const user = await requireUser();
   const parsed = validateNoteBody(rawBody);
   if (!parsed.ok) return fail(parsed.error);
 
   const db = getDb();
-  if (!updateNoteBody(db, user.id, noteId, parsed.body)) {
-    return fail("便签不存在");
-  }
+  const updated = db.transaction(() => {
+    if (!updateNoteBody(db, user.id, noteId, parsed.body)) return false;
+    if (pin) setNotePinned(db, user.id, noteId, true);
+    return true;
+  })();
+  if (!updated) return fail("便签不存在");
   revalidateStickyNotes();
   return ok(listNotes(db, user.id));
 }

@@ -1,9 +1,10 @@
 "use client";
 
 import { useState, useTransition } from "react";
-import { Menu, Plus } from "lucide-react";
-import { useAppShell } from "@/components/layout/app-shell";
+import { Plus } from "lucide-react";
+import { ToolBar } from "@/components/tools/tool-bar";
 import { ToolHeader } from "@/components/tools/tool-header";
+import { ToolMobileBar } from "@/components/tools/tool-mobile-bar";
 import { findToolBySlug } from "@/components/tools/tool-catalog";
 import {
   createNoteAction,
@@ -15,7 +16,6 @@ import {
 import type { StickyNote } from "@/lib/sticky-notes/notes";
 import { NoteCard } from "./note-card";
 import { NoteDialog } from "./note-dialog";
-import { StickyToolBar } from "./sticky-tool-bar";
 
 /**
  * 便签工具页（《功能/便签》§2.1）。
@@ -44,8 +44,6 @@ export function StickyNotesView({ initialNotes }: StickyNotesViewProps) {
 
   const tool = findToolBySlug("sticky-notes");
   const dialogOpen = creating || editingNote !== null;
-  // 没有页头之后，手机端的汉堡按钮移到工具头部左上角——否则打不开侧栏导航
-  const { openNav } = useAppShell();
 
   /** 统一跑一个写操作：成功用服务端返回的最新列表覆盖，失败留下错误文案。 */
   function run(
@@ -62,6 +60,20 @@ export function StickyNotesView({ initialNotes }: StickyNotesViewProps) {
         setError(result.error);
       }
     });
+  }
+
+  /** 弹窗里的「置顶保存」：保存（新建或编辑）+ 置顶一次完成。 */
+  function saveWithPin(body: string) {
+    if (creating) {
+      run(() => createNoteAction(body, true), () => setCreating(false));
+      return;
+    }
+    if (editingNote) {
+      run(
+        () => updateNoteAction(editingNote.id, body, true),
+        () => setEditingNote(null),
+      );
+    }
   }
 
   function openCreate() {
@@ -90,118 +102,104 @@ export function StickyNotesView({ initialNotes }: StickyNotesViewProps) {
   return (
     <>
       {/* 移动端顶部导航行：汉堡 + 新建（桌面由工具头部右侧承担，避免卡片内堆三层） */}
-      <div className="flex items-center justify-between px-4 pt-3 md:hidden">
-        <button
-          type="button"
-          onClick={openNav}
-          aria-label="打开菜单"
-          className="flex h-10 w-10 cursor-pointer items-center justify-center rounded-[2px] text-[#1F1F1F] transition-colors hover:bg-[#E5E5E5]"
-        >
-          <Menu className="h-5 w-5" />
-        </button>
-        <button
-          type="button"
-          onClick={openCreate}
-          disabled={pending}
-          className="flex h-8 cursor-pointer items-center gap-1.5 rounded-[2px] bg-[#000000] px-3 text-xs font-medium text-white transition-colors hover:bg-[#333333] disabled:cursor-not-allowed disabled:opacity-50"
-        >
-          <Plus className="h-3.5 w-3.5" />
-          新建便签
-        </button>
-      </div>
+      <ToolMobileBar
+        newLabel="新建便签"
+        onNew={openCreate}
+        disabled={pending}
+      />
 
-      <div className="space-y-4 px-4 py-4 md:px-6 md:py-6 xl:space-y-6">
+      <div className="px-4 py-4 md:px-6 md:py-6">
         {tool ? (
           <ToolHeader
             tool={tool}
             actions={
-              <>
-                {/* ≥ md：文字按钮；< md：40×40 图标按钮（§7.3 主操作） */}
-                <button
-                  type="button"
-                  onClick={openCreate}
-                  disabled={pending}
-                  className="hidden h-8 cursor-pointer items-center gap-1.5 rounded-[2px] bg-[#000000] px-3 text-xs font-medium text-white transition-colors hover:bg-[#333333] disabled:cursor-not-allowed disabled:opacity-50 md:flex"
-                >
-                  <Plus className="h-3.5 w-3.5" />
-                  新建便签
-                </button>
-                <button
-                  type="button"
-                  onClick={openCreate}
-                  disabled={pending}
-                  aria-label="新建便签"
-                  className="flex h-10 w-10 cursor-pointer items-center justify-center rounded-[2px] text-[#1F1F1F] transition-colors hover:bg-[#ECECEC] disabled:cursor-not-allowed disabled:opacity-50 md:hidden"
-                >
-                  <Plus className="h-5 w-5" />
-                </button>
-              </>
+              /* ≥ lg：文字按钮（< lg 的入口在顶部导航行里，避免同屏出现两个「新建」） */
+              <button
+                type="button"
+                onClick={openCreate}
+                disabled={pending}
+                className="flex h-8 cursor-pointer items-center gap-1.5 rounded-[2px] bg-[#000000] px-3 text-xs font-medium text-white transition-colors hover:bg-[#333333] disabled:cursor-not-allowed"
+              >
+                <Plus className="h-3.5 w-3.5" />
+                新建便签
+              </button>
             }
           />
         ) : null}
 
         {tool ? (
-          <StickyToolBar
-            name={tool.name}
-            icon={tool.icon}
-            onNew={openCreate}
-          />
+          <ToolBar name={tool.name} icon={tool.icon} onNew={openCreate} />
         ) : null}
 
         {showTopError ? (
-          <p role="alert" className="text-xs text-[#B91C1C]">
+          <p role="alert" className="mt-3 text-xs text-[#B91C1C]">
             {error}
           </p>
         ) : null}
 
-        {notes.length === 0 ? (
-          <div className="rounded-[2px] border border-dashed border-[#D9D9D9] bg-white p-8 text-center md:p-12">
-            <p className="text-sm text-[#A0A8B4]">还没有便签</p>
-            <button
-              type="button"
-              onClick={openCreate}
-              className="mt-3 h-8 cursor-pointer rounded-[2px] bg-[#000000] px-4 text-xs font-medium text-white transition-colors hover:bg-[#333333]"
-            >
-              新建便签
-            </button>
-          </div>
-        ) : (
-          <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-3">
-            {notes.map((note) => (
-              <NoteCard
-                key={note.id}
-                note={note}
-                confirmingDelete={confirmingDeleteId === note.id}
-                busy={pending}
-                onEdit={() => openEdit(note)}
-                onTogglePin={() =>
-                  run(() => togglePinAction(note.id, !note.pinned))
-                }
-                onRequestDelete={() => {
-                  setCreating(false);
-                  setEditingNote(null);
-                  setError(null);
-                  setConfirmingDeleteId(note.id);
-                }}
-                onCancelDelete={() => setConfirmingDeleteId(null)}
-                onConfirmDelete={() =>
-                  run(
-                    () => deleteNoteAction(note.id),
-                    () => setConfirmingDeleteId(null),
-                  )
-                }
-              />
-            ))}
-          </div>
-        )}
+        <div className="mt-4 xl:mt-6">
+          {notes.length === 0 ? (
+            <div className="rounded-[2px] border border-dashed border-[#D9D9D9] bg-white p-8 text-center md:p-12">
+              <p className="text-sm text-[#A0A8B4]">还没有便签</p>
+              <button
+                type="button"
+                onClick={openCreate}
+                className="mt-3 h-8 cursor-pointer rounded-[2px] bg-[#000000] px-4 text-xs font-medium text-white transition-colors hover:bg-[#333333]"
+              >
+                新建便签
+              </button>
+            </div>
+          ) : (
+            <section className="space-y-3">
+              <div className="flex min-h-7 items-center gap-2">
+                <span className="h-3.5 w-[3px] bg-[#000000]" />
+                <h2 className="text-sm font-semibold text-[#000000]">
+                  全部便签
+                </h2>
+                <span className="text-xs tabular-nums text-[#999999]">
+                  {notes.length}
+                </span>
+              </div>
+              <div className="grid grid-cols-2 gap-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 [@media(min-width:1400px)]:grid-cols-7">
+                {notes.map((note) => (
+                  <NoteCard
+                    key={note.id}
+                    note={note}
+                    confirmingDelete={confirmingDeleteId === note.id}
+                    busy={pending}
+                    onEdit={() => openEdit(note)}
+                    onTogglePin={() =>
+                      run(() => togglePinAction(note.id, !note.pinned))
+                    }
+                    onRequestDelete={() => {
+                      setCreating(false);
+                      setEditingNote(null);
+                      setError(null);
+                      setConfirmingDeleteId(note.id);
+                    }}
+                    onCancelDelete={() => setConfirmingDeleteId(null)}
+                    onConfirmDelete={() =>
+                      run(
+                        () => deleteNoteAction(note.id),
+                        () => setConfirmingDeleteId(null),
+                      )
+                    }
+                  />
+                ))}
+              </div>
+            </section>
+          )}
+        </div>
       </div>
 
       <NoteDialog
         open={dialogOpen}
         mode={creating ? "create" : "edit"}
         initialValue={editingNote?.body ?? ""}
+        createdAt={editingNote?.createdAt}
         busy={pending}
         error={error}
+        onSavePinned={saveWithPin}
         onSave={(body) => {
           if (creating) {
             run(
