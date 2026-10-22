@@ -21,8 +21,9 @@ import { shanghaiParts } from "@/lib/datetime/shanghai";
  *    日期、农历、节日、年度进度一起换新（§6 验收第 11 条）。浏览器钟可能比服务器快几秒，
  *    所以这条请求按 0 / 5s / 20s / 60s 有上限地重试，两端日期对上就停（`day-change.ts`）。
  *
- * 读屏：容器 `aria-hidden`，另在内部保留 `<time dateTime>` 语义——秒每秒都在变，
- * 交给辅助技术逐秒播报就是噪音（§七「秒级刷屏读屏」）。
+ * 读屏：整块 `aria-hidden`——秒每秒钟都在变，交给辅助技术逐秒播报就是噪音
+ * （§七「秒级刷屏读屏」）。注意 `aria-hidden` 会罩住里面的 `<time>`，所以时钟**不提供**
+ * 无障碍语义；日期那条语义由面板日期行的 `<time dateTime>` 承担，读屏要「今天几号」走那里。
  */
 interface DatetimeClockProps {
   /** 服务端算好的北京时间 `HH:MM:SS`，首帧原样渲染。 */
