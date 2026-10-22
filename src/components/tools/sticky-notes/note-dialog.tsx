@@ -21,6 +21,8 @@ interface NoteDialogProps {
   error: string | null;
   onSave: (body: string) => void;
   onSavePinned: (body: string) => void;
+  /** 删除当前这条（只在编辑态传）；点了直接删，没有二次确认。 */
+  onDelete?: () => void;
   onCancel: () => void;
 }
 
@@ -33,6 +35,7 @@ export function NoteDialog({
   error,
   onSave,
   onSavePinned,
+  onDelete,
   onCancel,
 }: NoteDialogProps) {
   return (
@@ -48,6 +51,7 @@ export function NoteDialog({
         error={error}
         onSave={onSave}
         onSavePinned={onSavePinned}
+        onDelete={onDelete}
         onCancel={onCancel}
       />
     </Modal>

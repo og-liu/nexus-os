@@ -7,8 +7,9 @@ import { cn } from "@/lib/utils";
 /**
  * 首页「待办清单」卡里的勾选行（《界面设计规范》§7.19）。
  *
- * 首页保留紧凑的行形态（工具页才是卡片网格）：整行可点、点哪儿都能勾，
- * 标题下面是创建时间（精确到分钟，与便签卡、待办卡同一份格式）。
+ * 首页保留紧凑的行形态（工具页才是卡片网格）：整行可点、点哪儿都能勾。
+ * **一条只占一行**：标题单行截断，创建时间（精确到分钟）放标题右侧——
+ * 时间在标题下面会把每行撑成两行，3 条就把卡片拉得很高（2026-10-22 联调要求）。
  *
  * **行本身不是 `<button>`**：行内点击只切换完成态，不承载其他按钮。
  * 键盘可达：行可聚焦，Enter / 空格切换——刻意不加 `role="button"`，
@@ -60,18 +61,16 @@ export function TodoRow({
         {completed ? <Check className="h-3 w-3 text-white" /> : null}
       </span>
 
-      <span className="min-w-0 flex-1">
-        <span
-          className={cn(
-            "line-clamp-2 whitespace-pre-wrap break-words text-sm",
-            completed ? "text-[#999999] line-through" : "text-[#000000]",
-          )}
-        >
-          {title}
-        </span>
-        <span className="mt-0.5 block text-[10px] text-[#999999]">
-          {formatDateTime(createdAt)}
-        </span>
+      <span
+        className={cn(
+          "min-w-0 flex-1 truncate text-sm",
+          completed ? "text-[#999999] line-through" : "text-[#000000]",
+        )}
+      >
+        {title}
+      </span>
+      <span className="shrink-0 text-[10px] tabular-nums text-[#999999]">
+        {formatDateTime(createdAt)}
       </span>
     </div>
   );

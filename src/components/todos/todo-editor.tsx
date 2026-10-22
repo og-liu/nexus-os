@@ -25,6 +25,8 @@ interface TodoEditorProps {
   busy: boolean;
   error?: string | null;
   onSave: (title: string) => void;
+  /** 删除当前这条；只在编辑已有待办时传，新建时不传（不渲染按钮）。 */
+  onDelete?: () => void;
   onCancel: () => void;
 }
 
@@ -34,9 +36,12 @@ export function TodoEditor({
   busy,
   error,
   onSave,
+  onDelete,
   onCancel,
 }: TodoEditorProps) {
   const [value, setValue] = useState(initialValue);
+  /** 删除要不要二次确认：点「删除」先出确认条，确认后才真删（Modal 关闭即卸载本组件，状态自然复位）。 */
+  const [confirmingDelete, setConfirmingDelete] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
   // 自动长高：行内高度先归零再取 scrollHeight，删字时才会跟着缩回去
@@ -95,12 +100,54 @@ export function TodoEditor({
 
       {error ? <p className="text-xs text-[#B91C1C]">{error}</p> : null}
 
+      {/* 删除要一次确认：点「删除」先把这一条换成「取消 / 确认删除」，
+          确认后才真删——删除不可撤销，误点一次就没了（2026-10-22 联调） */}
+      {confirmingDelete ? (
+        <div className="flex flex-wrap items-center justify-between gap-2 rounded-[2px] border border-[#E5E5E5] bg-[#F5F5F5] px-3 py-2">
+          <span className="text-xs text-[#666666]">
+            删除后无法恢复，确定删除这条待办？
+          </span>
+          <span className="flex shrink-0 items-center gap-2">
+            <button
+              type="button"
+              onClick={() => setConfirmingDelete(false)}
+              disabled={busy}
+              className="h-6 cursor-pointer rounded-[2px] bg-white px-2.5 text-xs text-[#666666] transition-colors hover:bg-[#ECECEC] disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              取消删除
+            </button>
+            <button
+              type="button"
+              onClick={onDelete}
+              disabled={busy}
+              className="h-6 cursor-pointer rounded-[2px] bg-[#000000] px-2.5 text-xs font-medium text-white transition-colors hover:bg-[#333333] disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              确认删除
+            </button>
+          </span>
+        </div>
+      ) : null}
+
       <div className="flex items-center justify-between gap-3">
         <span className="min-w-0 truncate text-[10px] tabular-nums text-[#999999]">
           {meta}
         </span>
 
         <div className="flex shrink-0 items-center gap-2">
+          {onDelete && !confirmingDelete ? (
+            <>
+              <button
+                type="button"
+                onClick={() => setConfirmingDelete(true)}
+                disabled={busy}
+                className="h-7 cursor-pointer rounded-[2px] bg-[#F5F5F5] px-3 text-xs font-medium text-[#B91C1C] disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                删除
+              </button>
+              {/* 与右侧「取消 / 保存」隔一道 1px 线：不可撤销的动作别和常规按钮挤在一起 */}
+              <span aria-hidden="true" className="h-4 w-px bg-[#E5E5E5]" />
+            </>
+          ) : null}
           <button
             type="button"
             onClick={onCancel}

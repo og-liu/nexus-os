@@ -3,6 +3,8 @@
 import { useEffect, useState, useTransition } from "react";
 import { ToolMobileBar } from "@/components/tools/tool-mobile-bar";
 import { findToolBySlug } from "@/components/tools/tool-catalog";
+import { useToast } from "@/components/ui/toast";
+import { formatDeletedMessage } from "@/lib/toast/format";
 import {
   clearCompletedTodosAction,
   createTodoAction,
@@ -104,6 +106,7 @@ export function TodoListView({ initialBoard }: TodoListViewProps) {
     return () => clearTimeout(timer);
   }, [leaving, open]);
 
+  const toast = useToast();
   const tool = findToolBySlug("todo-list");
   // 一条都没有才是「空」；只有已完成时仍是一张网格 + 折叠条
   const empty = open.length === 0 && completed.length === 0;
@@ -228,7 +231,10 @@ export function TodoListView({ initialBoard }: TodoListViewProps) {
     if (pending) return;
     run(
       () => deleteTodoAction(todo.id),
-      (board) => applyBoard(board),
+      (board) => {
+        applyBoard(board);
+        toast.success(formatDeletedMessage("待办", todo.title));
+      },
     );
   }
 
@@ -370,6 +376,22 @@ export function TodoListView({ initialBoard }: TodoListViewProps) {
         busy={pending}
         error={error}
         onSave={save}
+        onDelete={
+          // 编辑态才有删除：直接删掉当前这条、关掉弹窗（没有二次确认，2026-10-22 联调要求）
+          editingTodo
+            ? () =>
+                run(
+                  () => deleteTodoAction(editingTodo.id),
+                  (board) => {
+                    applyBoard(board);
+                    setEditingTodo(null);
+                    toast.success(
+                      formatDeletedMessage("待办", editingTodo.title),
+                    );
+                  },
+                )
+            : undefined
+        }
         onCancel={closeDialog}
       />
     </>

@@ -17,6 +17,8 @@ interface TodoDialogProps {
   busy: boolean;
   error: string | null;
   onSave: (title: string) => void;
+  /** 删除当前这条（只在编辑态传）；点了直接删，没有二次确认。 */
+  onDelete?: () => void;
   onCancel: () => void;
 }
 
@@ -28,6 +30,7 @@ export function TodoDialog({
   busy,
   error,
   onSave,
+  onDelete,
   onCancel,
 }: TodoDialogProps) {
   return (
@@ -42,6 +45,7 @@ export function TodoDialog({
         busy={busy}
         error={error}
         onSave={onSave}
+        onDelete={onDelete}
         onCancel={onCancel}
       />
     </Modal>
