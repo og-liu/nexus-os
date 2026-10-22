@@ -35,11 +35,22 @@ CREATE TABLE IF NOT EXISTS sticky_notes (
   user_id    INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
   body       TEXT    NOT NULL,
   pinned     INTEGER NOT NULL DEFAULT 0,   -- 0 / 1，SQLite 没有布尔类型
+  pinned_at  INTEGER,                      -- 置顶时刻（毫秒）；NULL = 未置顶。置顶组内排序用
   created_at INTEGER NOT NULL,             -- 毫秒时间戳
   updated_at INTEGER NOT NULL              -- 毫秒时间戳；只有改正文才刷新，置顶不刷新
 );
 
 CREATE INDEX IF NOT EXISTS idx_sticky_notes_user_id ON sticky_notes(user_id);
+
+CREATE TABLE IF NOT EXISTS todos (
+  id           INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id      INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  title        TEXT    NOT NULL,
+  completed_at INTEGER,                    -- 完成时刻（毫秒）；NULL = 还没做完
+  created_at   INTEGER NOT NULL            -- 毫秒时间戳
+);
+
+CREATE INDEX IF NOT EXISTS idx_todos_user_id ON todos(user_id);
 `;
 
 /** 建表（幂等）。单独导出，测试可以在任意连接上初始化结构。 */
@@ -47,6 +58,31 @@ export function initSchema(conn: Db): void {
   // 先迁移表名，再建表 —— 顺序不能反（理由见 migrateLegacyTableNames）
   migrateLegacyTableNames(conn);
   conn.exec(SCHEMA);
+  // 建表之后补列：`CREATE TABLE IF NOT EXISTS` 对已存在的表是空操作，老库不会自动多出列
+  migrateStickyNotePinnedAt(conn);
+}
+
+/**
+ * 便签表补列：`pinned_at`（置顶时刻）。
+ *
+ * 为什么需要这一列：置顶组内原本按 `updated_at` 排，而置顶动作**不刷新** `updated_at`，
+ * 所以刚置顶的旧便签会沉到置顶区末尾；要「最新置顶的排第一」，就必须记下置顶时刻。
+ *
+ * 老数据不知道当时什么时候置顶的，回填成 `updated_at`：
+ * 既保留它们原来的相对顺序，也让新置顶的便签自然排到它们前面。
+ * 幂等：列已存在就什么都不做，重复启动不会覆盖已有的 `pinned_at`。
+ */
+function migrateStickyNotePinnedAt(conn: Db): void {
+  const columns = conn
+    .prepare("PRAGMA table_info(sticky_notes)")
+    .all() as { name: string }[];
+
+  // 新库：表是上面 SCHEMA 刚建的，已经带这一列
+  if (columns.length === 0) return;
+  if (columns.some((column) => column.name === "pinned_at")) return;
+
+  conn.exec("ALTER TABLE sticky_notes ADD COLUMN pinned_at INTEGER");
+  conn.exec("UPDATE sticky_notes SET pinned_at = updated_at WHERE pinned = 1");
 }
 
 /**
