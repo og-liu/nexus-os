@@ -1,11 +1,14 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useEffect, useState, useTransition } from "react";
+import { useRouter } from "next/navigation";
 import { Plus } from "lucide-react";
 import { ToolBar } from "@/components/tools/tool-bar";
 import { ToolHeader } from "@/components/tools/tool-header";
 import { ToolMobileBar } from "@/components/tools/tool-mobile-bar";
 import { findToolBySlug } from "@/components/tools/tool-catalog";
+import { useToast } from "@/components/ui/toast";
+import { formatDeletedMessage } from "@/lib/toast/format";
 import {
   createNoteAction,
   deleteNoteAction,
@@ -30,17 +33,41 @@ import { NoteDialog } from "./note-dialog";
 
 interface StickyNotesViewProps {
   initialNotes: StickyNote[];
+  /**
+   * 深链要打开的便签 id（`?note=123`，来自首页便签卡的某一条）。
+   * 没有该参数、或 id 找不到（已被删掉）时为 `null`。
+   */
+  initialNoteId?: number | null;
 }
 
-export function StickyNotesView({ initialNotes }: StickyNotesViewProps) {
+export function StickyNotesView({
+  initialNotes,
+  initialNoteId = null,
+}: StickyNotesViewProps) {
+  const router = useRouter();
+  const toast = useToast();
   const [notes, setNotes] = useState<StickyNote[]>(initialNotes);
   const [creating, setCreating] = useState(false);
-  const [editingNote, setEditingNote] = useState<StickyNote | null>(null);
+  /**
+   * 深链（首页点了某一条便签）时**首帧就打开编辑弹窗**，不靠 useEffect 再补一次——
+   * 否则会先闪一下列表、再弹出弹窗。找不到对应便签就当没这个参数（可能已被删掉）。
+   */
+  const [editingNote, setEditingNote] = useState<StickyNote | null>(() =>
+    initialNoteId === null
+      ? null
+      : (initialNotes.find((note) => note.id === initialNoteId) ?? null),
+  );
   const [confirmingDeleteId, setConfirmingDeleteId] = useState<number | null>(
     null,
   );
   const [error, setError] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
+
+  // 打开之后把 `?note=` 从地址栏抹掉：否则关掉弹窗再刷新，它又弹回来
+  useEffect(() => {
+    if (initialNoteId === null) return;
+    router.replace("/tools/sticky-notes", { scroll: false });
+  }, [initialNoteId, router]);
 
   const tool = findToolBySlug("sticky-notes");
   const dialogOpen = creating || editingNote !== null;
@@ -181,7 +208,10 @@ export function StickyNotesView({ initialNotes }: StickyNotesViewProps) {
                     onConfirmDelete={() =>
                       run(
                         () => deleteNoteAction(note.id),
-                        () => setConfirmingDeleteId(null),
+                        () => {
+                          setConfirmingDeleteId(null);
+                          toast.success(formatDeletedMessage("便签", note.body));
+                        },
                       )
                     }
                   />
@@ -215,6 +245,21 @@ export function StickyNotesView({ initialNotes }: StickyNotesViewProps) {
             );
           }
         }}
+        onDelete={
+          // 编辑态才有删除：直接删掉当前这条并关掉弹窗（没有二次确认，2026-10-22 联调要求）
+          editingNote
+            ? () =>
+                run(
+                  () => deleteNoteAction(editingNote.id),
+                  () => {
+                    setEditingNote(null);
+                    toast.success(
+                      formatDeletedMessage("便签", editingNote.body),
+                    );
+                  },
+                )
+            : undefined
+        }
         onCancel={closeDialog}
       />
     </>

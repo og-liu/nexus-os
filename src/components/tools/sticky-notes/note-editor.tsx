@@ -11,8 +11,9 @@ import { NOTE_BODY_MAX_LENGTH, charLength } from "@/lib/sticky-notes/validate";
  * - 自动长高：每次输入把 `height` 设为 `scrollHeight`，长便签不出现内部滚动条；
  * - 快捷键：`⌘/Ctrl + Enter` 保存、`Esc` 取消；
  * - 「置顶保存」= 保存 + 置顶一步完成：编辑完不用再滚回列表里找它、再点置顶；
- *   底部三个按钮只有两层样式：灰色次要（取消 / 置顶保存）+ 黑色主操作（保存），
- *   同高度、同圆角、同字号，不加图标与描边；
+ *   底部按钮只有两层样式：灰色次要（删除 / 取消 / 置顶保存）+ 黑色主操作（保存），
+ *   同高度、同圆角、同字号，不加图标与描边；删除按钮文字用错误色 `#B91C1C`，
+ *   它是**直接删除、没有二次确认**（2026-10-22 联调要求），颜色是唯一提示；
  * - 编辑已有便签时，左下角补一行「创建于 YYYY-MM-DD HH:mm」，与待办编辑器同款；
  * - 字数提示只在 ≥ 900 时出现（1000 是上限，按字符数计），与创建时间并列显示。
  *
@@ -29,6 +30,8 @@ interface NoteEditorProps {
   onSave: (body: string) => void;
   /** 保存并置顶；不传则不渲染这个按钮。 */
   onSavePinned?: (body: string) => void;
+  /** 删除当前这条；只在编辑已有便签时传，新建时不传（不渲染按钮）。 */
+  onDelete?: () => void;
   onCancel: () => void;
 }
 
@@ -39,9 +42,12 @@ export function NoteEditor({
   error,
   onSave,
   onSavePinned,
+  onDelete,
   onCancel,
 }: NoteEditorProps) {
   const [value, setValue] = useState(initialValue);
+  /** 删除要不要二次确认：点「删除」先出确认条，确认后才真删（Modal 关闭即卸载本组件，状态自然复位）。 */
+  const [confirmingDelete, setConfirmingDelete] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
   // 自动长高：行内高度先归零再取 scrollHeight，删字时才会跟着缩回去
@@ -98,6 +104,34 @@ export function NoteEditor({
 
       {error ? <p className="text-xs text-[#B91C1C]">{error}</p> : null}
 
+      {/* 删除要一次确认：点「删除」先把这一条换成「取消 / 确认删除」，
+          确认后才真删——删除不可撤销，误点一次就没了（2026-10-22 联调） */}
+      {confirmingDelete ? (
+        <div className="flex flex-wrap items-center justify-between gap-2 rounded-[2px] border border-[#E5E5E5] bg-[#F5F5F5] px-3 py-2">
+          <span className="text-xs text-[#666666]">
+            删除后无法恢复，确定删除这条便签？
+          </span>
+          <span className="flex shrink-0 items-center gap-2">
+            <button
+              type="button"
+              onClick={() => setConfirmingDelete(false)}
+              disabled={busy}
+              className="h-6 cursor-pointer rounded-[2px] bg-white px-2.5 text-xs text-[#666666] transition-colors hover:bg-[#ECECEC] disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              取消删除
+            </button>
+            <button
+              type="button"
+              onClick={onDelete}
+              disabled={busy}
+              className="h-6 cursor-pointer rounded-[2px] bg-[#000000] px-2.5 text-xs font-medium text-white transition-colors hover:bg-[#333333] disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              确认删除
+            </button>
+          </span>
+        </div>
+      ) : null}
+
       <div className="flex items-center justify-between gap-3">
         {/* 左下角：创建时间（编辑时）+ 字数提示（接近上限时），与待办编辑器同一套 */}
         <span className="min-w-0 truncate text-[10px] tabular-nums text-[#999999]">
@@ -105,6 +139,21 @@ export function NoteEditor({
         </span>
 
         <div className="flex shrink-0 items-center gap-2">
+          {/* 删除：编辑态才有；点了直接删（无二次确认），所以文字用错误色区分于「取消」 */}
+          {onDelete && !confirmingDelete ? (
+            <>
+              <button
+                type="button"
+                onClick={() => setConfirmingDelete(true)}
+                disabled={busy}
+                className="h-7 cursor-pointer rounded-[2px] bg-[#F5F5F5] px-3 text-xs font-medium text-[#B91C1C] disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                删除
+              </button>
+              {/* 与右侧「取消 / 保存」隔一道 1px 线：不可撤销的动作别和常规按钮挤在一起 */}
+              <span aria-hidden="true" className="h-4 w-px bg-[#E5E5E5]" />
+            </>
+          ) : null}
           <button
             type="button"
             onClick={onCancel}
