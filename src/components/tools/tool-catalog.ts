@@ -512,7 +512,7 @@ export const TOOLS: Tool[] = [
     name: "待办清单",
     description: "简单任务管理",
     icon: CheckSquare,
-    status: "开发中",
+    status: "可用",
     category: "生活",
   },
   {

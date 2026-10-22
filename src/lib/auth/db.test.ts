@@ -110,3 +110,88 @@ describe("表名迁移：sessions → auth_sessions", () => {
     expect(tableNames(conn)).not.toContain("sessions");
   });
 });
+
+function columnNames(conn: Db, table: string): string[] {
+  return (
+    conn.prepare(`PRAGMA table_info(${table})`).all() as { name: string }[]
+  ).map((row) => row.name);
+}
+
+/** 造一个「还没有 pinned_at」的老便签库：置顶与未置顶各一行。 */
+function openLegacyNotesDatabase(): Db {
+  const conn = new Database(":memory:");
+  conn.pragma("foreign_keys = ON");
+  conn.exec(`
+    CREATE TABLE users (
+      id            INTEGER PRIMARY KEY AUTOINCREMENT,
+      username      TEXT    NOT NULL,
+      username_key  TEXT    NOT NULL UNIQUE,
+      password_hash TEXT    NOT NULL,
+      created_at    INTEGER NOT NULL
+    );
+
+    CREATE TABLE sticky_notes (
+      id         INTEGER PRIMARY KEY AUTOINCREMENT,
+      user_id    INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      body       TEXT    NOT NULL,
+      pinned     INTEGER NOT NULL DEFAULT 0,
+      created_at INTEGER NOT NULL,
+      updated_at INTEGER NOT NULL
+    );
+  `);
+  conn
+    .prepare(
+      "INSERT INTO users (username, username_key, password_hash, created_at) VALUES (?, ?, ?, ?)",
+    )
+    .run("alice", "alice", "hash", 1);
+  conn
+    .prepare(
+      "INSERT INTO sticky_notes (user_id, body, pinned, created_at, updated_at) VALUES (1, '置顶的', 1, 100, 200)",
+    )
+    .run();
+  conn
+    .prepare(
+      "INSERT INTO sticky_notes (user_id, body, pinned, created_at, updated_at) VALUES (1, '普通', 0, 300, 400)",
+    )
+    .run();
+  return conn;
+}
+
+describe("便签表补列：pinned_at", () => {
+  it("老库补上列，置顶行回填成 updated_at，行一行不丢", () => {
+    const conn = openLegacyNotesDatabase();
+
+    initSchema(conn);
+
+    expect(columnNames(conn, "sticky_notes")).toContain("pinned_at");
+    expect(
+      conn.prepare("SELECT pinned_at FROM sticky_notes WHERE body = '置顶的'").get(),
+    ).toEqual({ pinned_at: 200 });
+    expect(
+      conn.prepare("SELECT pinned_at FROM sticky_notes WHERE body = '普通'").get(),
+    ).toEqual({ pinned_at: null });
+    expect(
+      conn.prepare("SELECT COUNT(*) AS count FROM sticky_notes").get(),
+    ).toEqual({ count: 2 });
+  });
+
+  it("重复执行不会覆盖已有的 pinned_at", () => {
+    const conn = openLegacyNotesDatabase();
+    initSchema(conn);
+    conn
+      .prepare("UPDATE sticky_notes SET pinned_at = 999 WHERE body = '置顶的'")
+      .run();
+
+    initSchema(conn);
+    initSchema(conn);
+
+    expect(
+      conn.prepare("SELECT pinned_at FROM sticky_notes WHERE body = '置顶的'").get(),
+    ).toEqual({ pinned_at: 999 });
+  });
+
+  it("全新的库建表时就带 pinned_at", () => {
+    const conn = createConnection(":memory:");
+    expect(columnNames(conn, "sticky_notes")).toContain("pinned_at");
+  });
+});

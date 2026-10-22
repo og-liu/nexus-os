@@ -52,7 +52,7 @@ export function ToolHeader({ tool, actions }: ToolHeaderProps) {
         </div>
 
         {actions ? (
-          <div className="hidden shrink-0 items-center gap-2 md:flex">
+          <div className="hidden shrink-0 items-center gap-2 lg:flex">
             {actions}
           </div>
         ) : null}

@@ -1,27 +1,8 @@
 /**
- * 便签时间的展示格式化（纯函数，手写，不引 dayjs / date-fns）。
+ * 便签时间的展示格式化。
  *
- * 规则（2026-10-19 调整）：**统一显示绝对日期时间 `YYYY-MM-DD HH:mm`**。
- * 不再用「今天 / 昨天」这类相对说法——同一块列表里相对日期会随时间变化而跳，
- * 扫读时还要在脑子里换算成「到底是哪天」。
- *
- * 时区：**按 UTC+8 计算**——线上容器多为 UTC，用服务端本地时区会错开 8 小时。
- * 实现：先把时间戳加 8 小时，再用 `getUTC*` 读取，得到的就是 +8 的墙上时间。
+ * 规则与实现已提到 `@/lib/format`（`formatDateTime`）：待办也要在卡片上显示创建时间，
+ * 两个工具必须长得一样，所以只留一份实现。这里保留 `formatNoteTime` 这个名字，
+ * 让便签这一侧不必为一次共用改造而改一串 import。
  */
-
-const UTC8_OFFSET_MS = 8 * 60 * 60 * 1000;
-
-function pad(value: number): string {
-  return String(value).padStart(2, "0");
-}
-
-/** 把毫秒时间戳格式化成 `YYYY-MM-DD HH:mm`（UTC+8）。 */
-export function formatNoteTime(ts: number): string {
-  const date = new Date(ts + UTC8_OFFSET_MS);
-  const year = date.getUTCFullYear();
-  const month = pad(date.getUTCMonth() + 1);
-  const day = pad(date.getUTCDate());
-  const hour = pad(date.getUTCHours());
-  const minute = pad(date.getUTCMinutes());
-  return `${year}-${month}-${day} ${hour}:${minute}`;
-}
+export { formatDateTime as formatNoteTime } from "@/lib/format";

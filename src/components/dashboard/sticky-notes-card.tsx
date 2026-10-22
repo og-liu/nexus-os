@@ -4,11 +4,13 @@ import { formatNoteTime } from "@/lib/sticky-notes/format";
 import type { StickyNote } from "@/lib/sticky-notes/notes";
 
 /**
- * 首页右栏的便签常驻卡（《功能/便签》§2.2、《界面设计规范》§7.17）。
+ * 首页主区（≥ xl 时占左 2 列）的便签常驻卡（《功能/便签》§2.2、《界面设计规范》§7.17）。
  *
  * 数据由首页（Server Component）查好传进来——与工具页共用 `listNotes`，只是 `limit: 3`。
  * 「管理 →」直指便签本身（`/tools/sticky-notes`），不是工具列表：管理的是便签，
  * 点进列表还得再找一次，那一跳是错的。
+ *
+ * 卡内分栏 `md` 起 2 列：卡宽回到 2/3 之后，3 列会把便签挤成细条。
  */
 export function StickyNotesCard({ notes }: { notes: StickyNote[] }) {
   return (
@@ -38,7 +40,7 @@ export function StickyNotesCard({ notes }: { notes: StickyNote[] }) {
           </Link>
         </div>
       ) : (
-        <div className="mt-3 grid grid-cols-1 gap-2 md:grid-cols-2 xl:grid-cols-3">
+        <div className="mt-3 grid grid-cols-1 gap-2 md:grid-cols-2">
           {notes.map((note) => (
             <Link
               key={note.id}

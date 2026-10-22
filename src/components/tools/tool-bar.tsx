@@ -7,14 +7,15 @@ import { Plus } from "lucide-react";
 /**
  * 工具页的吸顶条：列表滚过工具头部之后，从顶部滑入一条紧凑栏（图标 + 名称 + 新建）。
  *
- * 为什么需要它：便签页去掉了页头，工具头部很大（图标 / 描述 / 分类），
+ * 为什么需要它：工具页去掉了页头，工具头部很大（图标 / 描述 / 分类），
  * 列表一长就滚没了——滚动到中间时既看不到「这是哪个工具」，也够不着「新建」。
+ * 便签页与待办页共用这一条，滚动行为与尺寸才能一致。
  *
  * 为什么用滚动位置而不是 IntersectionObserver：吸顶条本身是 `sticky`，
  * 如果哨兵也放在 sticky 容器里，它会跟着吸顶、永远「在视口内」，观察器不会触发。
  * 直接读 `main.scrollTop` 最稳（滚动容器是 AppShell 的 `<main>`，不是 window）。
  */
-interface StickyToolBarProps {
+interface ToolBarProps {
   name: string;
   icon: LucideIcon;
   onNew: () => void;
@@ -23,7 +24,7 @@ interface StickyToolBarProps {
 /** 滚过工具头部（约 180px）后出现；比头部略早，避免中间出现「什么都没有」的空白。 */
 const SHOW_AFTER_PX = 160;
 
-export function StickyToolBar({ name, icon: Icon, onNew }: StickyToolBarProps) {
+export function ToolBar({ name, icon: Icon, onNew }: ToolBarProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const [visible, setVisible] = useState(false);
 
