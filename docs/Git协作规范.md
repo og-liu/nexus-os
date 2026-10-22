@@ -161,6 +161,7 @@ main ──●──────────────────────
    - 改 `package.json` 的 `version`：**默认补丁号 +1**（`0.8.0 → 0.8.1`）——每次上线都涨一位，但中间那位只在**成规模的迭代**（一批有明显变化的功能、架构或交互大改）时才 +1（`0.8.x → 0.9.0`），大版本由 ogliu 指定。`release` 有分支保护，所以这一步也走 PR：`lingda/bump-x.y.z` → `--base release` → squash 合入。
    - 再跑一遍门禁（改版本也是改动）。
    - `gh pr create --base main --head release` → **用普通 merge（Create a merge commit），不要 squash**——squash 会把攒的几个功能压成一条提交，出问题只能整批回滚；普通 merge 让每个功能在 `main` 上留自己的合并点，坏哪个撤哪个。
+   - **合并提交的主体名要自己写成中文**：`gh pr merge <PR号> --merge --subject "发布 vX.Y.Z：<一句话摘要>"`。不写 `--subject`，GitHub 就用自动模板 `Merge pull request #48 from og-liu/release`——中文标题只落在正文里，提交列表/部署看板上一片英文，看不出这次上线是什么内容。
    - 打 tag：`git tag v<版本号> origin/main && git push origin v<版本号>`，tag 名与 `package.json` 一致（`0.2.0` ↔ `v0.2.0`）。
    - CI 自动部署（见《部署方案》）。
 9. **核对两边一致（Lingda，上线后做）**：
@@ -363,7 +364,7 @@ Lingda 从需求原文翻译成可勾选条目；含糊的标准在验收时一�
 | Lingda | `release` 整体门禁 | `git -C ~/nexus-os-worker switch release && git -C ~/nexus-os-worker pull --ff-only` → 跑五项 |
 | Lingda | 改版本号 | 在 `release` 上改 `package.json` 的 `version`（**默认补丁号 +1**；成规模的迭代才动中间位） |
 | ogliu | 上线 | 说一句「上线」 |
-| Lingda | 发版 | `gh pr merge <PR号> --merge`（**普通 merge**）→ `git tag v<版本> origin/main && git push origin v<版本>` |
+| Lingda | 发版 | `gh pr merge <PR号> --merge --subject "发布 v<版本>：<摘要>"`（**普通 merge**，主体自己写中文）→ `git tag v<版本> origin/main && git push origin v<版本>` |
 | Lingda | 核对上线结果 | `git fetch origin && git diff origin/release origin/main --stat`（应为空） |
 | Lingda | 紧急修复 | `git switch -c hotfix/<短名> origin/main` → 修 + 改补丁号 → 合 `main` + tag → 再从 `release` 拉分支把 `main` 合进来走 PR |
 | Lingda | 版本号改动怎么进 release | `release` 有保护，改 `package.json` 也要走 PR：`lingda/bump-x.y.z` → `--base release` → squash 合入 |
@@ -371,6 +372,8 @@ Lingda 从需求原文翻译成可勾选条目；含糊的标准在验收时一�
 ---
 
 ## 更新记录
+
+- 2026-10-22（合并提交写中文主体）：**`release` → `main` 的普通 merge 一律加 `--subject "发布 vX.Y.Z：<一句话摘要>"`**。起因：ogliu 发现提交列表从某次起变成一片 `Merge pull request #48 from og-liu/release`——不是中文丢了，GitHub 的自动模板把中文标题塞进了正文，列表只显示主体，看不出每次上线是什么内容。历史合并提交不回改。§五 ⑧ / §十三 命令速查同步。
 
 - 2026-10-22（版本号规则修正）：**默认改成补丁号 +1（`0.8.0 → 0.8.1`），中间那位只留给成规模的迭代（一批有明显变化的功能、架构或交互大改），大版本仍由 ogliu 指定。** 起因：ogliu 指出原来写的「默认递增小版本」不合理——每次上线都动中间那位，等于把「小版本」当流水号用，看号分不出这次改动的分量。按语义化版本的本意（第三位修修补补、第二位有分量的变更）分档，一串小修都在补丁号上排，攒出一批像样的功能才动中间位。§四 术语表 / §五 ⑧ / §十二 FAQ / §十三 命令速查同步。**历史 tag 不改**：`v0.8.0` 已上线，下一个版本从 `0.8.1` 起。
 
