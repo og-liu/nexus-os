@@ -2,7 +2,7 @@
 
 面向个人用户的智能工作空间：把日常工具、自动化流程、知识管理与 AI Agent 能力整合到一个平台里。
 
-> **当前进度**：项目骨架、应用基础界面规范、登录注册、应用外壳、工具中心已完成；除工具中心外的页面暂为「开发中」占位。
+> **当前进度**：应用外壳、登录注册、工具中心、便签、待办清单、日期时间面板、每日一句已完成；Agent / 知识 / 文件 / 自动 / 设置仍为「开发中」占位。
 
 ---
 
@@ -22,13 +22,14 @@ pnpm dev            # http://localhost:3000
 
 ## 提交前门禁
 
-四项全绿才算完成一次改动：
+五项全绿才算完成一次改动：
 
 ```bash
-pnpm typecheck      # 类型（tsc --noEmit）
-pnpm lint           # 代码规范
-pnpm test           # 单元测试（内存 SQLite，不碰本地数据）
-pnpm build          # 生产构建（能构建过才算真的能跑）
+pnpm exec next typegen  # 生成路由 / 布局类型（typecheck 的前置）
+pnpm typecheck          # 类型（tsc --noEmit）
+pnpm lint               # 代码规范
+pnpm test               # 单元测试（内存 SQLite，不碰本地数据）
+pnpm build              # 生产构建（能构建过才算真的能跑）
 ```
 
 CI 会跑同样的检查，然后构建并发布。
