@@ -15,11 +15,10 @@ import type { AttendanceSetting, OverrideStatus, SaturdayMode } from "./schedule
  *   会让每处查询都多一层判断（§三「不给 status 存 auto」）。
  */
 
-/** 库里的一行覆盖。`note` 目前没有写入路径（见交付卡「遗留」）。 */
+/** 库里的一行覆盖（2026-10-24 起没有 `note`：那一列是空壳，已删）。 */
 export interface AttendanceOverride {
   dayKey: string;
   status: OverrideStatus;
-  note: string | null;
 }
 
 interface SettingRow {
@@ -31,7 +30,6 @@ interface SettingRow {
 interface OverrideRow {
   day_key: string;
   status: OverrideStatus;
-  note: string | null;
 }
 
 /**
@@ -117,7 +115,7 @@ export function listOverrides(
 ): AttendanceOverride[] {
   const rows = db
     .prepare(
-      `SELECT day_key, status, note FROM attendance_overrides
+      `SELECT day_key, status FROM attendance_overrides
        WHERE user_id = ? AND day_key BETWEEN ? AND ?
        ORDER BY day_key`,
     )
@@ -126,7 +124,6 @@ export function listOverrides(
   return rows.map((row) => ({
     dayKey: row.day_key,
     status: row.status,
-    note: row.note,
   }));
 }
 
@@ -154,8 +151,7 @@ export function getOverride(
 /**
  * 写某一天的覆盖（UPSERT）。
  *
- * 同一天再改一次就是覆盖旧值，不会堆行；`note` 不在这条语句里：
- * 它目前没有写入路径，UPSERT 更新时保留原值（将来加备注不会因为改状态被清掉）。
+ * 同一天再改一次就是覆盖旧值，不会堆行。
  */
 export function saveOverride(
   db: Db,
@@ -165,8 +161,8 @@ export function saveOverride(
   now = Date.now(),
 ): void {
   db.prepare(
-    `INSERT INTO attendance_overrides (user_id, day_key, status, note, created_at, updated_at)
-     VALUES (?, ?, ?, NULL, ?, ?)
+    `INSERT INTO attendance_overrides (user_id, day_key, status, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?)
      ON CONFLICT(user_id, day_key) DO UPDATE SET
        status     = excluded.status,
        updated_at = excluded.updated_at`,

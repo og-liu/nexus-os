@@ -309,6 +309,57 @@ describe("重建迁移（老 CHECK 只允许 work/off）", () => {
   });
 });
 
+describe("删列迁移（attendance_overrides 带 note → 删掉）", () => {
+  it("老库的 note 列消失、覆盖行原样保留；重复执行不报错", () => {
+    // 手工造一个「带 note 列」的老库：这列建出来却从来没有写入路径（2026-10-24 删掉）
+    const db = new Database(":memory:");
+    db.pragma("foreign_keys = ON");
+    db.exec(`
+      CREATE TABLE users (
+        id            INTEGER PRIMARY KEY AUTOINCREMENT,
+        username      TEXT    NOT NULL,
+        username_key  TEXT    NOT NULL UNIQUE,
+        password_hash TEXT    NOT NULL,
+        created_at    INTEGER NOT NULL
+      );
+      CREATE TABLE attendance_overrides (
+        user_id    INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        day_key    TEXT    NOT NULL,
+        status     TEXT    NOT NULL CHECK (status IN ('work', 'off')),
+        note       TEXT,
+        created_at INTEGER NOT NULL,
+        updated_at INTEGER NOT NULL,
+        PRIMARY KEY (user_id, day_key)
+      ) WITHOUT ROWID;
+      INSERT INTO users (username, username_key, password_hash, created_at)
+        VALUES ('old', 'old', 'hash', 1);
+      INSERT INTO attendance_overrides (user_id, day_key, status, note, created_at, updated_at)
+        VALUES (1, '2026-10-26', 'off', '国庆调休', 111, 222);
+    `);
+
+    initSchema(db);
+
+    const columns = () =>
+      (
+        db.prepare("PRAGMA table_info(attendance_overrides)").all() as {
+          name: string;
+        }[]
+      ).map((column) => column.name);
+
+    expect(columns()).not.toContain("note");
+
+    // 原有的覆盖行一条不少、状态没变（删的只是一列没人用的备注）
+    expect(listOverrides(db, 1, "2026-10-01", "2026-10-31")).toEqual([
+      { dayKey: "2026-10-26", status: "off" },
+    ]);
+
+    // 幂等：再跑一次不报错、不重复删
+    initSchema(db);
+    expect(columns()).not.toContain("note");
+    expect(countRows(db, "attendance_overrides", 1)).toBe(1);
+  });
+});
+
 describe("buildMonthView", () => {
   it("42 格全部带状态；覆盖标 manual，制度管所有周六", () => {
     const { db, alice } = setup();
