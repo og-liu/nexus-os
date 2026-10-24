@@ -1,6 +1,7 @@
 "use client";
 
 import { Menu, Plus } from "lucide-react";
+import type { LucideIcon } from "lucide-react";
 import { useAppShell } from "@/components/layout/app-shell";
 
 /**
@@ -16,12 +17,15 @@ interface ToolMobileBarProps {
   newLabel: string;
   onNew: () => void;
   disabled?: boolean;
+  /** 主操作图标，默认 `Plus`（新建类动作用）；「回到今天」这类传自己的图标。 */
+  icon?: LucideIcon;
 }
 
 export function ToolMobileBar({
   newLabel,
   onNew,
   disabled = false,
+  icon: Icon = Plus,
 }: ToolMobileBarProps) {
   const { openNav } = useAppShell();
 
@@ -41,7 +45,7 @@ export function ToolMobileBar({
         disabled={disabled}
         className="flex h-8 cursor-pointer items-center gap-1.5 rounded-[2px] bg-[#000000] px-3 text-xs font-medium text-white transition-colors hover:bg-[#333333] disabled:cursor-not-allowed"
       >
-        <Plus className="h-3.5 w-3.5" />
+        <Icon className="h-3.5 w-3.5" />
         {newLabel}
       </button>
     </div>
