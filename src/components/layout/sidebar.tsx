@@ -3,18 +3,10 @@
 import { useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import {
-  Brain,
-  Rocket,
-  FolderOpen,
-  Bot,
-  BookOpen,
-  Zap,
-  Settings,
-  X,
-} from "lucide-react";
+import { X } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { LogoIcon } from "@/components/layout/logo-icon";
+import { navItems } from "@/components/layout/nav-items";
 import { UserMenu } from "@/components/layout/user-menu";
 
 /**
@@ -31,17 +23,9 @@ import { UserMenu } from "@/components/layout/user-menu";
  * 底部是账户区（§7.18）：两档触发形态不同、点开同一个用户菜单。
  * 导航区（min-h-0 + overflow-y-auto）与账户区（shrink-0）分开滚动——
  * 矮屏（横屏手机 / 小窗口）下导航可以滚，账户块钉在底部不被挤走。
+ *
+ * 导航项数组住在 `nav-items.ts`：页签栏与侧栏共用同一份文字，改菜单名只改一处。
  */
-
-const navItems = [
-  { href: "/", label: "总览", icon: Brain },
-  { href: "/agent", label: "Agent", icon: Bot },
-  { href: "/knowledge", label: "知识", icon: BookOpen },
-  { href: "/tools", label: "工具", icon: Rocket },
-  { href: "/files", label: "文件", icon: FolderOpen },
-  { href: "/automation", label: "自动", icon: Zap },
-  { href: "/settings", label: "设置", icon: Settings },
-];
 
 interface SidebarProps {
   /** desktop：常驻图标栏；mobile：手机抽屉内的完整菜单 */
