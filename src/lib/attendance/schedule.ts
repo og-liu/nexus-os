@@ -1,7 +1,7 @@
 import { daysBetween, isSaturday, weekdayOf } from "./month-grid";
 
 /**
- * 出勤状态的推算（《功能/出勤日历》§三「推算函数」）。
+ * 出勤状态的推算（《功能/工作日历》§三「推算函数」）。
  *
  * 三层，优先级从高到低，**顺序固定写在一处**：
  *

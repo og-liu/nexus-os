@@ -12,7 +12,7 @@ import { weekdayShortLabel, type MonthDayView } from "@/lib/attendance/month-gri
 import { statusLabel, type OverrideStatus } from "@/lib/attendance/schedule";
 
 /**
- * 点某一天弹出的状态弹层（《功能/出勤日历》§2.4、《界面设计规范》§7.21.3）。
+ * 点某一天弹出的状态弹层（《功能/工作日历》§2.4、《界面设计规范》§7.21.3）。
  *
  * | 按钮 | 写哪张表 |
  * |---|---|
