@@ -4,12 +4,16 @@ import { createContext, useCallback, useContext, useEffect, useState } from "rea
 import type { ReactNode } from "react";
 import { Footer } from "@/components/layout/footer";
 import { Sidebar } from "@/components/layout/sidebar";
+import { TabBar } from "@/components/layout/tab-bar";
 
 /**
  * 应用外壳（《界面设计规范》§5.1）。
  *
- * 桌面（≥ lg）：常驻图标侧边栏 + 右侧「主内容区 + 页脚」两段式。
- * 手机（< lg）：侧边栏收进抽屉，由页头的汉堡按钮打开。
+ * 桌面（≥ lg）：常驻图标侧边栏 + 右侧「页签栏 / 主内容区 / 页脚」三段式。
+ * 手机（< lg）：侧边栏收进抽屉，由页头的汉堡按钮打开；页签栏整条不渲染。
+ *
+ * 页签栏（§7.22）挂在这层、`<main>` 外面：它必须比页面活得久（切页面不重建），
+ * 也不能跟着主内容区一起滚。
  *
  * 「打开抽屉」的按钮在页头里、状态却住在外壳上，两者隔着好几层组件树——
  * 用一个 Context 把 `openNav` 传下去（页头里 `useAppShell()` 取用），
@@ -57,6 +61,8 @@ export function AppShell({
       <div className="flex h-screen overflow-hidden">
         <Sidebar variant="desktop" username={username} />
         <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
+          {/* 页签栏在 <main> 外面（§7.22.1）：不随内容滚，也不给 <main> 留占位 */}
+          <TabBar />
           <main className="flex-1 overflow-y-auto bg-[#ECECEC]">{children}</main>
           <Footer />
         </div>
