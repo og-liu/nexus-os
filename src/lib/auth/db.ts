@@ -77,7 +77,6 @@ CREATE TABLE IF NOT EXISTS attendance_overrides (
   user_id    INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
   day_key    TEXT    NOT NULL,             -- 'YYYY-MM-DD'
   status     TEXT    NOT NULL CHECK (status IN ('work', 'off')),
-  note       TEXT,                         -- 可空：「国庆调休」「请假」
   created_at INTEGER NOT NULL,
   updated_at INTEGER NOT NULL,
   PRIMARY KEY (user_id, day_key)
@@ -95,6 +94,29 @@ export function initSchema(conn: Db): void {
   migrateAttendanceCycles(conn);
   migrateAttendanceAnchor(conn);
   migrateAttendanceModeCheck(conn);
+  // 建表之后删列：`note` 是空壳列（理由见 migrateAttendanceOverrideNote）
+  migrateAttendanceOverrideNote(conn);
+}
+
+
+/**
+ * 删列：`attendance_overrides.note`（2026-10-24）。
+ *
+ * 这列建出来却**没有任何写入路径**——弹层里没有备注输入框，`saveOverride` 恒写 NULL，
+ * 界面上也不显示。一个永远是 NULL 的列会让读代码的人以为「备注功能是有的」，
+ * 而文档里那句「带备注的日子显示小字」根本不成立；空壳比没有这个功能更糟，所以删掉
+ * （《功能/出勤日历》§三「没有 note 列」）。
+ *
+ * 用 SQLite 3.35+ 的 `DROP COLUMN`（better-sqlite3 12 内置的版本远高于它）。
+ * `note` 既不是主键也不是索引列，删它不影响 `WITHOUT ROWID` 与复合主键。
+ * 幂等：新库按 SCHEMA 建出来本来就没有这列，看到没有就什么都不做。
+ */
+function migrateAttendanceOverrideNote(conn: Db): void {
+  const columns = conn
+    .prepare("PRAGMA table_info(attendance_overrides)")
+    .all() as { name: string }[];
+  if (!columns.some((column) => column.name === "note")) return;
+  conn.exec("ALTER TABLE attendance_overrides DROP COLUMN note");
 }
 
 
