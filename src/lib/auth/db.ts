@@ -11,6 +11,25 @@ export type Db = Database.Database;
  *
  * 全部 `CREATE ... IF NOT EXISTS`，可重复执行。
  */
+/**
+ * `attendance_settings` 的列定义。
+ *
+ * 抽成常量是因为它有**两份消费者**：首次建表（SCHEMA）与老库重建
+ * （`migrateAttendanceModeCheck`：SQLite 改不了 CHECK 约束，只能整表重建）。
+ * 两处各写一份迟早会漂移，重建出来的表就跟新库不一样了。
+ */
+const ATTENDANCE_SETTINGS_COLUMNS = `
+  user_id         INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+  saturday_mode   TEXT    NOT NULL CHECK (saturday_mode IN ('work', 'off', 'alternate')),
+  anchor_saturday TEXT,                    -- 仅 'alternate' 用：交替从哪个周六起算
+  anchor_is_work  INTEGER CHECK (anchor_is_work IN (0, 1)),
+  created_at      INTEGER NOT NULL,
+  updated_at      INTEGER NOT NULL,
+  -- 交替模式必须带锚点；单休 / 双休时两列为 NULL
+  CHECK (saturday_mode <> 'alternate'
+         OR (anchor_saturday IS NOT NULL AND anchor_is_work IS NOT NULL))
+`;
+
 const SCHEMA = `
 CREATE TABLE IF NOT EXISTS users (
   id            INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -51,6 +70,18 @@ CREATE TABLE IF NOT EXISTS todos (
 );
 
 CREATE INDEX IF NOT EXISTS idx_todos_user_id ON todos(user_id);
+
+CREATE TABLE IF NOT EXISTS attendance_settings (${ATTENDANCE_SETTINGS_COLUMNS});
+
+CREATE TABLE IF NOT EXISTS attendance_overrides (
+  user_id    INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  day_key    TEXT    NOT NULL,             -- 'YYYY-MM-DD'
+  status     TEXT    NOT NULL CHECK (status IN ('work', 'off')),
+  note       TEXT,                         -- 可空：「国庆调休」「请假」
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL,
+  PRIMARY KEY (user_id, day_key)
+) WITHOUT ROWID;
 `;
 
 /** 建表（幂等）。单独导出，测试可以在任意连接上初始化结构。 */
@@ -60,6 +91,109 @@ export function initSchema(conn: Db): void {
   conn.exec(SCHEMA);
   // 建表之后补列：`CREATE TABLE IF NOT EXISTS` 对已存在的表是空操作，老库不会自动多出列
   migrateStickyNotePinnedAt(conn);
+  // 建表之后搬数据：新表已经在了，老表还留着行
+  migrateAttendanceCycles(conn);
+  migrateAttendanceAnchor(conn);
+  migrateAttendanceModeCheck(conn);
+}
+
+
+/**
+ * 出勤设置补列：`anchor_saturday` / `anchor_is_work`（交替模式的锚点）。
+ *
+ * 为什么加：2026-10-23 联调第二轮，主人在单休 / 双休之外要「单双休（大小周）」——
+ * 本周单休、下周双休这样交替。交替必须知道**从哪一周起算**，否则每次读取都用
+ * 「今天所在的那一周」当起点，结果会随着日子往前走而漂移。
+ *
+ * 老库（只有 `saturday_mode` 四列）补成两列 NULL：那一版只有单休 / 双休，
+ * 本来就没有锚点，NULL 就是正确值。幂等：列已存在就什么都不做。
+ * 必须跑在 `migrateAttendanceModeCheck` **之前**：整表重建时要按六列搬行。
+ * 注意 SQLite 的 `ALTER TABLE ADD COLUMN` 带不上表级 CHECK，所以老库补出来的两列
+ * 只有应用层校验兜底；新库由 SCHEMA 里的 CHECK 管住。
+ */
+function migrateAttendanceAnchor(conn: Db): void {
+  const columns = conn
+    .prepare("PRAGMA table_info(attendance_settings)")
+    .all() as { name: string }[];
+
+  // 新库：表是上面 SCHEMA 刚建的，已经带这两列
+  if (columns.length === 0) return;
+  if (columns.some((column) => column.name === "anchor_saturday")) return;
+
+  conn.exec("ALTER TABLE attendance_settings ADD COLUMN anchor_saturday TEXT");
+  conn.exec("ALTER TABLE attendance_settings ADD COLUMN anchor_is_work INTEGER");
+}
+
+/**
+ * 补「单双休」这一档时，老表的 `CHECK (saturday_mode IN ('work', 'off'))` 会把
+ * `'alternate'` 直接拒掉（`SqliteError: CHECK constraint failed`）。
+ *
+ * SQLite **改不了已有的 CHECK**，只能整表重建：改名 → 按新列定义建表 → 搬行 → 删老表。
+ * 判断依据是建表语句里有没有 `'alternate'`；有就什么都不做（幂等）。
+ * 整个过程包在一个事务里：中途失败不会留下「表建了一半」的库。
+ */
+function migrateAttendanceModeCheck(conn: Db): void {
+  const table = conn
+    .prepare(
+      "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'attendance_settings'",
+    )
+    .get() as { sql: string } | undefined;
+  if (!table) return;
+  if (table.sql.includes("'alternate'")) return;
+
+  conn.exec(`
+    BEGIN;
+    ALTER TABLE attendance_settings RENAME TO attendance_settings_legacy;
+    CREATE TABLE attendance_settings (${ATTENDANCE_SETTINGS_COLUMNS});
+    INSERT INTO attendance_settings
+      (user_id, saturday_mode, anchor_saturday, anchor_is_work, created_at, updated_at)
+    SELECT user_id, saturday_mode, anchor_saturday, anchor_is_work, created_at, updated_at
+    FROM attendance_settings_legacy;
+    DROP TABLE attendance_settings_legacy;
+    COMMIT;
+  `);
+}
+
+/**
+ * 出勤设置的老表迁移：`attendance_cycles`（一个基准周六 + 那周上不上班）→
+ * `attendance_settings`（一个全局的周六制度：单休 / 双休）。
+ *
+ * 为什么结构换了：2026-10-23 联调时 ogliu 把口径定成「设置里直接选单休或双休，全年按它算」，
+ * 原来那套「基准周六 + 两周交替」的循环在当时被砍掉，表从 cycles 换成了 settings。
+ *
+ * 老库里的那一行仍然带着他的心意（那周的周六上不上班），搬成全局制度：
+ * `anchor_is_work = 1` → `saturday_mode = 'work'`（单休），否则 `'off'`（双休）。
+ * 搬完就把老表删掉——它随本功能诞生、尚未上线，除了这条设置没有别的数据要留。
+ * 幂等：新库里没有 `attendance_cycles`，直接跳过。
+ */
+function migrateAttendanceCycles(conn: Db): void {
+  if (!tableExists(conn, "attendance_cycles")) return;
+
+  const rows = conn
+    .prepare(
+      "SELECT user_id, anchor_is_work, created_at, updated_at FROM attendance_cycles",
+    )
+    .all() as {
+    user_id: number;
+    anchor_is_work: number;
+    created_at: number;
+    updated_at: number;
+  }[];
+
+  const insert = conn.prepare(
+    `INSERT OR IGNORE INTO attendance_settings (user_id, saturday_mode, created_at, updated_at)
+     VALUES (?, ?, ?, ?)`,
+  );
+  for (const row of rows) {
+    insert.run(
+      row.user_id,
+      row.anchor_is_work === 1 ? "work" : "off",
+      row.created_at,
+      row.updated_at,
+    );
+  }
+
+  conn.exec("DROP TABLE attendance_cycles");
 }
 
 /**
