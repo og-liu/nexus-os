@@ -7,6 +7,7 @@ import {
   Braces,
   CalendarCheck,
   CalendarClock,
+  CalendarDays,
   CheckSquare,
   Clapperboard,
   Clipboard,
@@ -561,6 +562,14 @@ export const TOOLS: Tool[] = [
     description: "每天更新一段正能量文案",
     icon: Quote,
     status: "开发中",
+    category: "生活",
+  },
+  {
+    slug: "attendance-calendar",
+    name: "工作日历",
+    description: "单休 / 双休 / 单双休自动推算，每天上班还是休息一眼看清",
+    icon: CalendarDays,
+    status: "可用",
     category: "生活",
   },
 ];
