@@ -24,7 +24,7 @@ import {
 } from "./schedule";
 
 /**
- * 出勤日历的 Server Actions（《功能/出勤日历》§2.4、§2.5）。
+ * 工作日历的 Server Actions（《功能/工作日历》§2.4、§2.5）。
  *
  * 两个前提与便签一致：
  * 1. Server Action 是**公开 HTTP 端点**——状态、日期、制度全部在服务端再校验一遍，
@@ -52,7 +52,7 @@ function fail(error: string): AttendanceActionResult {
   return { ok: false, error };
 }
 
-/** 首页出勤卡与工具页读同一份数据，写完一起失效。 */
+/** 首页工作日历卡与工具页读同一份数据，写完一起失效。 */
 function revalidateAttendance(): void {
   revalidatePath("/");
   revalidatePath("/tools/attendance-calendar");

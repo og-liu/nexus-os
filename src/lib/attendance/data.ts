@@ -2,7 +2,7 @@ import type { Db } from "@/lib/auth/db";
 import type { AttendanceSetting, OverrideStatus, SaturdayMode } from "./schedule";
 
 /**
- * 出勤日历的两张表（《功能/出勤日历》§三 数据模型）。
+ * 工作日历的两张表（《功能/工作日历》§三 数据模型）。
  *
  * 分工与便签一致：这里只碰数据库，不碰 cookie 与请求上下文；服务端操作在 `actions.ts`。
  * 每条 SQL 都带 `user_id = ?`——数据按账号隔离，「只有一个用户」不是理由。

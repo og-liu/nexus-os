@@ -4,7 +4,7 @@ import { formatLunarDate } from "@/lib/datetime/format";
 import { parseDayKey, type DayLabels } from "./month-grid";
 
 /**
- * 每格的农历 / 节日标注（《功能/出勤日历》§三「每格节日放几个」）。
+ * 每格的农历 / 节日标注（《功能/工作日历》§三「每格节日放几个」）。
  *
  * **整个 attendance 功能里只有这个文件 import lunar-javascript**，而它只被服务端
  * （`month-view.ts` ← 两个页面的 Server Component）引用，客户端组件碰不到
