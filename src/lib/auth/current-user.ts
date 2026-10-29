@@ -20,10 +20,13 @@ import type { User } from "./user";
  */
 
 /**
- * `secure` 由环境变量控制，**不能写死 true**。
- * 线上当前还是 HTTP，如果 cookie 带 Secure，浏览器会直接丢弃它——
- * 表现为「登录成功，一刷新就掉线」，而且没有任何报错。
- * 等域名备案完成、HTTPS 上线，再把 `SESSION_COOKIE_SECURE=true` 打开。
+ * `secure` 由环境变量控制，**不能写死 true**——两边的取值是相反的：
+ * - 本地是 HTTP：必须 false（或不设）。cookie 一旦带 Secure，浏览器会直接丢弃它，
+ *   表现为「登录成功，一刷新就掉线」，而且没有任何报错。
+ * - 线上 HTTPS 已上线：`shared/.env.production` 里设为 true（2026-10-29 实测核对）。
+ *
+ * 判定写成 `=== "true"` 而不是 truthy 判断：环境变量永远是字符串，
+ * `"false"` 在布尔语境里是 **true**，`Boolean(process.env.X)` 会把「关」判成「开」。
  */
 function sessionCookieOptions() {
   return {

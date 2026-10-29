@@ -286,9 +286,12 @@ export function createConnection(file: string): Db {
  * 不是项目根目录，同一个相对路径在两处的落点完全不同。所以线上由环境变量指定绝对路径。
  */
 export function resolveDatabasePath(): string {
-  return (
-    process.env.DATABASE_PATH ?? path.join(process.cwd(), "data", "nexus-os.db")
-  );
+  // 空值必须当作「没设」。`.env.example` 里 `DATABASE_PATH=` 是留空写法，
+  // 而 dotenv 会把它解析成**空字符串**（不是 undefined）——`??` 只拦 null/undefined，
+  // 空串会径直穿过去，数据库路径就成了空串，进程一起来就崩。
+  // 所以先 trim，再用 `||` 兜住「未设 / 空串 / 纯空格」三种情况。
+  const fromEnv = process.env.DATABASE_PATH?.trim();
+  return fromEnv || path.join(process.cwd(), "data", "nexus-os.db");
 }
 
 /**
