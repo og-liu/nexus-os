@@ -1,9 +1,8 @@
 "use client";
 
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Plus } from "lucide-react";
 import { Modal } from "@/components/ui/modal";
-import { useToast } from "@/components/ui/toast";
 import { cn } from "@/lib/utils";
 import { generatePassword } from "@/lib/vault/password";
 import type { VaultField, VaultGroup, VaultItem } from "@/lib/vault/vault";
@@ -15,8 +14,9 @@ import { useFieldDrag } from "./use-field-drag";
  * 新建 / 编辑条目弹窗（《功能/保险库》§2.5）。新建与编辑共用一份——
  * 差别只有初始值和标题，分两套会出现「两边校验不一样」这种迟早发生的事。
  *
- * **关闭前要防手滑**：有未保存改动时，第一次点关闭只提示、不关；再点一次才真的丢弃。
- * 这一条是拿弹窗里最贵的东西（刚敲进去的一串字段）换来的，`Esc` 也走同一条路。
+ * **关闭就是关闭**：点「取消」/ `Esc` / 点遮罩一律直接关、改动丢弃。
+ * 曾经做过「有改动要按两次」的防手滑，被主人否掉——他的原话是
+ * 「我都要取消了，为什么还要保存」。要留住改动就点保存，取消这个动作本身就表达了意图。
  */
 
 interface ItemDialogProps {
@@ -52,8 +52,6 @@ export function ItemDialog({
   onSubmit,
   onClose,
 }: ItemDialogProps) {
-  const toast = useToast();
-
   const [title, setTitle] = useState(item?.title ?? UNTITLED);
   const [groupId, setGroupId] = useState<number | null>(
     item ? item.groupId : defaultGroupId,
@@ -62,28 +60,19 @@ export function ItemDialog({
   const [fields, setFields] = useState<DraftField[]>(() =>
     item ? item.fields.map(toDraft) : [{ uid: nextUid(), key: "", value: "" }],
   );
-  /** 有未保存改动时，关闭动作要按两次（第一次只提示）。 */
-  const [exitArmed, setExitArmed] = useState(false);
 
-  const initialJson = useMemo(
-    () =>
-      JSON.stringify({
-        title: item?.title ?? UNTITLED,
-        groupId: item ? item.groupId : defaultGroupId,
-        fields: item ? item.fields : [{ key: "", value: "" }],
-      }),
-    [item, defaultGroupId],
-  );
-
-  const dirty = useMemo(
-    () =>
-      JSON.stringify({
-        title,
-        groupId,
-        fields: fields.map(({ key, value }) => ({ key, value })),
-      }) !== initialJson,
-    [title, groupId, fields, initialJson],
-  );
+  /**
+   * 打开弹窗就聚焦标题并**全选**「未命名」：进来直接打字就是替换，
+   * 不用先把那三个字删掉。焦点在标题而不是字段名——标题是这条记录的名字，
+   * 也是之后列表里唯一能看到的东西（新建时默认值已经是「未命名」，全选状态下敲字即覆盖）。
+   */
+  const titleRef = useRef<HTMLInputElement>(null);
+  useEffect(() => {
+    const input = titleRef.current;
+    if (!input) return;
+    input.focus();
+    input.select();
+  }, []);
 
   const reorder = useCallback((from: number, to: number) => {
     setFields((current) => {
@@ -131,14 +120,8 @@ export function ItemDialog({
   }, []);
 
   const handleClose = useCallback(() => {
-    if (dirty && !exitArmed) {
-      setExitArmed(true);
-      toast.warn("有未保存的改动，再点一次关闭");
-      window.setTimeout(() => setExitArmed(false), 2500);
-      return;
-    }
     onClose();
-  }, [dirty, exitArmed, onClose, toast]);
+  }, [onClose]);
 
   const submit = useCallback(() => {
     if (busy) return;
@@ -174,6 +157,7 @@ export function ItemDialog({
           <label className="block">
             <span className="mb-1 block text-[11px] text-[#8A8A8A]">标题</span>
             <input
+              ref={titleRef}
               type="text"
               value={title}
               onChange={(event) => setTitle(event.target.value)}
@@ -228,7 +212,6 @@ export function ItemDialog({
                 index={index}
                 dragging={dragIndex === index}
                 offset={offset}
-                autoFocus={index === 0}
                 onStartDrag={startDrag}
                 onMoveByKeyboard={moveByKeyboard}
                 onChange={updateField}

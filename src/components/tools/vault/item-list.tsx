@@ -3,6 +3,7 @@
 import type { ReactNode } from "react";
 import {
   FolderTree,
+  Menu,
   Plus,
   Search,
   Trash2,
@@ -18,6 +19,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { cn } from "@/lib/utils";
 import { formatDateTime } from "@/lib/format";
+import { useAppShell } from "@/components/layout/app-shell";
 import type { VaultGroup, VaultItem } from "@/lib/vault/vault";
 
 /**
@@ -83,11 +85,22 @@ export function ItemList({
 }: ItemListProps) {
   const checkedCount = checkedIds.size;
   const allChecked = items.length > 0 && items.every((item) => checkedIds.has(item.id));
+  // 这一页没有 PageHeader（三栏直接从页签栏下面开始），手机的全局侧边栏入口挪到这里
+  const { openNav } = useAppShell();
 
   return (
     <div className={cn("flex h-full min-w-0 flex-col bg-white @container", className)}>
       {/* 顶部一行的三种东西：群组（窄屏才出现）/ 搜索 / 新建 */}
       <div className="flex items-center gap-2 border-b border-[#E8E8E8] px-3 py-2">
+        <button
+          type="button"
+          onClick={openNav}
+          aria-label="打开菜单"
+          className="flex h-8 w-8 shrink-0 items-center justify-center rounded-[2px] text-[#1F1F1F] transition-colors hover:bg-[#F5F5F5] lg:hidden"
+        >
+          <Menu className="h-4 w-4" />
+        </button>
+
         <button
           type="button"
           onClick={onOpenGroups}

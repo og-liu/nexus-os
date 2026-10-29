@@ -28,7 +28,6 @@ interface FieldRowProps {
   index: number;
   dragging: boolean;
   offset: number;
-  autoFocus?: boolean;
   onStartDrag: (index: number, event: PointerEvent<HTMLElement>, row: HTMLElement | null) => void;
   onMoveByKeyboard: (index: number, event: KeyboardEvent<HTMLElement>) => void;
   onChange: (index: number, patch: Partial<Pick<DraftField, "key" | "value">>) => void;
@@ -41,7 +40,6 @@ export function FieldRow({
   index,
   dragging,
   offset,
-  autoFocus,
   onStartDrag,
   onMoveByKeyboard,
   onChange,
@@ -75,7 +73,6 @@ export function FieldRow({
         <input
           type="text"
           value={field.key}
-          autoFocus={autoFocus}
           onChange={(event) => onChange(index, { key: event.target.value })}
           placeholder="字段名"
           aria-label={`第 ${index + 1} 个字段的名字`}

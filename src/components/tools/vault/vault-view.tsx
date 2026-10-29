@@ -1,7 +1,6 @@
 "use client";
 
 import { useCallback, useMemo, useState, useTransition } from "react";
-import { PageHeader } from "@/components/layout/page-header";
 import { useToast } from "@/components/ui/toast";
 import { cn } from "@/lib/utils";
 import {
@@ -240,12 +239,14 @@ export function VaultView({ initialSnapshot }: VaultViewProps) {
 
       if (dialog.kind === "create-item") {
         mutate(() => createItemAction(input), {
-          successMessage: "已保存",
-          onOk: (_snapshot, createdId) => {
+          onOk: (snapshot, createdId) => {
             // 新建的那条直接选中（服务端把新 id 放在 createdId 上，不用猜）
             setDialog(null);
             setSelectedId(createdId ?? null);
             setDetailOpen(false);
+            // 提示带上标题：服务端可能把「未命名」补成「未命名 2」，所以从快照里取真标题
+            const created = snapshot.items.find((row) => row.id === createdId);
+            toast.success(`「${created?.title ?? input.title}」已保存`);
           },
         });
         return;
@@ -254,14 +255,15 @@ export function VaultView({ initialSnapshot }: VaultViewProps) {
       const item = dialog.item;
       if (!item) return;
       mutate(() => updateItemAction(item.id, input), {
-        successMessage: "已保存",
-        onOk: () => {
+        onOk: (snapshot) => {
           setDialog(null);
           setSelectedId(item.id);
+          const saved = snapshot.items.find((row) => row.id === item.id);
+          toast.success(`「${saved?.title ?? input.title}」已保存`);
         },
       });
     },
-    [dialog, mutate],
+    [dialog, mutate, toast],
   );
 
   const submitGroup = useCallback(
@@ -350,10 +352,8 @@ export function VaultView({ initialSnapshot }: VaultViewProps) {
   // ---------------------------------------------------------------- 渲染
 
   return (
-    <div className="flex h-full flex-col overflow-hidden">
-      <PageHeader title="保险库" backHref="/tools" />
-
-      <div className="flex min-h-0 flex-1 overflow-hidden">
+    <>
+      <div className="flex h-full overflow-hidden">
         {/* 左栏：≥ xl 常驻；更窄时收进抽屉（内容区只有 80px 侧栏让位，三栏会挤） */}
         <aside className="hidden w-52 shrink-0 border-r border-[#E8E8E8] xl:flex">
           <GroupNav
@@ -517,6 +517,6 @@ export function VaultView({ initialSnapshot }: VaultViewProps) {
           onClose={closeDialog}
         />
       ) : null}
-    </div>
+    </>
   );
 }
