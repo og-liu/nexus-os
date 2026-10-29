@@ -6,6 +6,15 @@ import { formatDateTime } from "@/lib/format";
 import type { VaultGroup, VaultItem } from "@/lib/vault/vault";
 
 /**
+ * 右栏遮挡用的固定星号串。
+ *
+ * 为什么固定 12 个而不是「几个就够」：3 个看起来像省略号或占位符，
+ * 12 个才像一串被藏起来的密码（主人要求「固定到 12 个」）。
+ * 也不按真实长度生成——那等于把长度这个信息泄露出去。
+ */
+const MASK = "************";
+
+/**
  * 保险库右栏：选中条目的全部内容（《功能/保险库》§2.4）。
  *
  * **字段值默认按 `field.hidden` 遮挡**（`***`），点眼睛能临时露出来——这是密码管理器的常规做法：
@@ -184,8 +193,8 @@ function ItemBody({
                       {field.value}
                     </p>
                   ) : (
-                    <p className="mt-0.5 font-mono text-[14px] tracking-widest text-[#8A8A8A]">
-                      ***
+                    <p className="mt-0.5 font-mono text-[14px] tracking-[0.35em] text-[#8A8A8A]">
+                      {MASK}
                     </p>
                   )}
                 </li>
