@@ -273,7 +273,18 @@ export function VaultView({ initialSnapshot }: VaultViewProps) {
       if (dialog.kind === "create-group") {
         mutate(() => createGroupAction(name), {
           successMessage: "群组已创建",
-          onOk: () => setDialog(null),
+          onOk: (snapshot, createdId) => {
+            setDialog(null);
+            // 建完直接切过去：新群组是空的，所以中栏空态、右栏空态，左栏高亮它
+            if (createdId !== undefined) {
+              setView(createdId);
+              setQuery("");
+              setCheckedIds(new Set());
+              const first = snapshot.items.find((item) => item.groupId === createdId);
+              setSelectedId(first?.id ?? null);
+              setDetailOpen(false);
+            }
+          },
         });
         return;
       }

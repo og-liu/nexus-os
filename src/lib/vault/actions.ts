@@ -132,7 +132,8 @@ export async function createGroupAction(rawName: string): Promise<VaultActionRes
   if (!result.ok) return fail("已存在同名群组");
 
   revalidateVault();
-  return ok(snapshot(db, user.id));
+  // 带上新群组 id：建完界面要直接切到它（否则用户得在左栏里再找一遍）
+  return ok(snapshot(db, user.id), result.id);
 }
 
 export async function renameGroupAction(
