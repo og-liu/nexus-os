@@ -1,6 +1,12 @@
+import path from "node:path";
 import Database from "better-sqlite3";
-import { describe, expect, it } from "vitest";
-import { createConnection, initSchema, type Db } from "./db";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import {
+  createConnection,
+  initSchema,
+  resolveDatabasePath,
+  type Db,
+} from "./db";
 
 /** 造一个「老版本」的库：登录会话表还叫 `sessions`，里面已经有行。 */
 function openLegacyDatabase(): Db {
@@ -193,5 +199,42 @@ describe("便签表补列：pinned_at", () => {
   it("全新的库建表时就带 pinned_at", () => {
     const conn = createConnection(":memory:");
     expect(columnNames(conn, "sticky_notes")).toContain("pinned_at");
+  });
+});
+
+describe("resolveDatabasePath：空值一律当作没设", () => {
+  const KEY = "DATABASE_PATH";
+  const fallback = path.join(process.cwd(), "data", "nexus-os.db");
+  let original: string | undefined;
+
+  beforeEach(() => {
+    original = process.env[KEY];
+  });
+
+  afterEach(() => {
+    if (original === undefined) delete process.env[KEY];
+    else process.env[KEY] = original;
+  });
+
+  it("没设时回退到项目下的 data/nexus-os.db", () => {
+    delete process.env[KEY];
+    expect(resolveDatabasePath()).toBe(fallback);
+  });
+
+  it("空串也回退——模板里写 DATABASE_PATH= 逐字复制过来时就是这种值", () => {
+    // dotenv 把 `DATABASE_PATH=` 解析成空字符串而不是 undefined，
+    // 用 `??` 兜底会漏掉它，数据库路径变成空串，进程一起来就崩。
+    process.env[KEY] = "";
+    expect(resolveDatabasePath()).toBe(fallback);
+  });
+
+  it("纯空格同样回退", () => {
+    process.env[KEY] = "   ";
+    expect(resolveDatabasePath()).toBe(fallback);
+  });
+
+  it("有值时用它（线上绝对路径走这条）", () => {
+    process.env[KEY] = "/opt/nexus-os/shared/data/nexus-os.db";
+    expect(resolveDatabasePath()).toBe("/opt/nexus-os/shared/data/nexus-os.db");
   });
 });
