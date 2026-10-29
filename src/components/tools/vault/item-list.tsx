@@ -55,6 +55,8 @@ interface ItemListProps {
   /** 手机上的群组 chip 条：当前视图。 */
   activeView: "all" | number;
   onSelectView: (view: "all" | number) => void;
+  /** 双击某一行直接打开编辑弹窗（比「先选中 → 再点右栏铅笔」少两步）。 */
+  onEditItem: (item: VaultItem) => void;
   /** 当前视图的说明，用在空态文案里。 */
   emptyText: string;
   busy: boolean;
@@ -79,6 +81,7 @@ export function ItemList({
   onOpenGroups,
   activeView,
   onSelectView,
+  onEditItem,
   emptyText,
   busy,
   className,
@@ -261,7 +264,7 @@ export function ItemList({
                 <li key={item.id}>
                   <div
                     className={cn(
-                      "flex items-center gap-2 border-b border-[#F0F0F0] px-3 py-0 text-[13px] transition-colors",
+                      "flex cursor-pointer select-none items-center gap-2 border-b border-[#F0F0F0] px-3 py-0 text-[13px] transition-colors",
                       selected ? "bg-[#F5F5F5]" : "bg-white hover:bg-[#FAFAFA]",
                     )}
                   >
@@ -271,16 +274,19 @@ export function ItemList({
                         aria-label={`选择「${item.title}」`}
                         checked={checked}
                         onChange={() => onToggleCheck(item.id)}
-                        className="h-3.5 w-3.5 accent-[#000000]"
+                        className="h-3.5 w-3.5 cursor-pointer accent-[#000000]"
                       />
                     </span>
 
-                    {/* 整行可点：点标题、字段、时间都算选中（复选框自己拦掉冒泡） */}
+                    {/* 整行可点：点标题、字段、时间都算选中（复选框自己拦掉冒泡）；
+                        双击直接进编辑——比「先选中、再点右栏铅笔」少两步（主人要求） */}
                     <button
                       type="button"
                       onClick={() => onSelect(item)}
+                      onDoubleClick={() => onEditItem(item)}
                       aria-current={selected ? "true" : undefined}
-                      className="flex min-w-0 flex-1 items-center gap-2 py-2 text-left outline-none focus-visible:underline"
+                      title="双击编辑"
+                      className="flex min-w-0 flex-1 cursor-pointer items-center gap-2 py-2 text-left outline-none focus-visible:underline"
                     >
                       <span
                         className={cn(

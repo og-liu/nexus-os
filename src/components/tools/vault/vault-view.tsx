@@ -386,6 +386,7 @@ export function VaultView({ initialSnapshot }: VaultViewProps) {
           onOpenGroups={() => setGroupsOpen(true)}
           activeView={view}
           onSelectView={selectView}
+          onEditItem={(item) => openDialog({ kind: "edit-item", item })}
           emptyText={emptyText}
           busy={pending}
           className={cn(
