@@ -54,6 +54,7 @@ import {
   StickyNote,
   TypeOutline,
   UsersRound,
+  Vault,
   Video,
   Volume2,
   ZoomIn,
@@ -562,6 +563,14 @@ export const TOOLS: Tool[] = [
     description: "每天更新一段正能量文案",
     icon: Quote,
     status: "开发中",
+    category: "生活",
+  },
+  {
+    slug: "vault",
+    name: "保险库",
+    description: "存账号、密码和任何需要记住的键值记录，按群组归类",
+    icon: Vault,
+    status: "可用",
     category: "生活",
   },
   {

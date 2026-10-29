@@ -3,8 +3,8 @@ import { TOOLS, TOOL_CATEGORIES, findToolBySlug } from "./tool-catalog";
 import { filterTools, groupTools } from "./tool-filter";
 
 describe("tool-catalog（《功能/工具中心》数据）", () => {
-  it("共 59 个工具，名称不重复", () => {
-    expect(TOOLS).toHaveLength(59);
+  it("共 60 个工具，名称不重复", () => {
+    expect(TOOLS).toHaveLength(60);
     const names = TOOLS.map((tool) => tool.name);
     expect(new Set(names).size).toBe(names.length);
   });
@@ -75,7 +75,7 @@ describe("groupTools（分类分组）", () => {
     const groups = groupTools(TOOLS, "全部");
     expect(Object.keys(groups)).toEqual([...TOOL_CATEGORIES]);
     expect(groups["图片"]).toHaveLength(12);
-    expect(groups["生活"]).toHaveLength(10);
+    expect(groups["生活"]).toHaveLength(11);
   });
 
   it("选中具体分类：只含该组；结果为空也保留组（复刻旧行为，不是 bug）", () => {
