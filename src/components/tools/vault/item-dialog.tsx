@@ -60,6 +60,12 @@ export function ItemDialog({
   const [fields, setFields] = useState<DraftField[]>(() =>
     item ? item.fields.map(toDraft) : [{ uid: nextUid(), key: "", value: "" }],
   );
+  /**
+   * 弹窗里哪几行的值被临时遮住了（键是 `DraftField.uid`）。
+   * **默认全露**：你正在编辑，得看见自己敲的是什么；遮住只是给「旁边有人」这种场合留的。
+   * 这是纯界面状态，不落库——保存下去的只有键和值。
+   */
+  const [hiddenUids, setHiddenUids] = useState<Set<string>>(() => new Set());
 
   /**
    * 打开弹窗就聚焦标题并**全选**「未命名」：进来直接打字就是替换，
@@ -107,6 +113,21 @@ export function ItemDialog({
   const removeField = useCallback((index: number) => {
     setFields((current) => current.filter((_, at) => at !== index));
   }, []);
+
+  /** 切换某一行的遮挡。用 uid 判断（按下标会在拖拽换位后指错行）。 */
+  const toggleFieldReveal = useCallback(
+    (index: number) => {
+      const uid = fields[index]?.uid;
+      if (!uid) return;
+      setHiddenUids((current) => {
+        const next = new Set(current);
+        if (next.has(uid)) next.delete(uid);
+        else next.add(uid);
+        return next;
+      });
+    },
+    [fields],
+  );
 
   /**
    * 🎲：直接覆盖这一行的值，不弹确认。
@@ -212,6 +233,8 @@ export function ItemDialog({
                 index={index}
                 dragging={dragIndex === index}
                 offset={offset}
+                revealed={!hiddenUids.has(field.uid)}
+                onToggleReveal={toggleFieldReveal}
                 onStartDrag={startDrag}
                 onMoveByKeyboard={moveByKeyboard}
                 onChange={updateField}

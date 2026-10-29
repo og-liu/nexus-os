@@ -1,7 +1,7 @@
 "use client";
 
 import { useRef, type KeyboardEvent, type PointerEvent } from "react";
-import { Dices, GripVertical, Trash2 } from "lucide-react";
+import { Dices, Eye, EyeOff, GripVertical, Trash2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 /**
@@ -28,6 +28,9 @@ interface FieldRowProps {
   index: number;
   dragging: boolean;
   offset: number;
+  /** 这一行的值当前看不看得见。新建时默认看得见（你在编辑，得确认自己敲了什么）。 */
+  revealed: boolean;
+  onToggleReveal: (index: number) => void;
   onStartDrag: (index: number, event: PointerEvent<HTMLElement>, row: HTMLElement | null) => void;
   onMoveByKeyboard: (index: number, event: KeyboardEvent<HTMLElement>) => void;
   onChange: (index: number, patch: Partial<Pick<DraftField, "key" | "value">>) => void;
@@ -40,6 +43,8 @@ export function FieldRow({
   index,
   dragging,
   offset,
+  revealed,
+  onToggleReveal,
   onStartDrag,
   onMoveByKeyboard,
   onChange,
@@ -79,7 +84,7 @@ export function FieldRow({
           className="h-9 w-full shrink-0 rounded-[2px] border border-[#E5E5E5] bg-white px-2 text-[13px] text-[#1F1F1F] outline-none placeholder:text-[#A0A8B4] focus:border-[#000000] sm:w-40"
         />
         <input
-          type="text"
+          type={revealed ? "text" : "password"}
           value={field.value}
           onChange={(event) => onChange(index, { value: event.target.value })}
           placeholder="值"
@@ -89,6 +94,18 @@ export function FieldRow({
       </div>
 
       <div className="flex shrink-0 items-center gap-0.5 pt-1">
+        {/* 眼睛：默认睁开（值看得见），点一下变圆点（`type="password"` 是浏览器原生遮挡）。
+            外面（右栏）默认是遮挡的、点开才露——两处方向相反，因为「编辑」和「查看」是两种场合 */}
+        <button
+          type="button"
+          onClick={() => onToggleReveal(index)}
+          aria-label={revealed ? "隐藏这个值" : "显示这个值"}
+          aria-pressed={!revealed}
+          title={revealed ? "隐藏" : "显示"}
+          className="flex h-7 w-7 items-center justify-center rounded-[2px] text-[#8A8A8A] transition-colors hover:bg-[#F5F5F5] hover:text-[#000000]"
+        >
+          {revealed ? <Eye className="h-3.5 w-3.5" /> : <EyeOff className="h-3.5 w-3.5" />}
+        </button>
         <button
           type="button"
           onClick={() => onGenerate(index)}

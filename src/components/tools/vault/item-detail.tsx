@@ -1,6 +1,6 @@
 "use client";
 
-import { ChevronLeft, Copy, Pencil, Trash2 } from "lucide-react";
+import { ChevronLeft, Copy, Eye, EyeOff, Pencil, Trash2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { formatDateTime } from "@/lib/format";
 import type { VaultGroup, VaultItem } from "@/lib/vault/vault";
@@ -8,14 +8,20 @@ import type { VaultGroup, VaultItem } from "@/lib/vault/vault";
 /**
  * 保险库右栏：选中条目的全部内容（《功能/保险库》§2.4）。
  *
- * **字段值按原样显示**：这一版不做掩码（没有字段类型，就无从判断「哪个是密码」；
- * 加个全局眼睛开关会让人误以为数据被加密了）。安全边界写在
- * 《数据库/保险库条目表》§七：库里是明文，这是知情选择。
+ * **字段值默认遮挡**（`***`），点眼睛才露出来——这是密码管理器的常规做法：
+ * 详情页经常在别人也能瞄到的屏幕上打开，默认露出等于默认泄露。
+ * 遮挡状态与中栏共用（`revealed` 由 `VaultView` 持有），所以两处不会一个露一个藏。
+ *
+ * 复制按钮复制的永远是**真值**：点复制的人明确知道自己在拿什么，
+ * 遮挡只影响「眼前能不能看见」，不改变数据。
  */
 
 interface ItemDetailProps {
   item: VaultItem | null;
   groups: VaultGroup[];
+  /** 哪些字段当前是露出来的，键 `${itemId}:${字段下标}`。 */
+  revealed: Set<string>;
+  onToggleReveal: (itemId: number, fieldIndex: number) => void;
   onEdit: () => void;
   onDelete: () => void;
   onCopy: (value: string) => void;
@@ -27,6 +33,8 @@ interface ItemDetailProps {
 export function ItemDetail({
   item,
   groups,
+  revealed,
+  onToggleReveal,
   onEdit,
   onDelete,
   onCopy,
@@ -39,6 +47,8 @@ export function ItemDetail({
         <ItemBody
           item={item}
           groups={groups}
+          revealed={revealed}
+          onToggleReveal={onToggleReveal}
           onEdit={onEdit}
           onDelete={onDelete}
           onCopy={onCopy}
@@ -54,6 +64,8 @@ export function ItemDetail({
 function ItemBody({
   item,
   groups,
+  revealed,
+  onToggleReveal,
   onEdit,
   onDelete,
   onCopy,
@@ -61,6 +73,8 @@ function ItemBody({
 }: {
   item: VaultItem;
   groups: VaultGroup[];
+  revealed: Set<string>;
+  onToggleReveal: (itemId: number, fieldIndex: number) => void;
   onEdit: () => void;
   onDelete: () => void;
   onCopy: (value: string) => void;
@@ -120,29 +134,61 @@ function ItemBody({
           </p>
         ) : (
           <ul className="divide-y divide-[#F0F0F0]">
-            {item.fields.map((field, index) => (
-              <li key={`${field.key}-${index}`} className="group py-2.5">
-                <div className="flex items-baseline justify-between gap-2">
-                  <span className="text-[11px] text-[#8A8A8A]">{field.key}</span>
-                  <button
-                    type="button"
-                    onClick={() => onCopy(field.value)}
-                    aria-label={`复制「${field.key}」的值`}
-                    title="复制"
-                    className="flex h-6 w-6 shrink-0 items-center justify-center rounded-[2px] text-[#8A8A8A] opacity-0 transition-opacity hover:bg-[#F5F5F5] hover:text-[#000000] focus-visible:opacity-100 group-hover:opacity-100 [@media(hover:none)]:opacity-100"
-                  >
-                    <Copy className="h-3.5 w-3.5" />
-                  </button>
-                </div>
-                {field.value ? (
-                  <p className="mt-0.5 break-all text-[14px] leading-relaxed text-[#000000]">
-                    {field.value}
-                  </p>
-                ) : (
-                  <p className="mt-0.5 text-[13px] italic text-[#C4C4C4]">（空）</p>
-                )}
-              </li>
-            ))}
+            {item.fields.map((field, index) => {
+              const isRevealed = revealed.has(`${item.id}:${index}`);
+              const hasValue = field.value !== "";
+
+              return (
+                <li key={`${field.key}-${index}`} className="group py-2.5">
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="text-[11px] text-[#8A8A8A]">{field.key}</span>
+                    <div className="flex items-center gap-0.5">
+                      {/* 眼睛**常显**：值默认是遮挡的，它就是唯一的「看一眼」入口，藏起来等于没有 */}
+                      {hasValue ? (
+                        <button
+                          type="button"
+                          onClick={() => onToggleReveal(item.id, index)}
+                          aria-label={
+                            isRevealed ? `隐藏「${field.key}」的值` : `显示「${field.key}」的值`
+                          }
+                          aria-pressed={isRevealed}
+                          title={isRevealed ? "隐藏" : "显示"}
+                          className="flex h-6 w-6 shrink-0 items-center justify-center rounded-[2px] text-[#8A8A8A] transition-colors hover:bg-[#F5F5F5] hover:text-[#000000]"
+                        >
+                          {isRevealed ? (
+                            <Eye className="h-3.5 w-3.5" />
+                          ) : (
+                            <EyeOff className="h-3.5 w-3.5" />
+                          )}
+                        </button>
+                      ) : null}
+
+                      <button
+                        type="button"
+                        onClick={() => onCopy(field.value)}
+                        aria-label={`复制「${field.key}」的值`}
+                        title="复制"
+                        className="flex h-6 w-6 shrink-0 items-center justify-center rounded-[2px] text-[#8A8A8A] opacity-0 transition-opacity hover:bg-[#F5F5F5] hover:text-[#000000] focus-visible:opacity-100 group-hover:opacity-100 [@media(hover:none)]:opacity-100"
+                      >
+                        <Copy className="h-3.5 w-3.5" />
+                      </button>
+                    </div>
+                  </div>
+
+                  {!hasValue ? (
+                    <p className="mt-0.5 text-[13px] italic text-[#C4C4C4]">（空）</p>
+                  ) : isRevealed ? (
+                    <p className="mt-0.5 break-all text-[14px] leading-relaxed text-[#000000]">
+                      {field.value}
+                    </p>
+                  ) : (
+                    <p className="mt-0.5 font-mono text-[14px] tracking-widest text-[#8A8A8A]">
+                      ***
+                    </p>
+                  )}
+                </li>
+              );
+            })}
           </ul>
         )}
       </div>
