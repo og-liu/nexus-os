@@ -110,9 +110,9 @@ describe("保险库条目", () => {
   it("字段数组往返：中文、符号、空值都原样保留，顺序不变", () => {
     const { db, alice } = setup();
     const fields = [
-      { key: "卡号", value: "8821319" },
-      { key: "密码", value: 'p@ss "word" \\ ok' },
-      { key: "备注", value: "" },
+      { key: "卡号", value: "8821319", hidden: false },
+      { key: "密码", value: 'p@ss "word" \\ ok', hidden: true },
+      { key: "备注", value: "", hidden: false },
     ];
     const created = makeItem(db, alice.id, "招商银行信用卡", null, fields);
 
@@ -220,7 +220,7 @@ describe("账户隔离（不靠界面，靠每条 SQL 的 user_id）", () => {
 
     const untouched = getItem(db, alice.id, item.id);
     expect(untouched?.title).toBe("招商");
-    expect(untouched?.fields).toEqual([{ key: "卡号", value: "1" }]);
+    expect(untouched?.fields).toEqual([{ key: "卡号", value: "1", hidden: false }]);
   });
 
   it("bob 删群组删不到 alice 的", () => {
@@ -239,17 +239,28 @@ describe("字段解析与派生数据", () => {
     expect(parseFields('[{"key":"a","value":1}]')).toEqual([]);
     expect(parseFields("[]")).toEqual([]);
     expect(parseFields('[{"key":"卡号","value":"1"},{"key":"","value":"x"}]')).toEqual([
-      { key: "卡号", value: "1" },
-      { key: "", value: "x" },
+      { key: "卡号", value: "1", hidden: false },
+      { key: "", value: "x", hidden: false },
     ]);
   });
 
-  it("serializeFields 只保留 key / value，顺序不变", () => {
+  it("parseFields：老数据没有 hidden → 当 false（默认不遮挡）", () => {
+    expect(parseFields('[{"key":"a","value":"1"}]')).toEqual([
+      { key: "a", value: "1", hidden: false },
+    ]);
+    expect(parseFields('[{"key":"a","value":"1","hidden":true}]')).toEqual([
+      { key: "a", value: "1", hidden: true },
+    ]);
+  });
+
+  it("serializeFields 写出 key / value / hidden，顺序不变", () => {
     const json = serializeFields([
       { key: "b", value: "2" },
-      { key: "a", value: "1" },
+      { key: "a", value: "1", hidden: true },
     ]);
-    expect(json).toBe('[{"key":"b","value":"2"},{"key":"a","value":"1"}]');
+    expect(json).toBe(
+      '[{"key":"b","value":"2","hidden":false},{"key":"a","value":"1","hidden":true}]',
+    );
   });
 
   it("collectFieldKeys：并集、首次出现顺序、可封顶", () => {

@@ -76,14 +76,14 @@ export function VaultView({ initialSnapshot }: VaultViewProps) {
   const [query, setQuery] = useState("");
   const [checkedIds, setCheckedIds] = useState<Set<number>>(() => new Set());
   /**
-   * 哪些字段值是「看得见」的，键是 `${itemId}:${字段下标}`。
+   * 用户**临时翻转**过显示的格子，键是 `${itemId}:${字段下标}`。
    *
-   * **不落库**：遮挡回答的是「这一眼谁在看」，不是数据本身的属性。存进库里会让它变成
-   * 一个持久设置——换个场景（比如这台机器只有你用）你想让它默认露出来，还得改数据。
-   * 默认全部遮挡，点眼睛才露；同一个字段在**中栏和右栏共用一个状态**（右栏点开，
-   * 中栏那格也跟着露），否则两处各记一份，用户会以为其中一个坏了。
+   * 和字段自带的 `hidden` 是两件事：
+   * - `hidden` 是「这一格默认要不要藏」，在编辑弹窗里设、跟着记录存进库；
+   * - 这个集合是「这一次我点开/关掉了哪几格」，只在内存里，刷新就没了。
+   * 中栏与右栏共用这一份，否则会出现「一边露一边藏」。
    */
-  const [revealed, setRevealed] = useState<Set<string>>(() => new Set());
+  const [toggled, setToggled] = useState<Set<string>>(() => new Set());
 
   const [groupsOpen, setGroupsOpen] = useState(false);
   /** 手机（< md）上「点条目进详情页」——详情整页替换列表，不是抽屉。 */
@@ -213,10 +213,10 @@ export function VaultView({ initialSnapshot }: VaultViewProps) {
 
   const clearChecks = useCallback(() => setCheckedIds(new Set()), []);
 
-  /** 露/藏某一个字段的值。中栏与右栏共用这一份状态。 */
+  /** 临时翻转某一格的显示（不写回库）。中栏与右栏共用这一份状态。 */
   const toggleReveal = useCallback((itemId: number, fieldIndex: number) => {
     const key = `${itemId}:${fieldIndex}`;
-    setRevealed((current) => {
+    setToggled((current) => {
       const next = new Set(current);
       if (next.has(key)) next.delete(key);
       else next.add(key);
@@ -418,7 +418,7 @@ export function VaultView({ initialSnapshot }: VaultViewProps) {
           activeView={view}
           onSelectView={selectView}
           onEditItem={(item) => openDialog({ kind: "edit-item", item })}
-          revealed={revealed}
+          toggled={toggled}
           emptyText={emptyText}
           busy={pending}
           className={cn(
@@ -431,7 +431,7 @@ export function VaultView({ initialSnapshot }: VaultViewProps) {
         <ItemDetail
           item={selectedItem}
           groups={groups}
-          revealed={revealed}
+          toggled={toggled}
           onToggleReveal={toggleReveal}
           onEdit={() => {
             if (selectedItem) openDialog({ kind: "edit-item", item: selectedItem });

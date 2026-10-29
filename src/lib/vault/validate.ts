@@ -65,7 +65,11 @@ export function validateFields(raw: unknown): Validated<VaultField[]> {
     if (typeof entry !== "object" || entry === null) {
       return { ok: false, error: "字段格式不正确" };
     }
-    const { key, value } = entry as { key?: unknown; value?: unknown };
+    const { key, value, hidden } = entry as {
+      key?: unknown;
+      value?: unknown;
+      hidden?: unknown;
+    };
     if (typeof key !== "string" || typeof value !== "string") {
       return { ok: false, error: "字段格式不正确" };
     }
@@ -79,7 +83,7 @@ export function validateFields(raw: unknown): Validated<VaultField[]> {
       return { ok: false, error: `字段值最多 ${FIELD_VALUE_MAX} 个字` };
     }
 
-    fields.push({ key: trimmedKey, value });
+    fields.push({ key: trimmedKey, value, hidden: hidden === true });
   }
 
   return { ok: true, value: fields };

@@ -14,6 +14,14 @@ import type { Db } from "@/lib/auth/db";
 export interface VaultField {
   key: string;
   value: string;
+  /**
+   * 默认要不要遮挡（眼睛闭着）。缺省 = 不遮挡。
+   *
+   * **这个落库，和「临时点开看一眼」是两回事**：它回答「这条记录的这一格，
+   * 我一打开就想不想看见」——是用户对数据的设定，所以跟着记录存。
+   * 临时点眼睛只是改变这一刻的显示，不写回。
+   */
+  hidden?: boolean;
 }
 
 /** 对外的条目表示（camelCase）。库里的 `fields` 是 JSON 文本，这里已经是数组。 */
@@ -80,15 +88,21 @@ export function parseFields(raw: string): VaultField[] {
   // 逐项过滤：只收 k/v 都是字符串的元素，别的形状一律丢掉
   return parsed.flatMap((entry) => {
     if (typeof entry !== "object" || entry === null) return [];
-    const { key, value } = entry as { key?: unknown; value?: unknown };
+    const { key, value, hidden } = entry as {
+      key?: unknown;
+      value?: unknown;
+      hidden?: unknown;
+    };
     if (typeof key !== "string" || typeof value !== "string") return [];
-    return [{ key, value }];
+    return [{ key, value, hidden: hidden === true }];
   });
 }
 
 /** 字段数组 → 存库的 JSON 文本。顺序就是用户拖出来的顺序，不排序。 */
 export function serializeFields(fields: VaultField[]): string {
-  return JSON.stringify(fields.map(({ key, value }) => ({ key, value })));
+  return JSON.stringify(
+    fields.map(({ key, value, hidden }) => ({ key, value, hidden: hidden === true })),
+  );
 }
 
 function toItem(row: VaultItemRow): VaultItem {

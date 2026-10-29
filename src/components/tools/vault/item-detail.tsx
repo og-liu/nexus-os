@@ -8,9 +8,10 @@ import type { VaultGroup, VaultItem } from "@/lib/vault/vault";
 /**
  * 保险库右栏：选中条目的全部内容（《功能/保险库》§2.4）。
  *
- * **字段值默认遮挡**（`***`），点眼睛才露出来——这是密码管理器的常规做法：
+ * **字段值默认按 `field.hidden` 遮挡**（`***`），点眼睛能临时露出来——这是密码管理器的常规做法：
  * 详情页经常在别人也能瞄到的屏幕上打开，默认露出等于默认泄露。
- * 遮挡状态与中栏共用（`revealed` 由 `VaultView` 持有），所以两处不会一个露一个藏。
+ * 而「这一格默认要不要藏」是**在编辑弹窗里设的、跟着记录存**（`fields[].hidden`）；
+ * 这里点眼睛只是**这一次**看不看，不写回库。
  *
  * 复制按钮复制的永远是**真值**：点复制的人明确知道自己在拿什么，
  * 遮挡只影响「眼前能不能看见」，不改变数据。
@@ -19,8 +20,8 @@ import type { VaultGroup, VaultItem } from "@/lib/vault/vault";
 interface ItemDetailProps {
   item: VaultItem | null;
   groups: VaultGroup[];
-  /** 哪些字段当前是露出来的，键 `${itemId}:${字段下标}`。 */
-  revealed: Set<string>;
+  /** 用户**临时翻转**过显示的格子，键 `${itemId}:${字段下标}`；与中栏共用。 */
+  toggled: Set<string>;
   onToggleReveal: (itemId: number, fieldIndex: number) => void;
   onEdit: () => void;
   onDelete: () => void;
@@ -33,7 +34,7 @@ interface ItemDetailProps {
 export function ItemDetail({
   item,
   groups,
-  revealed,
+  toggled,
   onToggleReveal,
   onEdit,
   onDelete,
@@ -47,7 +48,7 @@ export function ItemDetail({
         <ItemBody
           item={item}
           groups={groups}
-          revealed={revealed}
+          toggled={toggled}
           onToggleReveal={onToggleReveal}
           onEdit={onEdit}
           onDelete={onDelete}
@@ -64,7 +65,7 @@ export function ItemDetail({
 function ItemBody({
   item,
   groups,
-  revealed,
+  toggled,
   onToggleReveal,
   onEdit,
   onDelete,
@@ -73,7 +74,7 @@ function ItemBody({
 }: {
   item: VaultItem;
   groups: VaultGroup[];
-  revealed: Set<string>;
+  toggled: Set<string>;
   onToggleReveal: (itemId: number, fieldIndex: number) => void;
   onEdit: () => void;
   onDelete: () => void;
@@ -135,7 +136,8 @@ function ItemBody({
         ) : (
           <ul className="divide-y divide-[#F0F0F0]">
             {item.fields.map((field, index) => {
-              const isRevealed = revealed.has(`${item.id}:${index}`);
+              // 默认状态来自字段本身（编辑弹窗里设的），点眼睛在本会话内翻转一次
+              const isRevealed = !(field.hidden === true) !== toggled.has(`${item.id}:${index}`);
               const hasValue = field.value !== "";
 
               return (

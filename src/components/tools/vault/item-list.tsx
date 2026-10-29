@@ -57,8 +57,8 @@ interface ItemListProps {
   onSelectView: (view: "all" | number) => void;
   /** 双击某一行直接打开编辑弹窗（比「先选中 → 再点右栏铅笔」少两步）。 */
   onEditItem: (item: VaultItem) => void;
-  /** 哪些字段值是露出来的，键 `${itemId}:${字段下标}`；与右栏共用同一份状态。 */
-  revealed: Set<string>;
+  /** 用户**临时翻转**过显示的格子，键 `${itemId}:${字段下标}`；与右栏共用同一份状态。 */
+  toggled: Set<string>;
   /** 当前视图的说明，用在空态文案里。 */
   emptyText: string;
   busy: boolean;
@@ -84,7 +84,7 @@ export function ItemList({
   activeView,
   onSelectView,
   onEditItem,
-  revealed,
+  toggled,
   emptyText,
   busy,
   className,
@@ -301,27 +301,26 @@ export function ItemList({
                       </span>
                       {fieldKeys.map((key, index) => {
                         const fieldIndex = item.fields.findIndex((field) => field.key === key);
-                        const value = fieldIndex >= 0 ? item.fields[fieldIndex].value : undefined;
-                        // 有值但没点眼睛 → 遮挡（与右栏同一份状态，点右栏的眼睛这格也跟着露）
-                        const hidden =
-                          value !== undefined && value !== "" && !revealed.has(`${item.id}:${fieldIndex}`);
-                        const text =
-                          value === undefined || value === ""
-                            ? "—"
-                            : hidden
-                              ? "***"
-                              : value;
+                        const fieldValue = fieldIndex >= 0 ? item.fields[fieldIndex] : undefined;
+                        const hasValue =
+                          fieldValue !== undefined && fieldValue.value !== "";
+                        // 默认藏不藏看字段自己的 hidden（编辑弹窗里设的），点过眼睛就在本会话内翻转
+                        const shown =
+                          hasValue &&
+                          (!(fieldValue?.hidden === true)
+                            !== toggled.has(`${item.id}:${fieldIndex}`));
+                        const text = !hasValue ? "—" : shown ? fieldValue!.value : "***";
 
                         return (
                           <span
                             key={key}
                             className={cn(
                               "w-[110px] shrink-0 truncate text-[12px]",
-                              value === undefined || value === ""
+                              !hasValue
                                 ? "text-[#C4C4C4]"
-                                : hidden
-                                  ? "font-mono tracking-widest text-[#8A8A8A]"
-                                  : "text-[#5C5C5C]",
+                                : shown
+                                  ? "text-[#5C5C5C]"
+                                  : "font-mono tracking-widest text-[#8A8A8A]",
                               index < 2 ? "hidden @[560px]:block" : "hidden @[760px]:block",
                             )}
                           >

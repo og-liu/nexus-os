@@ -57,15 +57,34 @@ describe("字段校验", () => {
     expect(result).toEqual({
       ok: true,
       value: [
-        { key: "卡号", value: "1" },
-        { key: "密码", value: "" },
+        { key: "卡号", value: "1", hidden: false },
+        { key: "密码", value: "", hidden: false },
       ],
     });
   });
 
   it("字段名修掉两头空格，值不动（尾随空格可能是密码的一部分）", () => {
     const result = validateFields([{ key: "  卡号  ", value: " 12 " }]);
-    expect(result).toEqual({ ok: true, value: [{ key: "卡号", value: " 12 " }] });
+    expect(result).toEqual({
+      ok: true,
+      value: [{ key: "卡号", value: " 12 ", hidden: false }],
+    });
+  });
+
+  it("hidden 只认 true：缺省 / 非布尔值都当不遮挡", () => {
+    const result = validateFields([
+      { key: "a", value: "1", hidden: true },
+      { key: "b", value: "2" },
+      { key: "c", value: "3", hidden: "yes" },
+    ]);
+    expect(result).toEqual({
+      ok: true,
+      value: [
+        { key: "a", value: "1", hidden: true },
+        { key: "b", value: "2", hidden: false },
+        { key: "c", value: "3", hidden: false },
+      ],
+    });
   });
 
   it("元素形状不对 / 类型不是字符串 → 拒绝", () => {
