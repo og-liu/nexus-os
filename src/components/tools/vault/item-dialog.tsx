@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Plus } from "lucide-react";
+import { ChevronDown, Plus } from "lucide-react";
 import { Modal } from "@/components/ui/modal";
 import { cn } from "@/lib/utils";
 import { generatePassword } from "@/lib/vault/password";
@@ -180,21 +180,29 @@ export function ItemDialog({
 
           <label className="block">
             <span className="mb-1 block text-[11px] text-[#8A8A8A]">群组</span>
-            <select
-              value={groupId === null ? "" : String(groupId)}
-              onChange={(event) =>
-                setGroupId(event.target.value === "" ? null : Number(event.target.value))
-              }
-              aria-label="群组"
-              className="h-9 w-full rounded-[2px] border border-[#E5E5E5] bg-white px-2 text-[13px] text-[#1F1F1F] outline-none focus:border-[#000000]"
-            >
-              <option value="">未分组</option>
-              {groups.map((group) => (
-                <option key={group.id} value={group.id}>
-                  {group.name}
-                </option>
-              ))}
-            </select>
+            {/* 原生 select 的箭头由浏览器画、贴着边框，padding-right 管不到它；
+                所以 appearance-none 掉原生箭头，自己放一个 ChevronDown，才能留出右边距 */}
+            <div className="relative">
+              <select
+                value={groupId === null ? "" : String(groupId)}
+                onChange={(event) =>
+                  setGroupId(event.target.value === "" ? null : Number(event.target.value))
+                }
+                aria-label="群组"
+                className="h-9 w-full appearance-none rounded-[2px] border border-[#E5E5E5] bg-white pl-2 pr-8 text-[13px] text-[#1F1F1F] outline-none focus:border-[#000000]"
+              >
+                <option value="">未分组</option>
+                {groups.map((group) => (
+                  <option key={group.id} value={group.id}>
+                    {group.name}
+                  </option>
+                ))}
+              </select>
+              <ChevronDown
+                aria-hidden="true"
+                className="pointer-events-none absolute right-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-[#8A8A8A]"
+              />
+            </div>
           </label>
         </div>
 
