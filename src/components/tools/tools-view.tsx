@@ -41,6 +41,8 @@ export function ToolsView() {
     () => filterTools(TOOLS, searchQuery, selectedCategory),
     [searchQuery, selectedCategory],
   );
+  /** 是否在搜索（决定空态的措辞：搜不到 ≠ 这一类还没做）。 */
+  const searching = searchQuery.trim().length > 0;
   const groupedTools = useMemo(
     () => groupTools(filteredTools, selectedCategory),
     [filteredTools, selectedCategory],
@@ -189,11 +191,42 @@ export function ToolsView() {
                 </h2>
                 <span className="text-xs text-[#999999]">{items.length}</span>
               </div>
-              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-                {items.map((tool) => (
-                  <ToolCard key={tool.name} tool={tool} />
-                ))}
-              </div>
+              {items.length === 0 ? (
+                /*
+                  空分类的占位（2026-10-30 起）：目录只收真能用的工具之后，七个分类里
+                  有五个一个工具都没有。选中它们时如果只剩一行组标题 + 空网格，
+                  页面上就是一块留白，看着像加载失败。这里给一句话说明「这一类还没有」，
+                  再给一个回「全部」的出口——比让用户自己再点一次分类条少一步。
+                  搜索无结果时文案换回「未找到匹配的工具」（那是另一个意思：不是没做，是没搜到）。
+                */
+                <div className="rounded-[2px] border border-dashed border-[#D9D9D9] bg-white px-6 py-10 text-center">
+                  <p className="text-sm text-[#666666]">
+                    {searching
+                      ? "未找到匹配的工具"
+                      : "这个分类还没有可用的工具"}
+                  </p>
+                  {searching ? null : (
+                    <>
+                      <p className="mt-1.5 text-xs text-[#A0A8B4]">
+                        工具会一个个做出来，先看看别的分类
+                      </p>
+                      <button
+                        type="button"
+                        onClick={() => setSelectedCategory(ALL_CATEGORY)}
+                        className="mt-3 cursor-pointer text-xs font-medium text-[#000000] underline-offset-2 hover:underline"
+                      >
+                        看全部工具
+                      </button>
+                    </>
+                  )}
+                </div>
+              ) : (
+                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+                  {items.map((tool) => (
+                    <ToolCard key={tool.name} tool={tool} />
+                  ))}
+                </div>
+              )}
             </section>
           ))
         )}

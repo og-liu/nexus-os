@@ -10,36 +10,25 @@ import { findToolBySlug } from "@/components/tools/tool-catalog";
  * （旧界面那张快捷工具卡的悬停反馈，翻旧代码确认过：块 `bg-white → bg-[#000000]`、
  * 图标 `text-[#1F1F1F] → text-white`、按钮底色 `#F5F5F5 → #ECECEC`）。
  *
- * **为什么只列这几个**：
+ * **为什么只列这两个**（2026-10-30 起）：
  * - 便签 / 待办 / 工作日历**不列**——它们在总览上已经有了自己的卡，再列一遍是同一个入口说两遍；
- * - 保险库列在第一个（真能用）；
- * - 其余是**临时占位**：先把这套骨架跑起来，等总览整体拼图（主区 2/3 + 常驻栏 1/3）
- *   的时候再回头调重量与顺序。到时候把这里换掉就行，卡片形态不用动。
+ * - 剩下的两个真工具（保险库 / 图片压缩）没有自己的卡，这里是它们唯一的入口；
+ * - 以前这里还塞了 6 个占位工具（截图 OCR、JSON、密码生成…），目录清掉占位条目之后
+ *   它们一起消失了——点进去只有「开发中」的入口本来就不该出现。
  *
- * **这张卡比其他块宽**（外层 `max-w-[900px]`，别的都是 430）：4 列才排得下 8 个工具。
- * 逐块一行里夹一张长条卡是有意的——等总览拼回栅格，它会自然落进主区。
- * 列数随宽度退档：手机 2 列、平板 3 列、宽屏 4 列；窄屏少显示的那两个**藏起来**，
- * 而不是挤成 3+3+2 的残行。
+ * **卡片从 900px 宽卡收回 430px**：宽卡存在的唯一理由是「4 列才排得下 8 个工具」，
+ * 现在只有 2 个，再用宽卡就是一半留白。收回 430px 后它与便签 / 待办卡同宽，
+ * 逐块一行的总览反而更齐。工具再多到 5 个以上时再谈要不要变宽。
  */
 
-/** 常用工具的 slug 顺序。第一个是保险库，其余按分类错开摆（图片 / 文本 / 开发 / 媒体）。 */
-const QUICK_TOOL_SLUGS = [
-  "vault",
-  "image-compress",
-  "screenshot-ocr",
-  "json-tool",
-  "password-generator",
-  "markdown-editor",
-  "video-to-gif",
-  "qr-code-tool",
-];
-
-/** 窄屏只显示前 6 个（2 列 3 行 / 3 列 2 行），宽屏最后两个才补上。 */
-const NARROW_VISIBLE = 6;
+/** 常用工具的 slug 顺序（只在总览没有自己卡的真工具里挑）。 */
+const QUICK_TOOL_SLUGS = ["vault", "image-compress"];
 
 export function QuickToolsCard() {
   // 从工具目录取名字与图标：改工具名时这里跟着变，不重抄一份
-  const tools = QUICK_TOOL_SLUGS.map(findToolBySlug).flatMap((tool) => (tool ? [tool] : []));
+  const tools = QUICK_TOOL_SLUGS.map(findToolBySlug).flatMap((tool) =>
+    tool ? [tool] : [],
+  );
 
   return (
     <section aria-label="常用工具" className="rounded-[2px] bg-white p-5">
@@ -57,14 +46,12 @@ export function QuickToolsCard() {
         </Link>
       </div>
 
-      <div className="mt-4 grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-4">
-        {tools.map(({ slug, name, icon: Icon }, index) => (
+      <div className="mt-4 grid grid-cols-2 gap-3">
+        {tools.map(({ slug, name, icon: Icon }) => (
           <Link
             key={slug}
             href={`/tools/${slug}`}
-            className={`group items-center gap-2 rounded-[2px] bg-[#F5F5F5] p-2 transition-colors hover:bg-[#ECECEC] ${
-              index >= NARROW_VISIBLE ? "hidden xl:flex" : "flex"
-            }`}
+            className="group flex items-center gap-2 rounded-[2px] bg-[#F5F5F5] p-2 transition-colors hover:bg-[#ECECEC]"
           >
             {/* 图标块：白底 → hover 黑底，图标跟着翻白 */}
             <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-[2px] bg-white transition-colors group-hover:bg-[#000000]">
