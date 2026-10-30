@@ -21,6 +21,7 @@ const TOOL_TAB_SLUGS = new Set([
   "todo-list",
   "attendance-calendar",
   "vault",
+  "image-compress",
 ]);
 
 const TOOL_PATH_PREFIX = "/tools/";
