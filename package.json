@@ -22,8 +22,11 @@
   },
   "dependencies": {
     "@base-ui/react": "1.7.0",
+    "@jsquash/jpeg": "1.6.0",
+    "@jsquash/oxipng": "2.3.0",
     "better-sqlite3": "^12.4.1",
     "clsx": "2.1.1",
+    "imagequant": "0.1.2",
     "lucide-react": "1.31.0",
     "lunar-javascript": "^1.7.7",
     "next": "16.3.1",
