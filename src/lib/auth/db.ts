@@ -81,6 +81,30 @@ CREATE TABLE IF NOT EXISTS attendance_overrides (
   updated_at INTEGER NOT NULL,
   PRIMARY KEY (user_id, day_key)
 ) WITHOUT ROWID;
+
+CREATE TABLE IF NOT EXISTS vault_groups (
+  id         INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id    INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  name       TEXT    NOT NULL,
+  created_at INTEGER NOT NULL,             -- 毫秒时间戳；左栏按它升序（建得早的在上）
+  UNIQUE (user_id, name)                   -- 同一个人不能有两个同名群组
+);
+
+CREATE INDEX IF NOT EXISTS idx_vault_groups_user_id ON vault_groups(user_id);
+
+CREATE TABLE IF NOT EXISTS vault_items (
+  id         INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id    INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  group_id   INTEGER REFERENCES vault_groups(id) ON DELETE SET NULL,  -- NULL = 未分组
+  title      TEXT    NOT NULL,
+  fields     TEXT    NOT NULL DEFAULT '[]',  -- JSON 数组 [{"key","value"}]，顺序即显示顺序
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL              -- 列表排序主依据；移动群组也刷新
+);
+
+CREATE INDEX IF NOT EXISTS idx_vault_items_user_id ON vault_items(user_id);
+-- 外键不自动建索引：删群组时 SET NULL 要按 group_id 找子行，点群组看列表也靠它
+CREATE INDEX IF NOT EXISTS idx_vault_items_group_id ON vault_items(group_id);
 `;
 
 /** 建表（幂等）。单独导出，测试可以在任意连接上初始化结构。 */
