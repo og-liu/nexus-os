@@ -150,7 +150,7 @@ function ItemBody({
               const hasValue = field.value !== "";
 
               return (
-                <li key={`${field.key}-${index}`} className="group py-2.5">
+                <li key={`${field.key}-${index}`} className="py-2.5">
                   <div className="flex items-center justify-between gap-2">
                     <span className="text-[11px] text-[#8A8A8A]">{field.key}</span>
                     <div className="flex items-center gap-0.5">
@@ -179,7 +179,7 @@ function ItemBody({
                         onClick={() => onCopy(field.value)}
                         aria-label={`复制「${field.key}」的值`}
                         title="复制"
-                        className="flex h-6 w-6 shrink-0 items-center justify-center rounded-[2px] text-[#8A8A8A] opacity-0 transition-opacity hover:bg-[#F5F5F5] hover:text-[#000000] focus-visible:opacity-100 group-hover:opacity-100 [@media(hover:none)]:opacity-100"
+                        className="flex h-6 w-6 shrink-0 items-center justify-center rounded-[2px] text-[#8A8A8A] transition-colors hover:bg-[#F5F5F5] hover:text-[#000000]"
                       >
                         <Copy className="h-3.5 w-3.5" />
                       </button>
@@ -193,7 +193,7 @@ function ItemBody({
                       {field.value}
                     </p>
                   ) : (
-                    <p className="mt-0.5 font-mono text-[14px] tracking-[0.35em] text-[#8A8A8A]">
+                    <p className="mt-0.5 font-mono text-[14px] tracking-[0.15em] text-[#8A8A8A]">
                       {MASK}
                     </p>
                   )}
