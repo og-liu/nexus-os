@@ -102,8 +102,8 @@ export default async function OverviewPage() {
             days={attendanceDays}
           />
         </div>
-        <div className="max-w-[430px]">
-          {/* 常用工具：读「今天」的信息之后给一条「去哪儿」的路（详见 quick-tools-card） */}
+        <div className="max-w-[900px]">
+          {/* 常用工具：读「今天」的信息之后给一条「去哪儿」的路；比别人宽一档才排得下 4 列 */}
           <QuickToolsCard />
         </div>
         <div className="max-w-[430px]">
