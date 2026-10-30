@@ -54,6 +54,7 @@ import {
   StickyNote,
   TypeOutline,
   UsersRound,
+  Vault,
   Video,
   Volume2,
   ZoomIn,
@@ -93,7 +94,7 @@ export const TOOLS: Tool[] = [
     name: "图片压缩",
     description: "智能压缩图片体积，保持画质",
     icon: Image,
-    status: "可用",
+    status: "开发中",
     category: "图片",
   },
   {
@@ -101,7 +102,7 @@ export const TOOLS: Tool[] = [
     name: "图片格式转换",
     description: "PNG、JPG、WebP 等格式互转",
     icon: Images,
-    status: "可用",
+    status: "开发中",
     category: "图片",
   },
   {
@@ -165,7 +166,7 @@ export const TOOLS: Tool[] = [
     name: "截图 OCR",
     description: "截图后直接识别文字",
     icon: ScanLine,
-    status: "可用",
+    status: "开发中",
     category: "图片",
   },
   {
@@ -257,7 +258,7 @@ export const TOOLS: Tool[] = [
     name: "文本处理",
     description: "编码转换、大小写、格式清理",
     icon: FileText,
-    status: "可用",
+    status: "开发中",
     category: "文本",
   },
   {
@@ -562,6 +563,14 @@ export const TOOLS: Tool[] = [
     description: "每天更新一段正能量文案",
     icon: Quote,
     status: "开发中",
+    category: "生活",
+  },
+  {
+    slug: "vault",
+    name: "保险库",
+    description: "存账号、密码和任何需要记住的键值记录，按群组归类",
+    icon: Vault,
+    status: "可用",
     category: "生活",
   },
   {

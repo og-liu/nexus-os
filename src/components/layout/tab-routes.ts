@@ -20,6 +20,7 @@ const TOOL_TAB_SLUGS = new Set([
   "sticky-notes",
   "todo-list",
   "attendance-calendar",
+  "vault",
 ]);
 
 const TOOL_PATH_PREFIX = "/tools/";
