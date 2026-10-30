@@ -94,7 +94,7 @@ export const TOOLS: Tool[] = [
     name: "图片压缩",
     description: "智能压缩图片体积，保持画质",
     icon: Image,
-    status: "可用",
+    status: "开发中",
     category: "图片",
   },
   {
@@ -102,7 +102,7 @@ export const TOOLS: Tool[] = [
     name: "图片格式转换",
     description: "PNG、JPG、WebP 等格式互转",
     icon: Images,
-    status: "可用",
+    status: "开发中",
     category: "图片",
   },
   {
@@ -166,7 +166,7 @@ export const TOOLS: Tool[] = [
     name: "截图 OCR",
     description: "截图后直接识别文字",
     icon: ScanLine,
-    status: "可用",
+    status: "开发中",
     category: "图片",
   },
   {
@@ -258,7 +258,7 @@ export const TOOLS: Tool[] = [
     name: "文本处理",
     description: "编码转换、大小写、格式清理",
     icon: FileText,
-    status: "可用",
+    status: "开发中",
     category: "文本",
   },
   {
