@@ -52,7 +52,7 @@ export interface Tool {
   category: ToolCategory;
 }
 
-/** 五个真工具。顺序即「全部」视图里的展示顺序（图片 → 生活）。 */
+/** 五个真工具。顺序即「全部」视图里的展示顺序（图片 → 文本 → 生活）。 */
 export const TOOLS: Tool[] = [
   {
     slug: "image-compress",
@@ -68,7 +68,7 @@ export const TOOLS: Tool[] = [
     description: "简单任务管理",
     icon: CheckSquare,
     status: "可用",
-    category: "生活",
+    category: "文本",
   },
   {
     slug: "sticky-notes",
@@ -76,7 +76,7 @@ export const TOOLS: Tool[] = [
     description: "随手贴便签，首页常驻展示",
     icon: NotepadText,
     status: "可用",
-    category: "生活",
+    category: "文本",
   },
   {
     slug: "attendance-calendar",
