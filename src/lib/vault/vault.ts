@@ -121,7 +121,7 @@ const ITEM_ORDER = "ORDER BY updated_at DESC, id DESC";
 
 // ---------------------------------------------------------------- 群组
 
-/** 左栏：这个人的全部群组，按**建组顺序**（建得早的在上）带条目数。 */
+/** 左栏：这个人的全部群组，**最新建的排最上面**，带条目数。 */
 export function listGroups(db: Db, userId: number): VaultGroup[] {
   const rows = db
     .prepare(
@@ -130,7 +130,7 @@ export function listGroups(db: Db, userId: number): VaultGroup[] {
                 WHERE i.group_id = g.id AND i.user_id = g.user_id) AS item_count
          FROM vault_groups g
         WHERE g.user_id = ?
-        ORDER BY g.created_at ASC, g.id ASC`,
+        ORDER BY g.created_at DESC, g.id DESC`,
     )
     .all(userId) as VaultGroupRow[];
 

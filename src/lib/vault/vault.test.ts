@@ -51,7 +51,7 @@ function makeItem(
 }
 
 describe("保险库群组", () => {
-  it("按建组顺序列出（建得早的在上），带各自的条目数", () => {
+  it("最新建的群组排最上面，带各自的条目数", () => {
     const { db, alice } = setup();
     const bank = makeGroup(db, alice.id, "银行", 1_000);
     makeGroup(db, alice.id, "阿里云", 2_000);
@@ -60,8 +60,9 @@ describe("保险库群组", () => {
     makeItem(db, alice.id, "没归组");
 
     const groups = listGroups(db, alice.id);
-    expect(groups.map((group) => group.name)).toEqual(["银行", "阿里云"]);
-    expect(groups.map((group) => group.itemCount)).toEqual([2, 0]);
+    // created_at DESC：2_000 的「阿里云」在前
+    expect(groups.map((group) => group.name)).toEqual(["阿里云", "银行"]);
+    expect(groups.map((group) => group.itemCount)).toEqual([0, 2]);
   });
 
   it("同一个人不能有两个同名群组；不同人可以重名", () => {
