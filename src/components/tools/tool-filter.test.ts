@@ -3,18 +3,28 @@ import { TOOLS, TOOL_CATEGORIES, findToolBySlug } from "./tool-catalog";
 import { filterTools, groupTools } from "./tool-filter";
 
 describe("tool-catalog（《功能/工具中心》数据）", () => {
-  it("共 60 个工具，名称不重复", () => {
-    expect(TOOLS).toHaveLength(60);
+  it("只收真能用的工具：5 个，名称不重复", () => {
+    expect(TOOLS).toHaveLength(5);
     const names = TOOLS.map((tool) => tool.name);
     expect(new Set(names).size).toBe(names.length);
   });
 
-  it("59 个 slug 唯一且格式是全小写连字符", () => {
+  it("slug 唯一且格式是全小写连字符", () => {
     const slugs = TOOLS.map((tool) => tool.slug);
     expect(new Set(slugs).size).toBe(slugs.length);
     for (const slug of slugs) {
       expect(slug).toMatch(/^[a-z0-9]+(?:-[a-z0-9]+)*$/);
     }
+  });
+
+  it("五个真工具的 slug 一个不少", () => {
+    expect(TOOLS.map((tool) => tool.slug).sort()).toEqual([
+      "attendance-calendar",
+      "image-compress",
+      "sticky-notes",
+      "todo-list",
+      "vault",
+    ]);
   });
 
   it("按 slug 精确查找，大小写不匹配时查不到", () => {
@@ -23,13 +33,16 @@ describe("tool-catalog（《功能/工具中心》数据）", () => {
     expect(findToolBySlug("not-a-real-tool")).toBeUndefined();
   });
 
-  it("七个分类都有工具，状态取值合法", () => {
-    for (const category of TOOL_CATEGORIES) {
-      expect(TOOLS.some((tool) => tool.category === category)).toBe(true);
-    }
+  it("工具的分类必须在七个分类之内，状态取值合法", () => {
     for (const tool of TOOLS) {
+      expect(TOOL_CATEGORIES).toContain(tool.category);
       expect(["可用", "开发中"]).toContain(tool.status);
     }
+    // 分类是路线图，允许暂时没有工具（空分类由 views 给占位提示）
+    const emptyCategories = TOOL_CATEGORIES.filter(
+      (category) => !TOOLS.some((tool) => tool.category === category),
+    );
+    expect(emptyCategories.length).toBeGreaterThan(0);
   });
 });
 
@@ -40,29 +53,32 @@ describe("filterTools（搜索 + 分类过滤）", () => {
   });
 
   it("按分类过滤后，结果的分类全是所选分类", () => {
-    const files = filterTools(TOOLS, "", "文件");
-    expect(files.length).toBeGreaterThan(0);
-    expect(files.every((tool) => tool.category === "文件")).toBe(true);
+    const life = filterTools(TOOLS, "", "生活");
+    expect(life).toHaveLength(4);
+    expect(life.every((tool) => tool.category === "生活")).toBe(true);
+  });
+
+  it("空分类返回空数组（页面据此显示占位提示）", () => {
+    for (const category of ["文件", "文本", "开发", "媒体", "AI"] as const) {
+      expect(filterTools(TOOLS, "", category)).toHaveLength(0);
+    }
   });
 
   it("搜索忽略大小写，名称 / 描述 / 分类三处都能命中", () => {
-    expect(filterTools(TOOLS, "gif", "全部").map((t) => t.name)).toContain(
-      "GIF 制作",
-    );
-    expect(filterTools(TOOLS, "GIF", "全部").map((t) => t.name)).toContain(
-      "GIF 制作",
-    );
-    // 命中描述
-    expect(filterTools(TOOLS, "超分辨率", "全部").map((t) => t.name)).toEqual([
-      "图片放大",
+    expect(filterTools(TOOLS, "压缩", "全部").map((t) => t.name)).toEqual([
+      "图片压缩",
     ]);
-    // 命中分类名（旧行为：搜「媒体」捞出整个媒体分类）
-    expect(filterTools(TOOLS, "媒体", "全部")).toHaveLength(6);
+    // 命中描述
+    expect(filterTools(TOOLS, "常驻", "全部").map((t) => t.name)).toEqual([
+      "便签",
+    ]);
+    // 命中分类名：搜「生活」捞出整个生活分类
+    expect(filterTools(TOOLS, "生活", "全部")).toHaveLength(4);
   });
 
   it("搜索与分类叠加生效", () => {
-    const result = filterTools(TOOLS, "图片", "文件");
-    expect(result.every((tool) => tool.category === "文件")).toBe(true);
+    const result = filterTools(TOOLS, "图片", "生活");
+    expect(result).toHaveLength(0);
   });
 
   it("无匹配返回空数组", () => {
@@ -71,19 +87,19 @@ describe("filterTools（搜索 + 分类过滤）", () => {
 });
 
 describe("groupTools（分类分组）", () => {
-  it("「全部」按分类分组：七个分组、顺序与目录一致", () => {
+  it("「全部」只给有工具的分类分组，顺序与目录一致", () => {
     const groups = groupTools(TOOLS, "全部");
-    expect(Object.keys(groups)).toEqual([...TOOL_CATEGORIES]);
-    expect(groups["图片"]).toHaveLength(12);
-    expect(groups["生活"]).toHaveLength(11);
+    expect(Object.keys(groups)).toEqual(["图片", "生活"]);
+    expect(groups["图片"]).toHaveLength(1);
+    expect(groups["生活"]).toHaveLength(4);
   });
 
-  it("选中具体分类：只含该组；结果为空也保留组（复刻旧行为，不是 bug）", () => {
-    const media = groupTools(
-      TOOLS.filter((tool) => tool.category === "媒体"),
-      "媒体",
+  it("选中具体分类：只含该组；结果为空也保留组（靠它渲染占位提示）", () => {
+    const life = groupTools(
+      TOOLS.filter((tool) => tool.category === "生活"),
+      "生活",
     );
-    expect(Object.keys(media)).toEqual(["媒体"]);
+    expect(Object.keys(life)).toEqual(["生活"]);
 
     const empty = groupTools([], "图片");
     expect(empty).toEqual({ 图片: [] });
