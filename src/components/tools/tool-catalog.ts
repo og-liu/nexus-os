@@ -94,7 +94,7 @@ export const TOOLS: Tool[] = [
     name: "图片压缩",
     description: "智能压缩图片体积，保持画质",
     icon: Image,
-    status: "开发中",
+    status: "可用",
     category: "图片",
   },
   {
