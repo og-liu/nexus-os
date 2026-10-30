@@ -54,12 +54,19 @@ describe("filterTools（搜索 + 分类过滤）", () => {
 
   it("按分类过滤后，结果的分类全是所选分类", () => {
     const life = filterTools(TOOLS, "", "生活");
-    expect(life).toHaveLength(4);
+    expect(life).toHaveLength(2);
     expect(life.every((tool) => tool.category === "生活")).toBe(true);
+
+    // 便签 / 待办归「文本」，不是「生活」（2026-10-30 调整）
+    const text = filterTools(TOOLS, "", "文本");
+    expect(text.map((tool) => tool.slug).sort()).toEqual([
+      "sticky-notes",
+      "todo-list",
+    ]);
   });
 
   it("空分类返回空数组（页面据此显示占位提示）", () => {
-    for (const category of ["文件", "文本", "开发", "媒体", "AI"] as const) {
+    for (const category of ["文件", "开发", "媒体", "AI"] as const) {
       expect(filterTools(TOOLS, "", category)).toHaveLength(0);
     }
   });
@@ -73,7 +80,7 @@ describe("filterTools（搜索 + 分类过滤）", () => {
       "便签",
     ]);
     // 命中分类名：搜「生活」捞出整个生活分类
-    expect(filterTools(TOOLS, "生活", "全部")).toHaveLength(4);
+    expect(filterTools(TOOLS, "生活", "全部")).toHaveLength(2);
   });
 
   it("搜索与分类叠加生效", () => {
@@ -89,9 +96,10 @@ describe("filterTools（搜索 + 分类过滤）", () => {
 describe("groupTools（分类分组）", () => {
   it("「全部」只给有工具的分类分组，顺序与目录一致", () => {
     const groups = groupTools(TOOLS, "全部");
-    expect(Object.keys(groups)).toEqual(["图片", "生活"]);
+    expect(Object.keys(groups)).toEqual(["图片", "文本", "生活"]);
     expect(groups["图片"]).toHaveLength(1);
-    expect(groups["生活"]).toHaveLength(4);
+    expect(groups["文本"]).toHaveLength(2);
+    expect(groups["生活"]).toHaveLength(2);
   });
 
   it("选中具体分类：只含该组；结果为空也保留组（靠它渲染占位提示）", () => {
