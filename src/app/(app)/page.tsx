@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { AttendanceCard } from "@/components/attendance/attendance-card";
 import { DatetimePanel } from "@/components/dashboard/datetime-panel";
+import { QuickToolsCard } from "@/components/dashboard/quick-tools-card";
 import { QuoteCard } from "@/components/dashboard/quote-card";
 import { StickyNotesCard } from "@/components/dashboard/sticky-notes-card";
 import { PageHeader } from "@/components/layout/page-header";
@@ -30,19 +31,19 @@ export const metadata: Metadata = {
  *
  * 外壳已落地：登录成功后直接看到应用本身。
  *
- * 五块拼图**逐块各占一行、左对齐**，宽度按旧版总览页参考图预估：
- * - 日期时间面板 / 工作日历卡 / 待办卡 / 便签卡 / 每日一句卡都是 430px
+ * 六块拼图**逐块各占一行、左对齐**，宽度按旧版总览页参考图预估：
+ * - 日期时间面板 / 工作日历卡 / 常用工具卡 / 待办卡 / 便签卡 / 每日一句卡都是 430px
  *   （面板原本按旧版参考图定 372px，2026-10-23 联调时主人要求五块先统一宽度）
- * - 工作日历卡 / 待办卡 / 便签卡 / 每日一句卡 430px（旧版右栏实测 408–442px）
  *
  * 排成一行每块都会被挤窄（2026-10-22 联调否掉了那个版本）；等卡片补齐，再按旧版栅格
  * （主区 2/3 + 常驻栏 1/3）拼回去，尺寸口径已经对齐参考图。
  *
- * 顺序是「面板 → 出勤 → 待办 → 便签 → 每日一句」：面板与工作日历卡都是「今天」的即时信息
- * （今天到底上不上班），同属页头级信息，所以工作日历卡紧跟面板；待办排在便签之前
+ * 顺序是「面板 → 出勤 → 常用工具 → 待办 → 便签 → 每日一句」：面板与工作日历卡都是「今天」的
+ * 即时信息（今天到底上不上班），同属页头级信息，所以工作日历卡紧跟面板；常用工具是
+ * **「去哪儿」的入口**（只点不读），接在「今天」之后、「要做的事」之前；待办排在便签之前
  * （「今天还剩什么」比「随手记」更该第一眼看到）；每日一句是氛围信息，放最后。
  *
- * 没有栅格、没有 `col-start` / `row-start`：五块就是竖列里顺序排列的五个 div，
+ * 没有栅格、没有 `col-start` / `row-start`：六块就是竖列里顺序排列的六个 div，
  * 各自 `max-w-*` 限宽，DOM 顺序天然等于视觉顺序（Tab 焦点顺序也随之正确）。
  *
  * 面板的农历 / 节日 / 年度进度、工作日历卡的整月状态都在这里算一次（只在服务端），
@@ -100,6 +101,10 @@ export default async function OverviewPage() {
             month={todayParts.month}
             days={attendanceDays}
           />
+        </div>
+        <div className="max-w-[430px]">
+          {/* 常用工具：读「今天」的信息之后给一条「去哪儿」的路（详见 quick-tools-card） */}
+          <QuickToolsCard />
         </div>
         <div className="max-w-[430px]">
           <TodoCard todos={todos.open} done={todos.done} total={todos.total} />
