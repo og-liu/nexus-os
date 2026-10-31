@@ -147,6 +147,37 @@ describe("标签的增删改", () => {
       ["职业", "职业/周报", "重要"].sort(),
     );
   });
+
+  it("重命名：子标签会撞到别人身上时返回 conflict，且库里一行都没改", () => {
+    const { db, alice } = setup();
+    createTag(db, alice.id, "工作");
+    createTag(db, alice.id, "工作/周报");
+    // 只有 `生活/周报`、没有父级 `生活`——所以 `工作` → `生活` 本身不撞名，
+    // 撞的是它下面的 `工作/周报` → `生活/周报`
+    createTag(db, alice.id, "生活/周报");
+
+    const before = listTags(db, alice.id).map((tag) => tag.name).sort();
+    const work = listTags(db, alice.id).find((tag) => tag.name === "工作");
+    if (!work) throw new Error("标签没建出来");
+
+    expect(renameTag(db, alice.id, work.id, "生活")).toBe("conflict");
+    expect(listTags(db, alice.id).map((tag) => tag.name).sort()).toEqual(before);
+  });
+
+  it("重命名：只改大小写 / 空格（键不变）不算冲突，子标签不动", () => {
+    const { db, alice } = setup();
+    createTag(db, alice.id, "Work");
+    createTag(db, alice.id, "Work/Weekly");
+    createTag(db, alice.id, "生活");
+
+    const work = listTags(db, alice.id).find((tag) => tag.name === "Work");
+    if (!work) throw new Error("标签没建出来");
+
+    expect(renameTag(db, alice.id, work.id, "work")).toBe("ok");
+    expect(listTags(db, alice.id).map((tag) => tag.name).sort()).toEqual(
+      ["Work/Weekly", "生活", "work"].sort(),
+    );
+  });
 });
 
 describe("单独新建标签（管理面板）", () => {

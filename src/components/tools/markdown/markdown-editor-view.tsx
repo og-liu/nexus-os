@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState, useTransition } from "react";
+import type { CSSProperties } from "react";
 import { useToast } from "@/components/ui/toast";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { cn } from "@/lib/utils";
@@ -459,12 +460,21 @@ export function MarkdownEditorView({
               「编辑器 + 预览」时宽度由分割条拖出来的比例决定（`flex-basis`），其余两档吃满。
             */}
             <EditorPane
-              style={viewMode === "split" ? { flexBasis: `${splitRatio * 100}%` } : undefined}
+              /*
+               * 「编辑器 + 预览」的宽度走 CSS 变量 + `md:` 前缀。
+               * **手机上那一档落成「只显示编辑」，flex-basis 必须跟着失效**——内联 `flexBasis: 50%`
+               * 没有断点，缩到 375 时编辑区会卡在一半宽、右边留一片空（2026-10-31 修）。
+               */
+              style={
+                viewMode === "split"
+                  ? ({ "--split-basis": `${splitRatio * 100}%` } as CSSProperties)
+                  : undefined
+              }
               className={
                 viewMode === "preview"
                   ? "hidden"
                   : viewMode === "split"
-                    ? "flex shrink-0 grow-0"
+                    ? "flex flex-1 md:shrink-0 md:grow-0 md:basis-[var(--split-basis)]"
                     : "flex flex-1"
               }
               body={body}
