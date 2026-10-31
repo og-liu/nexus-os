@@ -22,6 +22,7 @@ const TOOL_TAB_SLUGS = new Set([
   "attendance-calendar",
   "vault",
   "image-compress",
+  "markdown-editor",
 ]);
 
 const TOOL_PATH_PREFIX = "/tools/";

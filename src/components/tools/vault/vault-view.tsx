@@ -21,7 +21,8 @@ import { GroupNav, type VaultView } from "./group-nav";
 import { ItemList } from "./item-list";
 import { ItemDetail } from "./item-detail";
 import { ItemDialog } from "./item-dialog";
-import { ConfirmDialog, GroupDialog } from "./dialogs";
+import { ConfirmDialog } from "@/components/ui/confirm-dialog";
+import { GroupDialog } from "./dialogs";
 
 /**
  * 保险库工具页（《功能/保险库》§二）。

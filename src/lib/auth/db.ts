@@ -105,6 +105,39 @@ CREATE TABLE IF NOT EXISTS vault_items (
 CREATE INDEX IF NOT EXISTS idx_vault_items_user_id ON vault_items(user_id);
 -- 外键不自动建索引：删群组时 SET NULL 要按 group_id 找子行，点群组看列表也靠它
 CREATE INDEX IF NOT EXISTS idx_vault_items_group_id ON vault_items(group_id);
+
+CREATE TABLE IF NOT EXISTS md_documents (
+  id         INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id    INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  title      TEXT    NOT NULL,             -- 独立一列，不从正文的「# 标题」推导
+  body       TEXT    NOT NULL DEFAULT '',  -- Markdown 原文，不存渲染结果
+  created_at INTEGER NOT NULL,             -- 毫秒时间戳；保存不动它
+  updated_at INTEGER NOT NULL              -- 毫秒时间戳；每次保存都刷新，列表排序唯一依据
+);
+
+-- 列表查询是 WHERE user_id = ?：SQLite 不为外键自动建索引，不建就是全表扫
+CREATE INDEX IF NOT EXISTS idx_md_documents_user_id ON md_documents(user_id);
+
+-- 标签：一篇文档可以有任意多个，也可以一个都没有（多对多）
+CREATE TABLE IF NOT EXISTS md_tags (
+  id         INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id    INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  name       TEXT    NOT NULL,             -- 展示用：保留大小写与「/」（「工作/周报」表示层级）
+  name_key   TEXT    NOT NULL,             -- 归一化（trim + 折叠空白 + 小写）：「工作」与「工作 」不能变成两个标签
+  created_at INTEGER NOT NULL,
+  UNIQUE (user_id, name_key)               -- 同一个人不许有两个只差大小写/空格的标签
+);
+
+CREATE INDEX IF NOT EXISTS idx_md_tags_user_id ON md_tags(user_id);
+
+CREATE TABLE IF NOT EXISTS md_document_tags (
+  document_id INTEGER NOT NULL REFERENCES md_documents(id) ON DELETE CASCADE,
+  tag_id      INTEGER NOT NULL REFERENCES md_tags(id) ON DELETE CASCADE,
+  PRIMARY KEY (document_id, tag_id)
+) WITHOUT ROWID;
+
+-- 反查「这个标签下有哪些文档」要按 tag_id 找，外键不自动建索引
+CREATE INDEX IF NOT EXISTS idx_md_document_tags_tag ON md_document_tags(tag_id);
 `;
 
 /** 建表（幂等）。单独导出，测试可以在任意连接上初始化结构。 */
