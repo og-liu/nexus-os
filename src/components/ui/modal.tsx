@@ -20,9 +20,32 @@ interface ModalProps {
   title: string;
   onClose: () => void;
   children: ReactNode;
+  /**
+   * 桌面形态（≥ sm）右上角也画一个 ×。
+   *
+   * 默认不开：确认框这类「只有两个明确选项」的弹窗多一个 × 是干扰。
+   * 内容较长的面板（标签管理）才需要——手机上本来就有顶栏的 ×，桌面没有就只剩 Esc 和点遮罩。
+   */
+  showCloseButton?: boolean;
+  /**
+   * 内容区怎么排：
+   * - `"auto"`（默认）：按内容高度自适应，表单类弹窗用；
+   * - `"fill"`：弹窗桌面态给一个固定高度、内容区自己撑满并滚动。
+   *   **长列表必须用这个**——`auto` 下内容区是块级、按内容撑高，里面的 `flex-1 overflow-y-auto`
+   *   拿不到高度，列表一长就把整个弹窗撑破 `max-h-[75vh]`，顶部的标题和底部的按钮全被挤出可视区。
+   */
+  bodyLayout?: "auto" | "fill";
 }
 
-export function Modal({ open, title, onClose, children }: ModalProps) {
+export function Modal({
+  open,
+  title,
+  onClose,
+  children,
+  showCloseButton = false,
+  bodyLayout = "auto",
+}: ModalProps) {
+  const fill = bodyLayout === "fill";
   // 打开时锁背景滚动：不锁的话，手指在遮罩上划，底下的列表会跟着滚
   useEffect(() => {
     if (!open) return;
@@ -76,12 +99,32 @@ export function Modal({ open, title, onClose, children }: ModalProps) {
         role="dialog"
         aria-modal="true"
         aria-label={title}
-        className="relative z-10 flex min-h-0 w-full flex-1 flex-col bg-white p-4 pb-[max(16px,env(safe-area-inset-bottom))] sm:max-h-[75vh] sm:flex-none sm:max-w-[640px] sm:rounded-[2px] sm:p-6"
+        className={
+          fill
+            ? "relative z-10 flex min-h-0 w-full flex-1 flex-col bg-white p-4 pb-[max(16px,env(safe-area-inset-bottom))] sm:h-[720px] sm:max-h-[80vh] sm:max-w-[680px] sm:rounded-[2px] sm:p-6"
+            : "relative z-10 flex min-h-0 w-full flex-1 flex-col bg-white p-4 pb-[max(16px,env(safe-area-inset-bottom))] sm:max-h-[75vh] sm:flex-none sm:max-w-[640px] sm:rounded-[2px] sm:p-6"
+        }
       >
-        <h2 className="hidden shrink-0 text-sm font-semibold text-[#000000] sm:block">
+        <h2 className="hidden shrink-0 pr-8 text-sm font-semibold text-[#000000] sm:block">
           {title}
         </h2>
-        <div className="mt-3 flex min-h-0 flex-1 flex-col sm:mt-3 sm:block sm:flex-none">
+        {showCloseButton ? (
+          <button
+            type="button"
+            onClick={onClose}
+            aria-label="关闭"
+            className="absolute right-3 top-3 hidden h-8 w-8 cursor-pointer items-center justify-center rounded-[2px] text-[#8A8A8A] transition-colors hover:bg-[#F5F5F5] hover:text-[#000000] sm:flex"
+          >
+            <X className="h-4 w-4" aria-hidden="true" />
+          </button>
+        ) : null}
+        <div
+          className={
+            fill
+              ? "mt-3 flex min-h-0 flex-1 flex-col"
+              : "mt-3 flex min-h-0 flex-1 flex-col sm:mt-3 sm:block sm:flex-none"
+          }
+        >
           {children}
         </div>
       </div>
