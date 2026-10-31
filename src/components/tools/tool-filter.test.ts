@@ -3,8 +3,8 @@ import { TOOLS, TOOL_CATEGORIES, findToolBySlug } from "./tool-catalog";
 import { filterTools, groupTools } from "./tool-filter";
 
 describe("tool-catalog（《功能/工具中心》数据）", () => {
-  it("只收真能用的工具：5 个，名称不重复", () => {
-    expect(TOOLS).toHaveLength(5);
+  it("只收真能用的工具：6 个，名称不重复", () => {
+    expect(TOOLS).toHaveLength(6);
     const names = TOOLS.map((tool) => tool.name);
     expect(new Set(names).size).toBe(names.length);
   });
@@ -17,10 +17,11 @@ describe("tool-catalog（《功能/工具中心》数据）", () => {
     }
   });
 
-  it("五个真工具的 slug 一个不少", () => {
+  it("六个真工具的 slug 一个不少", () => {
     expect(TOOLS.map((tool) => tool.slug).sort()).toEqual([
       "attendance-calendar",
       "image-compress",
+      "markdown-editor",
       "sticky-notes",
       "todo-list",
       "vault",
@@ -66,9 +67,13 @@ describe("filterTools（搜索 + 分类过滤）", () => {
   });
 
   it("空分类返回空数组（页面据此显示占位提示）", () => {
-    for (const category of ["文件", "开发", "媒体", "AI"] as const) {
+    for (const category of ["文件", "媒体", "AI"] as const) {
       expect(filterTools(TOOLS, "", category)).toHaveLength(0);
     }
+    // 「开发」在 Markdown 编辑器上线后不再是空分类（《功能/工具中心》验收 1）
+    expect(filterTools(TOOLS, "", "开发").map((tool) => tool.slug)).toEqual([
+      "markdown-editor",
+    ]);
   });
 
   it("搜索忽略大小写，名称 / 描述 / 分类三处都能命中", () => {
@@ -96,10 +101,11 @@ describe("filterTools（搜索 + 分类过滤）", () => {
 describe("groupTools（分类分组）", () => {
   it("「全部」只给有工具的分类分组，顺序与目录一致", () => {
     const groups = groupTools(TOOLS, "全部");
-    expect(Object.keys(groups)).toEqual(["图片", "文本", "生活"]);
+    expect(Object.keys(groups)).toEqual(["图片", "文本", "生活", "开发"]);
     expect(groups["图片"]).toHaveLength(1);
     expect(groups["文本"]).toHaveLength(2);
     expect(groups["生活"]).toHaveLength(2);
+    expect(groups["开发"]).toHaveLength(1);
   });
 
   it("选中具体分类：只含该组；结果为空也保留组（靠它渲染占位提示）", () => {
