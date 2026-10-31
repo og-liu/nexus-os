@@ -161,6 +161,7 @@ export async function renameTagAction(
   const result = renameTag(db, user.id, id.value, rawName);
   if (result === "missing") return { ok: false, error: "标签不存在或名字不合法" };
   if (result === "duplicate") return { ok: false, error: "已存在同名标签" };
+  if (result === "conflict") return { ok: false, error: "改名后的子标签与已有标签重名" };
 
   revalidateMarkdown();
   return { ok: true, allTags: listTags(db, user.id) };

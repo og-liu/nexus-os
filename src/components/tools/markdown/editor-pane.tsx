@@ -1,6 +1,7 @@
 "use client";
 
 import { useRef, type CSSProperties, type KeyboardEvent, type ReactNode } from "react";
+import { Copy, Download } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { applyFormat, type FormatKind } from "@/lib/markdown/format";
 import { charCount } from "@/lib/markdown/validate";
@@ -120,25 +121,31 @@ export function EditorPane({
           <button
             type="button"
             onClick={onRetry}
-            className="cursor-pointer text-[#B91C1C] transition-colors hover:underline"
+            className="shrink-0 cursor-pointer whitespace-nowrap text-[#B91C1C] transition-colors hover:underline"
           >
             {statusText}
           </button>
         ) : (
-          <span className="text-[#999999]">{statusText}</span>
+          <span className="shrink-0 whitespace-nowrap text-[#999999]">{statusText}</span>
         )}
 
         <div className="flex items-center gap-1">
-          <span className="text-[#999999]">{charCount(body)} 字</span>
+          <span className="shrink-0 whitespace-nowrap text-[#999999]">{charCount(body)} 字</span>
+          {/*
+            「复制」「导出 .md」：≥ sm 是文字按钮，手机上收成图标。
+            375px 下三个文字挤在一行会把「已保存」「复制」「导出 .md」各折成两行（2026-10-31 修）。
+            aria-label 与 title 两种宽度都有，图标形态不至于变成谜语。
+          */}
           <button
             type="button"
             onClick={onCopy}
             disabled={!hasDocument}
             aria-label="复制 Markdown"
             title="复制 Markdown"
-            className="flex h-6 cursor-pointer items-center rounded-[2px] px-2 text-[11px] text-[#666666] transition-colors hover:bg-[#F5F5F5] disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent"
+            className="flex h-6 w-6 shrink-0 cursor-pointer items-center justify-center rounded-[2px] text-[11px] text-[#666666] transition-colors hover:bg-[#F5F5F5] disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent sm:w-auto sm:px-2"
           >
-            复制
+            <Copy className="h-3.5 w-3.5 sm:hidden" aria-hidden="true" />
+            <span className="hidden sm:inline">复制</span>
           </button>
           <button
             type="button"
@@ -146,9 +153,10 @@ export function EditorPane({
             disabled={!hasDocument}
             aria-label="导出 .md"
             title="导出 .md"
-            className="flex h-6 cursor-pointer items-center rounded-[2px] px-2 text-[11px] text-[#666666] transition-colors hover:bg-[#F5F5F5] disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent"
+            className="flex h-6 w-6 shrink-0 cursor-pointer items-center justify-center rounded-[2px] text-[11px] text-[#666666] transition-colors hover:bg-[#F5F5F5] disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent sm:w-auto sm:px-2"
           >
-            导出 .md
+            <Download className="h-3.5 w-3.5 sm:hidden" aria-hidden="true" />
+            <span className="hidden sm:inline">导出 .md</span>
           </button>
         </div>
       </div>

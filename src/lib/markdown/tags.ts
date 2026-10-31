@@ -214,13 +214,22 @@ export function setDocumentTags(
   return listDocumentTags(db, userId, documentId);
 }
 
-/** 重命名标签。同一个人已经有同名标签 → `"duplicate"`；不存在 → `"missing"`。 */
+/**
+ * 重命名标签。同一个人已经有同名标签 → `"duplicate"`；不存在 → `"missing"`；
+ * 改名会把**子标签**撞到别人身上 → `"conflict"`。
+ *
+ * 第三种情况是 2026-10-31 补的：`工作/周报` 与 `生活/周报` 并存时把 `工作` 改名成
+ * `生活`，子标签跟着改成 `生活/周报` 就撞了 `UNIQUE(user_id, name_key)`——
+ * 事务会回滚、数据不会坏，但异常会冒泡成 Server Action 报错。**必须在动手之前查**，
+ * 因为 SQLite 的约束只会在 UPDATE 执行到那一行时才炸，而那时前面几行已经改了
+ * （靠事务回滚能救回来，但用户看到的是一句看不懂的错）。
+ */
 export function renameTag(
   db: Db,
   userId: number,
   tagId: number,
   rawName: unknown,
-): "ok" | "missing" | "duplicate" {
+): "ok" | "missing" | "duplicate" | "conflict" {
   const name = normalizeTagName(rawName);
   if (!name) return "missing";
 
@@ -237,6 +246,37 @@ export function renameTag(
     if (clash) return "duplicate";
   }
 
+  // 改键就是「搬走」：子标签要跟着改名，所以先算出它们的新键，跟库里已有的对一遍
+  const children =
+    nextKey === current.name_key
+      ? []
+      : (db
+          .prepare("SELECT id, name, name_key FROM md_tags WHERE user_id = ? AND name_key LIKE ?")
+          .all(userId, `${current.name_key}/%`) as {
+          id: number;
+          name: string;
+          name_key: string;
+        }[]);
+
+  if (children.length > 0) {
+    const planned = children.map((child) => ({
+      id: child.id,
+      nextKey: tagKey(`${name}/${child.name.replace(/^[^/]*\//, "")}`),
+    }));
+    // 自己这一组（父 + 全部子）都会改名，它们的旧键让出来、新键自己占，不算冲突
+    const ownIds = new Set<number>([tagId, ...children.map((child) => child.id)]);
+    const taken = db
+      .prepare(
+        `SELECT id, name_key FROM md_tags
+          WHERE user_id = ? AND name_key IN (${planned.map(() => "?").join(", ")})`,
+      )
+      .all(userId, ...planned.map((item) => item.nextKey)) as {
+      id: number;
+      name_key: string;
+    }[];
+    if (taken.some((row) => !ownIds.has(row.id))) return "conflict";
+  }
+
   const rename = db.transaction(() => {
     if (nextKey === current.name_key) {
       db.prepare("UPDATE md_tags SET name = ? WHERE id = ? AND user_id = ?").run(
@@ -247,7 +287,6 @@ export function renameTag(
       return;
     }
 
-    // 改了键就是「搬走」：把自己的子标签（`工作/xxx`）也一起改名，否则层级会断
     db.prepare("UPDATE md_tags SET name = ?, name_key = ? WHERE id = ? AND user_id = ?").run(
       name,
       nextKey,
@@ -255,13 +294,6 @@ export function renameTag(
       userId,
     );
 
-    const children = db
-      .prepare("SELECT id, name, name_key FROM md_tags WHERE user_id = ? AND name_key LIKE ?")
-      .all(userId, `${current.name_key}/%`) as {
-      id: number;
-      name: string;
-      name_key: string;
-    }[];
     for (const child of children) {
       const suffix = child.name.replace(/^[^/]*\//, "");
       const childName = `${name}/${suffix}`;
