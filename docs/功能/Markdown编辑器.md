@@ -2,7 +2,7 @@
 
 | 状态 | 开始日期 | 最近更新 |
 |---|---|---|
-| ✅ 已完成 | 2026-10-30 | 2026-10-30 |
+| ✅ 已完成 | 2026-10-30 | 2026-10-31 |
 
 > 一句话：一个**能存多篇、可用标签归类**的 Markdown 写作工具——左边是文档列表，中间写原文，右边实时看到渲染结果；写完能复制走或导出 `.md` 文件。
 
@@ -22,6 +22,9 @@
 - **导出**：状态栏右侧「复制 Markdown」、「导出 .md」（浏览器下载，文件名取标题）
 - **字数**：状态栏显示字数（按字符数算，emoji 记 1 个）
 - **目录同步**：`tool-catalog` 新增一条 `markdown-editor`（分类「开发」、状态「可用」），工具卡可点；`tab-routes` 的 `TOOL_TAB_SLUGS` 加同一个 slug
+- **标签**（2026-10-30 联调追加）：一篇文档可以挂多个标签（多对多，两个新表 `md_tags` / `md_document_tags`）；标签名里带 `/` 表示层级（`工作/周报` 是 `工作` 的子标签），筛选 `工作` 时子标签一起命中；编辑区工具栏下方一条标签条（回车新建、点开列已有）、左栏标签下拉筛选、独立的标签管理面板（新建 / 改名 / 单删 / 批删，删标签只解除关联不删文档）
+- **版式三档 + 拖拽分栏**（2026-10-31 联调追加）：仅编辑器 / 编辑器 + 预览 / 仅预览（手机两档），默认**仅编辑器**；「编辑 + 预览」档中间一条可拖拽分割条（比例不持久化，刷新回 1:1）
+- **批量删除**（2026-10-30 联调追加）：左栏「选择」进批量模式，可全选 / 取消；搜索时全选只作用于可见项；确认框写数量；删到当前篇时自动打开剩余第一篇
 
 **主动放弃（本版不做，不是遗漏）：**
 
@@ -33,11 +36,10 @@
 | 关闭页面兜底保存 | 浏览器直接关掉可能丢最后不到 1 秒的输入。要兜住它得用 `sendBeacon` / keepalive `fetch` 绕开 Server Action 自己写请求，收益只是「少丢几个字」——接受这个损失，写进「已知的坑」 |
 | 全文搜索 | 只搜标题（前端过滤）。搜正文要 SQLite FTS5 + 中文分词，《数据库/README》§八已把它排到知识库 |
 | 版本历史 / 回收站 | 没有「上一次写的什么样」这种需求；软删除会让每条查询都得带 `deleted_at IS NULL`。硬删 + 二次确认更便宜 |
-| 文件夹 / 标签 | 多篇按时间排就够；分类要先定层级、拖拽、删除时子项归哪，属于「知识」模块的范围 |
+| 标签树 / 拖拽归类 | 层级只靠名字里的 `/`（`工作/周报`），不做 `parent_id` 树表、不做拖拽移动。**标签本身已做**（见上一节），这里放弃的是「树」：树要递归改名、移动、删除策略，而 `/` 前缀匹配已经能表达「分类下还有分类」 |
 | 实时协同 / 多端同步 | 这是单机个人工作台，没有第二个客户端 |
 | 导出 HTML / PDF | 导出目标是「能喂给别的系统」的 Markdown 原文；HTML / PDF 要另定样式与分页规则 |
 | 滚动同步（预览跟着光标走） | 要做「原文位置 ↔ 渲染位置」的映射加滚动监听，第一版不值这个复杂度 |
-| 阅读模式（预览占满全屏） | 手机上已经有整屏预览；桌面上把编辑区收起来反而少了「边写边看」这个唯一理由 |
 
 ---
 
@@ -150,7 +152,7 @@
 ### 2.5 右栏：实时预览
 
 - `bg-white`，内容区 `px-5 py-4`，自己滚（`overflow-y-auto`）
-- 渲染结果外面包一层 `<div className="markdown-body">`，样式**只作用在预览区**（Tailwind 的 preflight 会把 h1 / ul / blockquote 的默认样式全清掉，不写这组样式，渲染出来的标题和正文一样大、列表没有点）：
+- 样式用 react-markdown 的 **`components` 映射**给：每个元素在映射里直接带 Tailwind 类名（`preview-pane.tsx`），不包 `.markdown-body` 那种全局作用域——本仓库只有一份 `globals.css`，作用域样式得另起类名 + 另加文件。**必须逐个元素给**：Tailwind 的 preflight 会把 h1 / ul / blockquote 的默认样式全清掉，漏一个，那个元素就和正文一样大、列表没有点：
 
 | 元素 | 样式 |
 |---|---|
@@ -270,25 +272,38 @@ CREATE INDEX IF NOT EXISTS idx_md_documents_user_id ON md_documents(user_id);
 
 ```
 src/lib/markdown/
-├── documents.ts        数据访问：列表 / 读取 / 新建 / 保存 / 删除
-├── validate.ts         服务端校验：标题长度、正文长度、归属
-├── actions.ts          Server Actions（每个都先 requireUser()）
+├── documents.ts        文档数据访问：列表（带标签，一次聚合）/ 读 / 建 / 存 / 删 / 批量删 / 未命名补序号
+├── tags.ts             标签数据访问：归一化键、`/` 层级前缀匹配、建改删、批量删、使用计数
+├── validate.ts         服务端校验：标题 60 字 / 正文 100000 字符 / id
 ├── format.ts           工具栏纯函数 applyFormat(text, selection, kind)
-├── documents.test.ts   数据层单测（含 user_id 隔离、排序、只动 updated_at）
-├── validate.test.ts    校验单测
-└── format.test.ts      格式化单测（9 种语法 + 取消 + 跨行选区）
+├── export-name.ts      导出文件名清洗（非法字符替换、空标题兜底）
+├── actions.ts          Server Actions（文档 4 个 + 标签 5 个，每个都先 requireUser）
+├── documents.test.ts   文档数据层单测（user_id 隔离、排序、只动 updated_at）
+├── tags.test.ts        标签单测（归一化、层级、隔离、改名连子标签、计数）
+├── validate.test.ts    校验边界
+├── format.test.ts      9 种语法 + 取消 + 跨行选区
+└── export-name.test.ts 文件名清洗
 
 src/components/tools/markdown/
-├── markdown-editor-view.tsx  页面主视图：状态中枢（当前文档、列表、搜索、抽屉开关）
-├── document-list.tsx         左栏（新建 / 搜索 / 列表 / 空态 / 全屏版）
-├── editor-pane.tsx           中栏（标题行 + 工具栏 + textarea + 状态栏）
-├── format-toolbar.tsx        9 个格式按钮
-├── preview-pane.tsx          右栏（react-markdown + markdown-body 样式作用域）
-├── markdown-body.css         预览区元素样式（或写成同目录的样式对象，按项目现有做法选）
-└── use-autosave.ts           自动保存 hook（防抖 + flush + 串行 + 状态）
+├── markdown-editor-view.tsx      页面主视图：状态中枢（当前文档、列表、搜索、批量、版式）
+├── editor-top-bar.tsx            贯穿「编辑 + 预览」的标题行（标题 / 版式开关 / 左栏开关 / 新建）
+├── view-mode-switch.tsx          版式三档开关（仅编辑器 / 编辑 + 预览 / 仅预览）
+├── split-divider.tsx             可拖拽分割条（Pointer Events + rAF 节流 + 边界夹取）
+├── document-list.tsx             左栏（新建 / 批量选择 / 搜索 / 标签筛选 / 行尾删除 / 空态）
+├── document-list-overlays.tsx    md–xl 抽屉 + <md 全屏列表（贴页面根，不盖页签栏）
+├── document-chips.tsx            <md 的文档切换 chip 条
+├── editor-pane.tsx               中栏（工具栏 + textarea + 标签条 + 状态栏）
+├── format-toolbar.tsx            9 个格式按钮
+├── preview-pane.tsx              右栏（react-markdown + remark-gfm，`components` 映射带类名）
+├── tag-bar.tsx                   编辑区标签条（点开列已有标签 / 回车新建 / 失焦不误建）
+├── tag-filter-select.tsx         左栏标签下拉筛选（可搜索 / 带篇数 / 层级缩进）
+├── tag-manager.tsx               标签管理面板（新建 / 改名 / 单删 / 批删）
+├── use-autosave.ts               自动保存 hook（防抖 + 串行 + flush + 输入法感知）
+├── use-document-tags.ts          标签状态与动作（从主视图抽出）
+└── split-divider.test.ts         分割条夹取逻辑单测
 
 src/app/(app)/tools/markdown-editor/page.tsx   路由（requireUser + 取列表 + 传初值）
-src/lib/auth/db.ts                            initSchema() 里加一张表
+src/lib/auth/db.ts                            initSchema() 里加**三张表**（md_documents / md_tags / md_document_tags）
 src/components/tools/tool-catalog.ts          新增一条工具记录
 src/components/layout/tab-routes.ts           TOOL_TAB_SLUGS 加 "markdown-editor"
 ```
@@ -359,8 +374,8 @@ src/components/layout/tab-routes.ts           TOOL_TAB_SLUGS 加 "markdown-edito
 
 | 坑 | 机制 | 对策 |
 |---|---|---|
-| `react-markdown` 不接受 `className` | v9 起收紧了 props，`className` 传不进去（类型报错或静默忽略） | 外面包一层 `<div className="markdown-body">`，样式挂在这个 div 上 |
-| 预览样式被 Tailwind preflight 抹平 | preflight 把 `h1` 字号、`ul` 的 `list-style`、`blockquote` 缩进全清零了，渲染出来和正文一样大、列表没点 | 预览区用 `.markdown-body` 作用域写一组元素样式（§2.4 的表），只影响预览区，不污染全站 |
+| `react-markdown` 不接受 `className` | v9 起收紧了 props，`className` 传不进去（类型报错或静默忽略） | 不传 `className`、也不包 `.markdown-body`：样式全部走 `components` 映射（`preview-pane.tsx`），每个元素在组件里带类名 |
+| 预览样式被 Tailwind preflight 抹平 | preflight 把 `h1` 字号、`ul` 的 `list-style`、`blockquote` 缩进全清零了，渲染出来和正文一样大、列表没点 | `components` 映射必须覆盖**渲染出来的每一种元素**（含 `h4`–`h6`、`table` 的 `th`/`td`、任务列表的 `input`）——漏一个，那个元素就退回裸样式 |
 | 手机上聚焦输入框整页放大 | iOS 对 `font-size < 16px` 的输入控件聚焦时会自动缩放 | 标题与正文在 `< sm` 用 16px，`sm:` 起回到 18px / 13px mono |
 | 点工具栏按钮后格式打到光标处 | 按钮拿到焦点、textarea 失焦，`selectionStart/End` 归零 | 按钮 `onMouseDown` 里 `preventDefault()`，让 textarea 保持焦点与选区 |
 | 切换文档丢最后一段 | 防抖计时器还没到就已经切走 | hook 暴露 `flush()`；切换 / 删除 / 卸载前都先调它；用 ref 持有最新 timer 与内容 |
@@ -396,6 +411,9 @@ src/components/layout/tab-routes.ts           TOOL_TAB_SLUGS 加 "markdown-edito
 
 | 日期 | 改动 |
 |---|---|
+| 2026-10-31 | **文档对账**（验收时改的，代码没动）：§一「做」补上**标签**、**版式三档 + 拖拽分栏**、**批量删除**三条（这三块是 10-30 / 10-31 联调追加的，之前只写进了「关键决策」，做清单里没有——写手读做清单会以为没这个功能）；放弃表删掉「文件夹 / 标签」与「阅读模式（预览占满全屏）」两条（都已做），换成「标签树 / 拖拽归类」（标签做了、树没做）；§2.5 与坑表把「包一层 `.markdown-body`」改为 **`components` 映射**（与 `preview-pane.tsx` 的实际写法一致）；§五 文件落点按真实文件重写（lib 6 个模块 + 组件 15 个，`db.ts` 加的是**三张表**不是一张） |
+| 2026-10-31 | **新增标签系统**（联调需求）：`md_tags` + `md_document_tags` 两张表（多对多，`WITHOUT ROWID`）；标签名归一化键 `name_key` + `UNIQUE(user_id, name_key)`；层级靠名字里的 `/`，筛选按前缀命中；编辑区标签条、左栏下拉筛选、标签管理面板；删标签只解除关联、文档不删；打标签**不刷新** `updated_at`（内容没变，列表不该跳） |
+| 2026-10-31 | **版式三档 + 拖拽分栏**（联调）：仅编辑器 / 编辑器 + 预览 / 仅预览，**默认改成仅编辑器**（原来默认 1:1 双栏）；三枚按钮住进贯穿「编辑 + 预览」的标题行（「仅预览」时编辑区整块让位，开关留在里面就点不到）；「编辑 + 预览」档中间加可拖拽分割条（百分比 + 边界夹取 360 / 320px，不持久化） |
 | 2026-10-30 | **行尾删除改为常显**：不再 hover 才出现（看不见的动作等于没有），hover 时图标由灰变**纯黑**而不是变红。§2.2 与《界面设计规范》§7.25.3 同步 |
 | 2026-10-30 | **删除挪到列表行尾**（联调定的）：顶行不再有删除按钮（没打开文档时那里只剩一个灰按钮，且删的是「当前那篇」而不是「你指的那篇」）；改为左栏列表每行尾部一个垃圾桶，桌面 hover 才显、触屏常显，仍走二次确认。删的不是当前篇时编辑区不动；删的是当前篇才重新选第一篇。§2.2 / §2.3 / §四 / 验收 15·27 同步 |
 | 2026-10-30 | **新建按钮挪到顶行最右**：与保险库中栏一致（它的新建就在最右）。顺序变成 汉堡 / 文档图标 / 标题（弹性）/ 删除图标 / 黑底「新建」——`≥ xl` 时「新建」隐藏，右侧回到只剩删除，设计稿「最右：删除」在常驻左栏那档仍然成立。§2.3 与 §2.5 同步 |
