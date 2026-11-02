@@ -109,7 +109,9 @@ export default async function WorkCalendarPage({
       <AttendanceMobileBar />
 
       <div className="px-4 py-4 md:px-6 md:py-6">
-        <div className="mx-auto w-full max-w-[1360px]">
+        {/* 内容容器不设 max-width（《界面设计规范》§5.3）：铺满内容区、只留内边距，
+            与便签 / 待办同一套骨架。2026-11-02 去掉这里的 max-w-[1360px] */}
+        <div>
           {tool ? (
             <ToolHeader
               tool={tool}

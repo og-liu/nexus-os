@@ -82,7 +82,7 @@ export function ExtractView() {
       />
 
       <div className="px-4 py-4 md:px-6 md:py-6">
-        <div className="mx-auto w-full max-w-[1360px] space-y-4 xl:space-y-6">
+        <div className="space-y-4 xl:space-y-6">
           {tool ? <ToolHeader tool={tool} /> : null}
 
           <input
