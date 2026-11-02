@@ -4,7 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { useToast } from "@/components/ui/toast";
 import { batchRejectionReason } from "@/lib/image-compress/batch-rules";
 import { outputFilename, sourceMime } from "@/lib/image-compress/plan-output";
-import { buildZip, uniqueName } from "@/lib/image-compress/zip";
+import { buildZip, uniqueName } from "@/lib/zip";
 import { compressImage } from "./compress-encode";
 
 /**
