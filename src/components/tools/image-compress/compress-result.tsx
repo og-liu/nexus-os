@@ -2,7 +2,7 @@
 
 import { Download, RefreshCw } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { formatBytes, percentSaved } from "@/lib/image-compress/format-bytes";
+import { formatBytes, percentSaved } from "@/lib/format-bytes";
 import type { CompressOutcome } from "./image-source";
 
 /**

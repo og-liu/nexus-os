@@ -17,11 +17,14 @@
   },
   "pnpm": {
     "onlyBuiltDependencies": [
-      "better-sqlite3"
+      "better-sqlite3",
+      "@ffmpeg-installer/darwin-arm64",
+      "@ffmpeg-installer/linux-x64"
     ]
   },
   "dependencies": {
     "@base-ui/react": "1.7.0",
+    "@ffmpeg-installer/ffmpeg": "1.1.0",
     "@jsquash/jpeg": "1.6.0",
     "@jsquash/oxipng": "2.3.0",
     "better-sqlite3": "^12.4.1",

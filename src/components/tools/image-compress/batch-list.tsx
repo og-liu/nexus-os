@@ -1,7 +1,7 @@
 "use client";
 
 import { Download, Loader2 } from "lucide-react";
-import { formatBytes } from "@/lib/image-compress/format-bytes";
+import { formatBytes } from "@/lib/format-bytes";
 import type { BatchItem } from "./use-batch-compress";
 
 /**

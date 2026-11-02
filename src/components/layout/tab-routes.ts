@@ -23,6 +23,7 @@ const TOOL_TAB_SLUGS = new Set([
   "vault",
   "image-compress",
   "markdown-editor",
+  "audio-extract",
 ]);
 
 const TOOL_PATH_PREFIX = "/tools/";
