@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { Loader2 } from "lucide-react";
-import { formatBytes } from "@/lib/image-compress/format-bytes";
+import { formatBytes } from "@/lib/format-bytes";
 import { CompressCompare } from "./compress-compare";
 
 /**

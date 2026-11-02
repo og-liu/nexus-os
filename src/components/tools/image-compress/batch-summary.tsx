@@ -1,7 +1,7 @@
 "use client";
 
 import { Download, Loader2, RefreshCw } from "lucide-react";
-import { formatBytes, percentSaved } from "@/lib/image-compress/format-bytes";
+import { formatBytes, percentSaved } from "@/lib/format-bytes";
 import type { BatchItem, BatchProgress } from "./use-batch-compress";
 
 /**

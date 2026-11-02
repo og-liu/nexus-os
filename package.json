@@ -1,6 +1,6 @@
 {
   "name": "nexus-os",
-  "version": "0.10.0",
+  "version": "0.11.0",
   "description": "Nexus OS 是一个面向个人用户打造的智能工作空间，将日常工具、自动化流程、知识管理以及 AI Agent 能力整合到统一的平台中。让工具成为能力，让 AI 成为助手，让个人数据真正服务于自己。",
   "private": true,
   "scripts": {
@@ -17,11 +17,14 @@
   },
   "pnpm": {
     "onlyBuiltDependencies": [
-      "better-sqlite3"
+      "better-sqlite3",
+      "@ffmpeg-installer/darwin-arm64",
+      "@ffmpeg-installer/linux-x64"
     ]
   },
   "dependencies": {
     "@base-ui/react": "1.7.0",
+    "@ffmpeg-installer/ffmpeg": "1.1.0",
     "@jsquash/jpeg": "1.6.0",
     "@jsquash/oxipng": "2.3.0",
     "better-sqlite3": "^12.4.1",
