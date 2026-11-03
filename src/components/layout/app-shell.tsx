@@ -5,6 +5,8 @@ import type { ReactNode } from "react";
 import { Footer } from "@/components/layout/footer";
 import { Sidebar } from "@/components/layout/sidebar";
 import { TabBar } from "@/components/layout/tab-bar";
+import { PlayerOrb } from "@/components/music-player/player-orb";
+import { PlayerProvider } from "@/components/music-player/player-provider";
 
 /**
  * 应用外壳（《界面设计规范》§5.1）。
@@ -57,37 +59,47 @@ export function AppShell({
 
   return (
     <AppShellContext.Provider value={{ openNav }}>
-      {/* 桌面布局：整页禁止横向滚动，只有主内容区纵向滚动 */}
-      <div className="flex h-screen overflow-hidden">
-        <Sidebar variant="desktop" username={username} />
-        <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
-          {/* 页签栏在 <main> 外面（§7.22.1）：不随内容滚，也不给 <main> 留占位 */}
-          <TabBar />
-          <main className="flex-1 overflow-y-auto bg-[#ECECEC]">{children}</main>
-          <Footer />
+      {/*
+        播放器包在最外层：整个应用只渲染一个 <audio>，它比任何页面都活得久。
+        切页面时页面组件会卸载重建，这一层不会——歌因此不会断
+        （《功能/音乐播放器》§四第 3 条）。
+      */}
+      <PlayerProvider>
+        {/* 桌面布局：整页禁止横向滚动，只有主内容区纵向滚动 */}
+        <div className="flex h-screen overflow-hidden">
+          <Sidebar variant="desktop" username={username} />
+          <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
+            {/* 页签栏在 <main> 外面（§7.22.1）：不随内容滚，也不给 <main> 留占位 */}
+            <TabBar />
+            <main className="flex-1 overflow-y-auto bg-[#ECECEC]">{children}</main>
+            <Footer />
+          </div>
         </div>
-      </div>
 
-      {/* 手机抽屉（< lg，仅这些尺寸渲染）：点击遮罩或任一导航后关闭 */}
-      <div
-        className={`fixed inset-0 z-50 lg:hidden ${
-          navOpen ? "" : "pointer-events-none"
-        }`}
-      >
+        {/* 手机抽屉（< lg，仅这些尺寸渲染）：点击遮罩或任一导航后关闭 */}
         <div
-          onClick={closeNav}
-          className={`absolute inset-0 bg-black/25 backdrop-blur-sm transition-opacity duration-300 ${
-            navOpen ? "opacity-100" : "opacity-0"
-          }`}
-        />
-        <div
-          className={`absolute left-0 top-0 h-full w-64 bg-[#F5F5F5] shadow-xl transition-transform duration-300 ${
-            navOpen ? "translate-x-0" : "-translate-x-full"
+          className={`fixed inset-0 z-50 lg:hidden ${
+            navOpen ? "" : "pointer-events-none"
           }`}
         >
-          <Sidebar variant="mobile" username={username} onNavigate={closeNav} />
+          <div
+            onClick={closeNav}
+            className={`absolute inset-0 bg-black/25 backdrop-blur-sm transition-opacity duration-300 ${
+              navOpen ? "opacity-100" : "opacity-0"
+            }`}
+          />
+          <div
+            className={`absolute left-0 top-0 h-full w-64 bg-[#F5F5F5] shadow-xl transition-transform duration-300 ${
+              navOpen ? "translate-x-0" : "-translate-x-full"
+            }`}
+          >
+            <Sidebar variant="mobile" username={username} onNavigate={closeNav} />
+          </div>
         </div>
-      </div>
+
+        {/* 右下角悬浮球：`fixed` 定位，切页面不重建，所以「一直在」 */}
+        <PlayerOrb />
+      </PlayerProvider>
     </AppShellContext.Provider>
   );
 }

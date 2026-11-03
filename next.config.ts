@@ -6,6 +6,16 @@ const nextConfig: NextConfig = {
   // 针对目标服务器内存较小（2 GiB）的部署形态：构建在 CI 上做，服务器只跑产物。
   output: "standalone",
 
+  // 关掉 Next 的开发指示器。它是一颗「深灰圆 + 白色 N」，跟音乐悬浮球几乎一模一样：
+  // 留着它，页面上就有两颗长得一样的球，用户分不清哪颗能点。
+  //
+  // 本来想用 `devIndicators: { position: 'top-right' }` 摆开，**实测在 Next 16.3.1 上不生效**
+  // （配置合法、重启过、硬刷新过，球始终在左下角）——而左下角正好压住侧边栏底部的
+  // 用户菜单。所以干脆关掉：这个指示器只是「编译状态 / 路由信息」，生产环境本来就不渲染，
+  // 而悬浮球的样式是照它复刻的（《功能/音乐播放器》§2.4），视觉上没有损失。
+  // 想把它开回来：删掉这一行即可（会回到左下角那颗）。
+  devIndicators: false,
+
   // 原生模块必须排除在打包之外：better-sqlite3 带 C++ 内核（包内是 .node 二进制），
   // 打包器会把它们转坏，运行时报「找不到模块」。列进白名单后按原样从 node_modules 加载。
   //
@@ -16,9 +26,14 @@ const nextConfig: NextConfig = {
 
   // 二进制文件不会因为「有 import」就被打进 standalone 产物（追踪器只跟 JS/JSON），
   // 而线上机器**没有系统 ffmpeg 可兜底**（Alibaba Cloud Linux 3 的源里没有这个包）。
-  // 所以显式把平台二进制包含进这条路由的产物里——《功能/音频提取》§七 第 6 条。
+  // 所以显式把平台二进制包含进这些路由的产物里——《功能/音频提取》§七 第 6 条、
+  // 《功能/音乐播放器》§七（上传时要用 ffmpeg 探编码与时长，同一个坑）。
+  //
+  // **新增一个 spawn ffmpeg 的路由，就要在这里加一行**；漏了的表现是「本地正常、
+  // 线上传歌必失败」，因为开发机的 node_modules 里二进制一直都在。
   outputFileTracingIncludes: {
     "/api/tools/audio-extract": ["./node_modules/@ffmpeg-installer/**"],
+    "/api/tools/music-player/tracks": ["./node_modules/@ffmpeg-installer/**"],
   },
 };
 

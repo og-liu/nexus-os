@@ -25,6 +25,7 @@ const TOOL_TAB_SLUGS = new Set([
   "markdown-editor",
   "audio-extract",
   "douyin-download",
+  "music-player",
 ]);
 
 const TOOL_PATH_PREFIX = "/tools/";
