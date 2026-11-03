@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { contentDisposition, outputFilename, stripExtension } from "./filename";
+import { contentDisposition } from "../content-disposition";
+import { outputFilename, stripExtension } from "./filename";
 
 describe("outputFilename（输出文件名清洗）", () => {
   it("普通名字：只换扩展名", () => {

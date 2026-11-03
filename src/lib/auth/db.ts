@@ -138,6 +138,40 @@ CREATE TABLE IF NOT EXISTS md_document_tags (
 
 -- 反查「这个标签下有哪些文档」要按 tag_id 找，外键不自动建索引
 CREATE INDEX IF NOT EXISTS idx_md_document_tags_tag ON md_document_tags(tag_id);
+
+-- 抖音解析缓存（《功能/抖音下载》§三）。
+-- **不挂 user_id**：这张表是外部接口响应的本地副本，不是用户资产——同一个视频谁解析过都算数，
+-- 按用户存只会多存几份同样的公开数据。将来做收藏夹时另建用户维度的表。
+CREATE TABLE IF NOT EXISTS douyin_videos (
+  aweme_id    TEXT    PRIMARY KEY,        -- 抖音作品 id，天然唯一，直接当主键
+  title       TEXT    NOT NULL,
+  author      TEXT    NOT NULL,
+  cover_url   TEXT    NOT NULL,
+  duration_ms INTEGER NOT NULL,
+  play_url    TEXT    NOT NULL,           -- 抖音 CDN 直链，会过期；fetched_at 决定还能不能直接用
+  fetched_at  INTEGER NOT NULL            -- 毫秒时间戳；超过 24 小时视为过期，重新解析
+);
+
+-- 分享链接 → 作品 id 的映射。
+-- 短链（v.douyin.com/xxx）本身看不出是哪个视频，不把这条对应关系记下来，
+-- 同一个短链每贴一次就要重新解析一次，而每次解析都是钱。
+CREATE TABLE IF NOT EXISTS douyin_links (
+  share_url  TEXT    PRIMARY KEY,
+  aweme_id   TEXT    NOT NULL REFERENCES douyin_videos(aweme_id) ON DELETE CASCADE,
+  fetched_at INTEGER NOT NULL
+);
+
+-- 用户自己的 API Key（《功能/用户密钥》§三）。
+-- **只存密文**：AES-256-GCM，格式 v1.<iv>.<tag>.<data>，主密钥在 ENCRYPTION_KEY。
+-- 主键是 (user_id, provider)：一个人一家只能有一条，覆盖保存走 UPSERT。
+CREATE TABLE IF NOT EXISTS user_secrets (
+  user_id    INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  provider   TEXT    NOT NULL,
+  ciphertext TEXT    NOT NULL,
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL,
+  PRIMARY KEY (user_id, provider)
+) WITHOUT ROWID;
 `;
 
 /** 建表（幂等）。单独导出，测试可以在任意连接上初始化结构。 */

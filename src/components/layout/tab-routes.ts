@@ -24,6 +24,7 @@ const TOOL_TAB_SLUGS = new Set([
   "image-compress",
   "markdown-editor",
   "audio-extract",
+  "douyin-download",
 ]);
 
 const TOOL_PATH_PREFIX = "/tools/";

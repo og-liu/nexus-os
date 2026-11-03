@@ -7,6 +7,7 @@
 // 再谈存哪儿、怎么恢复。先接存储会让这一版同时背两个还没定好的问题。
 
 import { Bot, ChevronDown, Send, Square, Zap } from "lucide-react";
+import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
 import type { TokenUsage } from "@/lib/agent/providers";
 import { cn } from "@/lib/utils";
@@ -21,13 +22,21 @@ interface ChatBubble {
   usage: TokenUsage | null;
   /** 这一条失败了就写在这儿，气泡里显示成红字 */
   error?: string;
+  /** 服务端给的错误码；`no-key` 用「还没设置」的语气渲染，不用错误色 */
+  errorCode?: string;
 }
 
 /** 服务端推回来的事件（与 app/api/chat/route.ts 里的 send 一一对应） */
 type ServerEvent =
   | { type: "delta"; kind: "content" | "reasoning"; text: string }
   | { type: "done"; usage: TokenUsage | null }
-  | { type: "error"; message: string };
+  | { type: "error"; message: string; code?: string };
+
+/**
+ * 这些错误码属于「用户去设置里能解决」——统一用普通说明色 + 一个「去设置」链接，
+ * **不套错误红**。红字只留给用户自己解决不了的故障（网络、限流、上游 5xx）。
+ */
+const SETTINGS_FIXABLE = new Set(["no-key", "bad-key"]);
 
 export function AgentChat() {
   const [messages, setMessages] = useState<ChatBubble[]>([]);
@@ -83,15 +92,17 @@ export function AgentChat() {
       });
 
       if (!res.ok || !res.body) {
-        // 服务端拒绝时带的是 JSON { error }，尽量把真实原因显示出来，
-        // 不要一律说「请求失败」——那样用户只能瞎猜（踩过的坑）
-        const detail = await res
+        // 服务端拒绝时带的是 JSON { error, code }，尽量把真实原因显示出来，
+        // 不要一律说「请求失败」——那样用户只能瞎猜（踩过的坑）。
+        // `code` 决定这句话怎么呈现：`no-key` 是「还没设置」而不是「出错」，
+        // 用错误色会让人以为系统坏了（《界面设计规范》§2.3）。
+        const payload = (await res
           .json()
-          .then((j: { error?: string }) => j.error)
-          .catch(() => null);
+          .catch(() => null)) as { error?: string; code?: string } | null;
         patch(assistantId, (m) => ({
           ...m,
-          error: detail ?? `请求失败（${res.status}）`,
+          error: payload?.error ?? `请求失败（${res.status}）`,
+          errorCode: payload?.code,
         }));
         return;
       }
@@ -128,7 +139,11 @@ export function AgentChat() {
           } else if (event.type === "done") {
             patch(assistantId, (m) => ({ ...m, usage: event.usage }));
           } else if (event.type === "error") {
-            patch(assistantId, (m) => ({ ...m, error: event.message }));
+            patch(assistantId, (m) => ({
+              ...m,
+              error: event.message,
+              errorCode: event.code,
+            }));
           }
         }
       }
@@ -244,7 +259,24 @@ export function AgentChat() {
                     )}
 
                     {msg.error ? (
-                      <div className="mt-1 text-xs leading-relaxed text-[#B91C1C]">{msg.error}</div>
+                      SETTINGS_FIXABLE.has(msg.errorCode ?? "") ? (
+                        // 「去设置里能解决」的一律走这套：普通说明色 + 一个能点的入口。
+                        // 套错误红会让人以为系统坏了（《界面设计规范》§7.23）
+                        <div className="mt-1 text-xs leading-relaxed text-[#666666]">
+                          {msg.error}
+                          <span className="mx-1">·</span>
+                          <Link
+                            href="/settings"
+                            className="cursor-pointer text-[#000000] underline underline-offset-2 hover:no-underline"
+                          >
+                            {msg.errorCode === "no-key" ? "去设置里填" : "去设置里改"}
+                          </Link>
+                        </div>
+                      ) : (
+                        <div className="mt-1 text-xs leading-relaxed text-[#B91C1C]">
+                          {msg.error}
+                        </div>
+                      )
                     ) : null}
 
                     {msg.usage ? (
