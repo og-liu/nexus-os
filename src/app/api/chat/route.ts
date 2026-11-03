@@ -17,6 +17,9 @@ import {
   type ChatMessage,
 } from "@/lib/agent/providers";
 import { getCurrentUser } from "@/lib/auth/current-user";
+import { getDb } from "@/lib/auth/db";
+import { MasterKeyMissingError, SecretDecryptError } from "@/lib/secrets/crypto";
+import { readSecret } from "@/lib/secrets/store";
 
 // better-sqlite3 是原生模块，必须跑在 Node 运行时（不能用 Edge）
 export const runtime = "nodejs";
@@ -98,6 +101,26 @@ export async function POST(req: Request) {
   }
 
   const provider = PROVIDERS.deepseek;
+
+  // 模型 Key 属于**当前登录用户**（《功能/用户密钥》）。读不到就在这里直接拒绝：
+  // 流一旦开了头，响应头就发出去了，再报错前端只能看到一条断裂的 SSE。
+  let apiKey: string;
+  try {
+    const stored = readSecret(getDb(), user.id, "deepseek");
+    if (!stored) {
+      return Response.json(
+        { error: "还没配置 DeepSeek 的 Key", code: "no-key" },
+        { status: 400 },
+      );
+    }
+    apiKey = stored;
+  } catch (error) {
+    if (error instanceof MasterKeyMissingError || error instanceof SecretDecryptError) {
+      return Response.json({ error: error.message }, { status: 400 });
+    }
+    return Response.json({ error: "读取你的 Key 时出错了，稍后再试" }, { status: 500 });
+  }
+
   const messages: ChatMessage[] = [
     { role: "system", content: SYSTEM_PROMPT },
     ...history,
@@ -119,6 +142,7 @@ export async function POST(req: Request) {
           provider,
           model,
           messages,
+          apiKey,
           (kind, text) => send({ type: "delta", kind, text }),
         );
         send({ type: "done", usage: result.usage });
@@ -130,7 +154,12 @@ export async function POST(req: Request) {
             : e instanceof Error
               ? `${provider.name} 调用失败：${e.message}`
               : "未知错误";
-        send({ type: "error", message });
+        send({
+          type: "error",
+          message,
+          // 带上机器码，前端才知道这条该用「去设置里改」的样式，还是红字报错
+          code: e instanceof ProviderError ? e.code : undefined,
+        });
       } finally {
         controller.close();
       }

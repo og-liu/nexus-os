@@ -14,7 +14,8 @@ import {
   sweepOrphans,
   writeBodyToFile,
 } from "@/lib/audio-extract/ffmpeg";
-import { contentDisposition, outputFilename } from "@/lib/audio-extract/filename";
+import { contentDisposition } from "@/lib/content-disposition";
+import { outputFilename } from "@/lib/audio-extract/filename";
 import { planOutput } from "@/lib/audio-extract/plan-output";
 
 /**

@@ -42,15 +42,5 @@ export function outputFilename(sourceName: string, extension: string): string {
   return `${base || "audio"}${extension}`;
 }
 
-/**
- * `Content-Disposition` 的值（RFC 5987）。
- *
- * 只写 `filename="中文.m4a"` 时，浏览器对非 ASCII 的处理各家不一样，
- * 存下来常常是乱码或干脆叫 `download`。所以给两个字段：
- * `filename=` 放一个 ASCII 兜底名，`filename*=` 放按 UTF-8 百分号编码的真名——
- * 认 `filename*` 的浏览器（现代浏览器全认）用真名，其余用兜底名。
- */
-export function contentDisposition(filename: string): string {
-  const fallback = filename.replace(/[^\x20-\x7E]/g, "_").replace(/["\\]/g, "_");
-  return `attachment; filename="${fallback}"; filename*=UTF-8''${encodeURIComponent(filename)}`;
-}
+// `contentDisposition` 已提升到 `@/lib/content-disposition`——抖音下载也需要它，
+// 两个功能各存一份会漂移。这里不再重复定义。

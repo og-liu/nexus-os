@@ -1,6 +1,7 @@
 import {
   CalendarDays,
   CheckSquare,
+  Download,
   FileCode,
   Image,
   Music,
@@ -15,7 +16,7 @@ import type { LucideIcon } from "lucide-react";
  * **只收真能用的工具**（2026-10-30 起）：这里曾经是 60 条——当时 5 个真工具 + 55 条
  * 占位条目。占位条目点进去只有一句「该工具开发中...」，对用户是一次白跑，
  * 对目录是一次撒谎：卡片长得一模一样，看不出哪个能用。
- * 现在是 7 个真工具、一条占位都没有。
+ * 现在是 8 个真工具、一条占位都没有。
  *
  * 现在的规矩：**工具没实现就不进目录**。要加工具，先把工具做出来，最后一步再来这里登记
  * （工具卡、`tab-routes` 白名单、`/tools/<slug>` 路由三处一起加）。
@@ -55,7 +56,7 @@ export interface Tool {
   category: ToolCategory;
 }
 
-/** 七个真工具。顺序即「全部」视图里的展示顺序（图片 → 文本 → 生活 → 开发 → 媒体）。 */
+/** 八个真工具。顺序即「全部」视图里的展示顺序（图片 → 文本 → 生活 → 开发 → 媒体）。 */
 export const TOOLS: Tool[] = [
   {
     slug: "image-compress",
@@ -110,6 +111,14 @@ export const TOOLS: Tool[] = [
     name: "音频提取",
     description: "从视频里把声音原样提出来，能无损就不转码",
     icon: Music,
+    status: "可用",
+    category: "媒体",
+  },
+  {
+    slug: "douyin-download",
+    name: "抖音下载",
+    description: "贴一条分享链接，把无水印视频存下来",
+    icon: Download,
     status: "可用",
     category: "媒体",
   },

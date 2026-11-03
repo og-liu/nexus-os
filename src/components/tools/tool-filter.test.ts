@@ -3,8 +3,8 @@ import { TOOLS, TOOL_CATEGORIES, findToolBySlug } from "./tool-catalog";
 import { filterTools, groupTools } from "./tool-filter";
 
 describe("tool-catalog（《功能/工具中心》数据）", () => {
-  it("只收真能用的工具：7 个，名称不重复", () => {
-    expect(TOOLS).toHaveLength(7);
+  it("只收真能用的工具：8 个，名称不重复", () => {
+    expect(TOOLS).toHaveLength(8);
     const names = TOOLS.map((tool) => tool.name);
     expect(new Set(names).size).toBe(names.length);
   });
@@ -17,10 +17,11 @@ describe("tool-catalog（《功能/工具中心》数据）", () => {
     }
   });
 
-  it("七个真工具的 slug 一个不少", () => {
+  it("八个真工具的 slug 一个不少", () => {
     expect(TOOLS.map((tool) => tool.slug).sort()).toEqual([
       "attendance-calendar",
       "audio-extract",
+      "douyin-download",
       "image-compress",
       "markdown-editor",
       "sticky-notes",
@@ -107,7 +108,7 @@ describe("groupTools（分类分组）", () => {
     expect(groups["文本"]).toHaveLength(2);
     expect(groups["生活"]).toHaveLength(2);
     expect(groups["开发"]).toHaveLength(1);
-    expect(groups["媒体"]).toHaveLength(1);
+    expect(groups["媒体"]).toHaveLength(2);
   });
 
   it("选中具体分类：只含该组；结果为空也保留组（靠它渲染占位提示）", () => {
