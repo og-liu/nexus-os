@@ -30,11 +30,6 @@ export interface ProviderConfig {
   name: string;
   /** OpenAI 兼容接口的 base URL */
   baseURL: string;
-  /**
-   * API Key 所在的环境变量**名字**——注意存的是「去哪找」，不是 Key 本身。
-   * Key 只存在于 .env.local（本地）与服务器上的 .env.production，不进代码、不进仓库。
-   */
-  apiKeyEnv: string;
 }
 
 export const PROVIDERS: Record<string, ProviderConfig> = {
@@ -42,15 +37,22 @@ export const PROVIDERS: Record<string, ProviderConfig> = {
     id: "deepseek",
     name: "DeepSeek",
     baseURL: "https://api.deepseek.com",
-    apiKeyEnv: "DEEPSEEK_API_KEY",
   },
 };
 
 /** 供应商侧的失败（网络、鉴权、限流…）。上层据此返回给用户看的话。 */
 export class ProviderError extends Error {
-  constructor(message: string) {
+  /**
+   * 给界面用的机器码。有了它，前端才能区分「用户去设置里能解决」（`bad-key`）
+   * 和「用户解决不了的故障」（网络、限流、上游 5xx）——
+   * 前者不该套错误红，后者才该。
+   */
+  readonly code?: string;
+
+  constructor(message: string, code?: string) {
     super(message);
     this.name = "ProviderError";
+    this.code = code;
   }
 }
 
@@ -77,13 +79,13 @@ export async function streamChat(
   provider: ProviderConfig,
   model: string,
   messages: ChatMessage[],
+  apiKey: string,
   onDelta: (kind: StreamKind, text: string) => void,
 ): Promise<StreamResult> {
-  const apiKey = process.env[provider.apiKeyEnv];
-  if (!apiKey) {
-    throw new ProviderError(
-      `未配置 ${provider.apiKeyEnv}，请填进项目根目录的 .env.local 后重启 dev`,
-    );
+  // Key 是**当前登录用户的**（《功能/用户密钥》），由调用方从数据库解出来传入。
+  // 这里不再读任何环境变量：站点不替任何人付模型钱。
+  if (!apiKey.trim()) {
+    throw new ProviderError("还没配置 DeepSeek 的 Key，去设置里填一下");
   }
 
   const CONNECT_TIMEOUT_MS = 30_000;
@@ -123,7 +125,10 @@ export async function streamChat(
   if (!res.ok || !res.body) {
     const detail = await res.text().catch(() => "");
     if (res.status === 401) {
-      throw new ProviderError(`${provider.name} 鉴权失败：API Key 无效或已过期`);
+      throw new ProviderError(
+        `${provider.name} 鉴权失败：API Key 无效或已过期`,
+        "bad-key",
+      );
     }
     if (res.status === 402) {
       throw new ProviderError(`${provider.name} 余额不足，请到平台充值`);

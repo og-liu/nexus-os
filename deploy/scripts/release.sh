@@ -33,6 +33,22 @@ fi
 # ── 正常发布 ────────────────────────────────────────────────
 [ -f "$PKG" ] || { log "找不到发布包：$PKG"; exit 1; }
 
+# ── 关键环境变量守卫 ────────────────────────────────────────
+# 缺 ENCRYPTION_KEY 时服务照样起得来（不会崩），但「设置 → API 密钥」保存会全部失败，
+# 表现是「发布成功、功能却是坏的」——这种静默失败必须在这里拦住。
+ENV_FILE="$APP_DIR/shared/.env.production"
+if [ ! -f "$ENV_FILE" ]; then
+  log "❌ 找不到 $ENV_FILE"
+  exit 1
+fi
+if ! grep -qE '^ENCRYPTION_KEY=.+' "$ENV_FILE"; then
+  log "❌ $ENV_FILE 里缺 ENCRYPTION_KEY（或值为空）"
+  log "   没有它，所有人在设置页保存 Key 都会失败。生成一个再发布："
+  log "   node -e \"console.log(require('crypto').randomBytes(32).toString('base64'))\""
+  log "   写进 $ENV_FILE 后重跑本脚本"
+  exit 1
+fi
+
 TS=$(date +%Y%m%d-%H%M%S)
 NEW="$APP_DIR/releases/$TS"
 
