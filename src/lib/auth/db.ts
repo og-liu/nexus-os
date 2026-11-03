@@ -172,6 +172,61 @@ CREATE TABLE IF NOT EXISTS user_secrets (
   updated_at INTEGER NOT NULL,
   PRIMARY KEY (user_id, provider)
 ) WITHOUT ROWID;
+
+-- 音乐曲库（《功能/音乐播放器》§三）。
+-- 磁盘上的文件名叫 <uuid>.<ext>，**不是原文件名**：原名可以是 ../etc/passwd，
+-- 也可能两首歌同名互相覆盖。展示用的歌名单独存在 title 列里。
+-- codec 是 ffmpeg 探出来的真实编码，不是扩展名推的——浏览器能不能播跟的是编码。
+CREATE TABLE IF NOT EXISTS music_tracks (
+  id          INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id     INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  title       TEXT    NOT NULL,
+  artist      TEXT,
+  file_name   TEXT    NOT NULL,
+  codec       TEXT    NOT NULL,
+  size_bytes  INTEGER NOT NULL,
+  duration_ms INTEGER,
+  -- 用户自己拖出来的顺序（升序 = 从上到下）。同值按 id 兜底
+  position    INTEGER NOT NULL DEFAULT 0,
+  created_at  INTEGER NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_music_tracks_user_id ON music_tracks(user_id);
+
+-- 歌单：一行 = 一个歌单；歌单里的歌在 playlist_tracks，不复制歌曲
+CREATE TABLE IF NOT EXISTS playlists (
+  id         INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id    INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  name       TEXT    NOT NULL,
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL,
+  UNIQUE (user_id, name)
+);
+
+CREATE INDEX IF NOT EXISTS idx_playlists_user_id ON playlists(user_id);
+
+-- 关联表：一行 = 「这首歌在这个歌单里」；两边的行消失时它跟着消失
+CREATE TABLE IF NOT EXISTS playlist_tracks (
+  playlist_id INTEGER NOT NULL REFERENCES playlists(id) ON DELETE CASCADE,
+  track_id    INTEGER NOT NULL REFERENCES music_tracks(id) ON DELETE CASCADE,
+  -- 歌单内的顺序（升序 = 从上到下）。同值按 track_id 兜底
+  position    INTEGER NOT NULL DEFAULT 0,
+  added_at    INTEGER NOT NULL,
+  PRIMARY KEY (playlist_id, track_id)
+) WITHOUT ROWID;
+
+-- 反查「这首歌在哪些歌单里」；SQLite 不为外键自动建索引
+CREATE INDEX IF NOT EXISTS idx_playlist_tracks_track ON playlist_tracks(track_id);
+
+-- 上次播到哪：每人一行。关掉重开 / 刷新页面时接着播（《功能/音乐播放器》§2.1.6）
+CREATE TABLE IF NOT EXISTS music_playback (
+  user_id     INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+  -- 歌或歌单被删时置空而不是删整行：位置还留着，下次播同一首还能接上
+  track_id    INTEGER REFERENCES music_tracks(id) ON DELETE SET NULL,
+  playlist_id INTEGER REFERENCES playlists(id) ON DELETE SET NULL,
+  position_ms INTEGER NOT NULL DEFAULT 0,
+  updated_at  INTEGER NOT NULL
+);
 `;
 
 /** 建表（幂等）。单独导出，测试可以在任意连接上初始化结构。 */
@@ -181,6 +236,7 @@ export function initSchema(conn: Db): void {
   conn.exec(SCHEMA);
   // 建表之后补列：`CREATE TABLE IF NOT EXISTS` 对已存在的表是空操作，老库不会自动多出列
   migrateStickyNotePinnedAt(conn);
+  migrateMusicPosition(conn);
   // 建表之后搬数据：新表已经在了，老表还留着行
   migrateAttendanceCycles(conn);
   migrateAttendanceAnchor(conn);
@@ -330,6 +386,48 @@ function migrateStickyNotePinnedAt(conn: Db): void {
 
   conn.exec("ALTER TABLE sticky_notes ADD COLUMN pinned_at INTEGER");
   conn.exec("UPDATE sticky_notes SET pinned_at = updated_at WHERE pinned = 1");
+}
+
+/**
+ * 补 `position` 列（2026-11-03，曲目与歌单都支持拖拽排序）。
+ *
+ * 之前顺序是**推导出来的**：曲库按 `created_at ASC, id ASC`，歌单内按 `added_at ASC, track_id ASC`。
+ * 一旦用户能拖，顺序就必须落成一个真实的列——推导不出一条他手动排过的序列。
+ *
+ * 回填用「数一数前面有几个」的写法（相关子查询），而不是 `ROW_NUMBER()`：
+ * 项目的最小 SQLite 版本不保证支持窗口函数，而这条给老库跑一次就完了，不必优雅。
+ */
+function migrateMusicPosition(conn: Db): void {
+  const trackColumns = conn
+    .prepare("PRAGMA table_info(music_tracks)")
+    .all() as { name: string }[];
+  // 新库：表是 SCHEMA 刚建的，已经带这一列
+  if (trackColumns.length > 0 && !trackColumns.some((column) => column.name === "position")) {
+    conn.exec("ALTER TABLE music_tracks ADD COLUMN position INTEGER NOT NULL DEFAULT 0");
+    conn.exec(`
+      UPDATE music_tracks SET position = (
+        SELECT count(*) FROM music_tracks t2
+        WHERE t2.user_id = music_tracks.user_id
+          AND (t2.created_at < music_tracks.created_at
+            OR (t2.created_at = music_tracks.created_at AND t2.id < music_tracks.id))
+      )
+    `);
+  }
+
+  const linkColumns = conn
+    .prepare("PRAGMA table_info(playlist_tracks)")
+    .all() as { name: string }[];
+  if (linkColumns.length > 0 && !linkColumns.some((column) => column.name === "position")) {
+    conn.exec("ALTER TABLE playlist_tracks ADD COLUMN position INTEGER NOT NULL DEFAULT 0");
+    conn.exec(`
+      UPDATE playlist_tracks SET position = (
+        SELECT count(*) FROM playlist_tracks p2
+        WHERE p2.playlist_id = playlist_tracks.playlist_id
+          AND (p2.added_at < playlist_tracks.added_at
+            OR (p2.added_at = playlist_tracks.added_at AND p2.track_id < playlist_tracks.track_id))
+      )
+    `);
+  }
 }
 
 /**

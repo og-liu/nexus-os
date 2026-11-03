@@ -27,6 +27,8 @@
   --animate-slide-in-right: slide-in-right 0.28s cubic-bezier(0.22, 1, 0.36, 1) both;
   /* §12.4：侧栏导航涟漪 */
   --animate-ripple: ripple-expand 580ms ease-out forwards;
+  /* 《功能/音乐播放器》§2.1：正在播那一行的等化器（三根竖条跳动） */
+  --animate-eq: eq-bounce 0.9s ease-in-out infinite;
 
   /*
    * shadcn/ui 主题变量映射：给组件库的默认样式兜底（如下拉菜单的 bg-popover）。
@@ -123,6 +125,38 @@
     opacity: 1;
     transform: none;
   }
+}
+
+/* 《功能/音乐播放器》§2.1：正在播那一行的等化器。
+   用 transform 而不是 height：高度变化会触发重排，而它每秒要动很多次。 */
+@keyframes eq-bounce {
+  0%,
+  100% {
+    transform: scaleY(0.3);
+  }
+  50% {
+    transform: scaleY(1);
+  }
+}
+
+/* 《功能/音乐播放器》§2.4：悬浮球里那个 N 的呼吸。
+   播放时线条在 0.7 ↔ 1 之间缓慢明暗，代替「图标旋转」——转一个字母认不出来。
+   下限不能太低：0.5 以下就成了「一闪一闪」，像加载失败。 */
+@keyframes orb-breathe {
+  0%,
+  100% {
+    opacity: 0.7;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+
+/* N 的线条默认是「藏起来」的：path 上写着 stroke-dashoffset="29.6"，跟线的总长相等。
+   原版靠这个类把它覆盖成 0 才显示出来（它自己也是这么做的），
+   照抄时不自己改行内值，免得跟原版渐行渐远。 */
+.orb-mark .paused {
+  stroke-dashoffset: 0;
 }
 
 @keyframes drift {

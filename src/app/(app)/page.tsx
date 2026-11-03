@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { AttendanceCard } from "@/components/attendance/attendance-card";
 import { DatetimePanel } from "@/components/dashboard/datetime-panel";
+import { MusicCard } from "@/components/dashboard/music-card";
 import { QuickToolsCard } from "@/components/dashboard/quick-tools-card";
 import { QuoteCard } from "@/components/dashboard/quote-card";
 import { StickyNotesCard } from "@/components/dashboard/sticky-notes-card";
@@ -31,19 +32,20 @@ export const metadata: Metadata = {
  *
  * 外壳已落地：登录成功后直接看到应用本身。
  *
- * 六块拼图**逐块各占一行、左对齐**，宽度按旧版总览页参考图预估：
- * - 日期时间面板 / 工作日历卡 / 常用工具卡 / 待办卡 / 便签卡 / 每日一句卡都是 430px
+ * 七块拼图**逐块各占一行、左对齐**，宽度按旧版总览页参考图预估：
+ * - 日期时间面板 / 工作日历卡 / 常用工具卡 / 待办卡 / 便签卡 / 音乐卡 / 每日一句卡都是 430px
  *   （面板原本按旧版参考图定 372px，2026-10-23 联调时主人要求五块先统一宽度）
  *
  * 排成一行每块都会被挤窄（2026-10-22 联调否掉了那个版本）；等卡片补齐，再按旧版栅格
  * （主区 2/3 + 常驻栏 1/3）拼回去，尺寸口径已经对齐参考图。
  *
- * 顺序是「面板 → 出勤 → 常用工具 → 待办 → 便签 → 每日一句」：面板与工作日历卡都是「今天」的
- * 即时信息（今天到底上不上班），同属页头级信息，所以工作日历卡紧跟面板；常用工具是
+ * 顺序是「面板 → 出勤 → 常用工具 → 待办 → 便签 → 音乐 → 每日一句」：面板与工作日历卡都是
+ * 「今天」的即时信息（今天到底上不上班），同属页头级信息，所以工作日历卡紧跟面板；常用工具是
  * **「去哪儿」的入口**（只点不读），接在「今天」之后、「要做的事」之前；待办排在便签之前
  * （「今天还剩什么」比「随手记」更该第一眼看到）；每日一句是氛围信息，放最后。
+ * 音乐卡（2026-11-03 加）是陪伴类内容，与每日一句同类，但它可操作，所以排在每日一句**前面**。
  *
- * 没有栅格、没有 `col-start` / `row-start`：六块就是竖列里顺序排列的六个 div，
+ * 没有栅格、没有 `col-start` / `row-start`：七块就是竖列里顺序排列的七个 div，
  * 各自 `max-w-*` 限宽，DOM 顺序天然等于视觉顺序（Tab 焦点顺序也随之正确）。
  *
  * 面板的农历 / 节日 / 年度进度、工作日历卡的整月状态都在这里算一次（只在服务端），
@@ -83,7 +85,7 @@ export default async function OverviewPage() {
         description="串联工具、知识与智能，新一代私人专属数字操作系统"
       />
       {/*
-        逐块展示（过渡形态）：五块拼图各占一行、左对齐，宽度按旧版总览页的参考图预估
+        逐块展示（过渡形态）：七块拼图各占一行、左对齐，宽度按旧版总览页的参考图预估
         （旧版截图是 2x，折算成 CSS 像素：右栏里的「今日待办」「便签」408–442 → 取 430；
         面板原本 372，2026-10-23 联调时先统一成 430）。
         窄屏用 max-w 限制、屏窄于它时自动满宽。
@@ -111,6 +113,10 @@ export default async function OverviewPage() {
         </div>
         <div className="max-w-[430px]">
           <StickyNotesCard notes={notes} />
+        </div>
+        <div className="max-w-[430px]">
+          {/* 音乐卡只读 PlayerProvider：真正的 <audio> 挂在外壳上，这张卡是遥控器 */}
+          <MusicCard />
         </div>
         <div className="max-w-[430px]">
           {/*
