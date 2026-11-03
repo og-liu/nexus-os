@@ -36,16 +36,16 @@ describe("tool-catalog（《功能/工具中心》数据）", () => {
     expect(findToolBySlug("not-a-real-tool")).toBeUndefined();
   });
 
-  it("工具的分类必须在七个分类之内，状态取值合法", () => {
+  it("工具的分类必须在五个分类之内，状态取值合法", () => {
     for (const tool of TOOLS) {
       expect(TOOL_CATEGORIES).toContain(tool.category);
       expect(["可用", "开发中"]).toContain(tool.status);
     }
-    // 分类是路线图，允许暂时没有工具（空分类由 views 给占位提示）
+    // 有工具才有分类（2026-11-03 起）：分类条上不允许出现空分类
     const emptyCategories = TOOL_CATEGORIES.filter(
       (category) => !TOOLS.some((tool) => tool.category === category),
     );
-    expect(emptyCategories.length).toBeGreaterThan(0);
+    expect(emptyCategories).toEqual([]);
   });
 });
 
@@ -68,11 +68,11 @@ describe("filterTools（搜索 + 分类过滤）", () => {
     ]);
   });
 
-  it("空分类返回空数组（页面据此显示占位提示）", () => {
-    for (const category of ["文件", "AI"] as const) {
-      expect(filterTools(TOOLS, "", category)).toHaveLength(0);
+  it("每个分类都筛得出工具（分类条上不再有空分类）", () => {
+    for (const category of TOOL_CATEGORIES) {
+      expect(filterTools(TOOLS, "", category).length).toBeGreaterThan(0);
     }
-    // 「开发」在 Markdown 编辑器上线后不再是空分类（《功能/工具中心》验收 1）
+    // 「开发」这一格只有 Markdown 编辑器（《功能/工具中心》验收 1）
     expect(filterTools(TOOLS, "", "开发").map((tool) => tool.slug)).toEqual([
       "markdown-editor",
     ]);
