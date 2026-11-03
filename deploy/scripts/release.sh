@@ -18,6 +18,21 @@ PKG="$APP_DIR/incoming/release.tar.gz"
 
 log() { echo "[release] $*"; }
 
+# ── 自更新 ──────────────────────────────────────────────────
+# 这个脚本住在 /opt/nexus-os/bin/，不在发布包里。CI 那边能用的 sudo 只授权了「运行 release.sh」，
+# 没有「往 bin/ 里装东西」的权限（实测：sudo install 报 a password is required）。
+# 所以 CI 把新版本摊到 incoming/，由这里自己换自己、再重跑一遍。
+# 不做这一步的话，「改了 release.sh」只是改了仓库里那份，线上永远跑旧的——
+# 加了守卫却没生效，比不加更危险（2026-11-03 踩过）。
+SELF=$(readlink -f "$0")
+INCOMING_SCRIPT="$APP_DIR/incoming/release.sh"
+if [ -f "$INCOMING_SCRIPT" ] && ! cmp -s "$INCOMING_SCRIPT" "$SELF"; then
+  log "incoming 里有新的发布脚本，换上去再继续"
+  install -m 755 -o root -g root "$INCOMING_SCRIPT" "$SELF"
+  rm -f "$INCOMING_SCRIPT"
+  exec "$SELF" "$@"
+fi
+
 # ── 回滚模式 ────────────────────────────────────────────────
 if [ "${1:-}" = "--rollback" ]; then
   PREV=$(ls -1dt "$APP_DIR"/releases/*/ | sed -n 2p || true)
