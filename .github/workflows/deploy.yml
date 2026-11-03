@@ -102,6 +102,15 @@ jobs:
     needs: ci                 # CI 全绿才可能执行
     runs-on: ubuntu-latest
     steps:
+      # 这个 job 只用 artifact 里的发布包，本来不需要仓库 —— 但「同步发布脚本」那步要拿
+      # deploy/scripts/release.sh，而它不随发布包走。所以只稀疏 checkout 这一个目录：
+      # 拉整个仓库是几百 MB 的白等待。
+      - name: 拉取发布脚本所在目录
+        uses: actions/checkout@v4
+        with:
+          sparse-checkout: deploy
+          sparse-checkout-cone-mode: true
+
       - name: 取回发布包
         uses: actions/download-artifact@v4
         with:
