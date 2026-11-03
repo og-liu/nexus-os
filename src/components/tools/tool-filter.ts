@@ -10,7 +10,7 @@ export const ALL_CATEGORY = "全部" as const;
 
 export type CategoryFilter = typeof ALL_CATEGORY | ToolCategory;
 
-/** 筛选条上的全部选项：全部 + 七个分类（数组顺序即展示顺序）。 */
+/** 筛选条上的全部选项：全部 + 五个分类（数组顺序即展示顺序）。 */
 export const CATEGORY_FILTERS: CategoryFilter[] = [
   ALL_CATEGORY,
   ...TOOL_CATEGORIES,
