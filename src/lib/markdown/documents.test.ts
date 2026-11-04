@@ -9,6 +9,7 @@ import {
   listDocuments,
   nextUntitledTitle,
   saveDocument,
+  uniqueImportTitle,
 } from "./documents";
 import { UNTITLED } from "./validate";
 
@@ -182,5 +183,17 @@ describe("未命名文档补序号", () => {
     const { db, alice, bob } = setup();
     createDocument(db, alice.id, UNTITLED, "", 1_000);
     expect(nextUntitledTitle(db, bob.id)).toBe(UNTITLED);
+  });
+
+  it("导入标题撞名补序号，且只数自己名下的标题", () => {
+    const { db, alice, bob } = setup();
+    createDocument(db, alice.id, "周报", "a", 1_000);
+    createDocument(db, bob.id, "周报", "b", 1_000);
+    createDocument(db, bob.id, "周报 2", "c", 2_000);
+
+    // alice 只有一篇「周报」→ 补到 2；bob 那边已经有 2 了 → 补到 3
+    expect(uniqueImportTitle(db, alice.id, "周报")).toBe("周报 2");
+    expect(uniqueImportTitle(db, bob.id, "周报")).toBe("周报 3");
+    expect(uniqueImportTitle(db, alice.id, "灵感")).toBe("灵感");
   });
 });

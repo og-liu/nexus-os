@@ -5,6 +5,7 @@ import { cn } from "@/lib/utils";
 import { formatDateTime } from "@/lib/format";
 import type { MdDocumentSummary } from "@/lib/markdown/documents";
 import type { MdTag } from "@/lib/markdown/tags";
+import { ImportMenu, type ImportCandidate } from "./import-menu";
 import { TagFilterSelect } from "./tag-filter-select";
 
 /**
@@ -46,6 +47,10 @@ interface DocumentListProps {
   onToggleAll?: () => void;
   onDeleteChecked?: () => void;
   busy?: boolean;
+  /** 导入进行中的进度（`null` = 没在导）：顶行换成状态条。 */
+  importing?: { done: number; total: number } | null;
+  /** 选好文件、读完文本之后交给页面入库。 */
+  onImportFiles: (candidates: ImportCandidate[]) => void;
   /** 左栏顶部的标签筛选（全部 / 无标签 / 各标签）。 */
   tags: MdTag[];
   /** 当前筛选：`null` = 全部、`UNTAGGED_KEY` = 无标签、否则是标签的归一化 key。 */
@@ -86,6 +91,8 @@ export function DocumentList({
   onToggleAll,
   onDeleteChecked,
   busy = false,
+  importing = null,
+  onImportFiles,
   onBack,
   className,
 }: DocumentListProps) {
@@ -148,6 +155,24 @@ export function DocumentList({
             <X className="h-3.5 w-3.5" aria-hidden="true" />
           </button>
         </div>
+      ) : importing ? (
+        /*
+          导入中：挤掉「新建」那一行（与批量条同一位置、同一高度，列表不下推）。
+          进度条是 2px 的细轨道——导入是秒级的事，不该占掉更多注意力。
+        */
+        <div className="flex h-[48px] shrink-0 items-center gap-2 px-2">
+          <span className="shrink-0 text-[11px] tabular-nums text-[#666666]">
+            导入中 {importing.done} / {importing.total}
+          </span>
+          <span className="h-0.5 min-w-0 flex-1 overflow-hidden rounded-full bg-[#F0F0F0]">
+            <span
+              className="block h-full bg-[#000000] transition-[width] duration-200"
+              style={{
+                width: `${importing.total > 0 ? (importing.done / importing.total) * 100 : 0}%`,
+              }}
+            />
+          </span>
+        </div>
       ) : (
         <div className="shrink-0 p-2">
           <div className="flex items-center gap-1">
@@ -160,6 +185,7 @@ export function DocumentList({
               <Plus className="h-3.5 w-3.5" aria-hidden="true" />
               新建
             </button>
+            <ImportMenu disabled={busy} onFiles={onImportFiles} />
             <button
               type="button"
               onClick={onEnterSelection}
