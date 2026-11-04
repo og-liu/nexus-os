@@ -175,6 +175,14 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
    *   否则一刷新页面就自己响起来（这就是用户报的那个 bug）。
    */
   const resumeAutoPlayRef = useRef<boolean | null>(null);
+  /**
+   * 「上次在播」的恢复意图还没兑现（自动播被浏览器拒时）。
+   *
+   * 这期间**不许把 `is_playing` 写回 0**：那不是用户暂停，只是这次没播起来；
+   * 写回去的后果是下次刷新读到「暂停」，从此不再尝试——用户看到的就是
+   * 「播放中刷新，再也不会接着播」。
+   */
+  const resumePendingRef = useRef(false);
 
   const [library, setLibrary] = useState<Track[]>([]);
   const [totalBytes, setTotalBytes] = useState(0);
@@ -284,6 +292,8 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
         // 原来这里不记播放状态，下面的切歌 effect 一挂载就 play()）。
         if (data.resume?.trackId) {
           resumeAutoPlayRef.current = data.resume.playing;
+          // 「上次在播」的意图先记着，播起来之前别把 is_playing 写回 0
+          resumePendingRef.current = data.resume.playing;
           // 恢复期间不许上报：这时 currentTime 还是 0，「暂停就上报」会把进度覆盖成 0
           restoringRef.current = true;
           restoreStartedAtRef.current = Date.now();
@@ -308,6 +318,33 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
   }, []);
 
   /**
+   * 首屏恢复「上次在播」时按播放，带**静音兜底**（2026-11-04 加）。
+   *
+   * 浏览器不许无手势自动播：`play()` 会抛 `NotAllowedError`，直接 `.catch` 就永远停了。
+   * 但**静音自动播放是允许的**——先 `muted = true` 播起来，成功后再取消静音。
+   * 用户本来就把音量调成静音的话，保持不变（不替他打开声音）。
+   */
+  const resumePlay = useCallback(async (audio: HTMLAudioElement) => {
+    const wasMuted = audio.muted;
+    try {
+      await audio.play();
+      return;
+    } catch {
+      // 落到静音兜底
+    }
+
+    audio.muted = true;
+    try {
+      await audio.play();
+      // 播起来了：把静音恢复原状（用户本来就静音的话就保持静音）
+      audio.muted = wasMuted;
+    } catch {
+      audio.muted = wasMuted;
+      setPlaying(false);
+    }
+  }, []);
+
+  /**
    * 切歌之后开始播。
    *
    * `src` 由 React 渲染在 `<audio>` 上（见底部的 JSX），这里只负责按播放。
@@ -324,9 +361,15 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
     resumeAutoPlayRef.current = null;
     if (resumePlaying === false) return;
 
+    // 恢复「上次在播」：浏览器可能拒，走静音兜底
+    if (resumePlaying === true) {
+      void resumePlay(audio);
+      return;
+    }
+
     // iOS 上「自动接下一首」可能被拒：静默停在暂停态，不弹错误
     void audio.play().catch(() => setPlaying(false));
-  }, [currentId]);
+  }, [currentId, resumePlay]);
 
   /** 顺序 / 随机地取下一首。`auto` = 一首自然播完，顺序模式到最后一首就停。 */
   const advance = useCallback(
@@ -414,7 +457,11 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
       setPosition(0);
       setDuration(0);
     };
-    const onPlay = () => setPlaying(true);
+    const onPlay = () => {
+      // 播起来了：恢复意图已兑现，之后正常记录
+      resumePendingRef.current = false;
+      setPlaying(true);
+    };
     const onPause = () => setPlaying(false);
     const onEnded = () => advanceRef.current(true);
     const onError = () => {
@@ -637,6 +684,9 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
       // 用 `<audio>` 的真实状态而不是 React 的 `playing`：「暂停那一刻」的 effect 调这里时，
       // state 可能还没追上；`audio.paused` 是这一刻的事实
       const isPlaying = audio ? !audio.paused : false;
+      // 「上次在播」的恢复意图还没兑现（自动播被浏览器拒）：这不是用户暂停，
+      // 写回 0 会让下次刷新从此不再尝试——保持 1，下次接着试
+      if (!isPlaying && resumePendingRef.current) return;
 
       void fetch("/api/tools/music-player/state", {
         method: "POST",
