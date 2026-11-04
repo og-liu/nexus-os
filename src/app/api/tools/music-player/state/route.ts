@@ -5,7 +5,10 @@ import { savePlaybackState } from "@/lib/music-player/playback";
 /**
  * 上报「上次播到哪」（《功能/音乐播放器》§2.1.6）。
  *
- * `POST` —— body `{ trackId, playlistId, positionMs }`
+ * `POST` —— body `{ trackId, playlistId, positionMs, playing }`
+ *
+ * `playing` 是「此刻是不是正在播」：刷新后 `playing: false` 就停在暂停态、
+ * `true` 才尝试接着播（浏览器不许无手势自动播时会被拒，前端静默停在暂停）。
  *
  * **用 POST 而不是 PUT**：页面卸载前的前端用 `fetch(..., { keepalive: true })`
  * 发出，同时 `navigator.sendBeacon` 只会 POST。一个方法两种发送方式都能用，
@@ -23,7 +26,12 @@ export async function POST(request: Request) {
   const user = await getCurrentUser();
   if (!user) return Response.json({ code: "unauthorized", error: "请先登录" }, { status: 401 });
 
-  let body: { trackId?: unknown; playlistId?: unknown; positionMs?: unknown };
+  let body: {
+    trackId?: unknown;
+    playlistId?: unknown;
+    positionMs?: unknown;
+    playing?: unknown;
+  };
   try {
     body = await request.json();
   } catch {
@@ -39,6 +47,8 @@ export async function POST(request: Request) {
     trackId: num(body.trackId),
     playlistId: num(body.playlistId),
     positionMs: Number(body.positionMs) || 0,
+    // 只有明确的 true 才算在播：老客户端不带这个字段时按暂停处理（宁可不响）
+    playing: body.playing === true,
   });
 
   // 什么都不回：这个请求是「顺手记一笔」，前端不等结果

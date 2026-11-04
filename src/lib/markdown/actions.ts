@@ -10,6 +10,7 @@ import {
   getDocument,
   nextUntitledTitle,
   saveDocument,
+  uniqueImportTitle,
   type MdDocument,
 } from "./documents";
 import {
@@ -59,6 +60,36 @@ export async function createDocumentAction(): Promise<MarkdownActionResult> {
 
   const title = nextUntitledTitle(db, user.id);
   const created = createDocument(db, user.id, title, "");
+
+  revalidateMarkdown();
+  return { ok: true, document: created };
+}
+
+/**
+ * 导入一篇（《功能/Markdown编辑器》§2.8）。
+ *
+ * 标题由客户端从文件名算好传来，**服务端照样重新校验**（Server Action 是公开端点）；
+ * 撞名在这里补序号——客户端不知道库里此刻有哪些标题，导一批同名文件时只有服务端
+ * 能保证「两篇不会都叫周报」。
+ *
+ * 一次只导一篇：整批塞进一个请求会撞 Server Action 的 1MB 请求体上限，
+ * 客户端负责串行调用并把进度拼起来。
+ */
+export async function importDocumentAction(
+  rawTitle: unknown,
+  rawBody: unknown,
+): Promise<MarkdownActionResult> {
+  const user = await requireUser();
+
+  const title = validateTitle(rawTitle);
+  if (!title.ok) return fail(title.error);
+
+  const body = validateBody(rawBody);
+  if (!body.ok) return fail(body.error);
+
+  const db = getDb();
+  const finalTitle = uniqueImportTitle(db, user.id, title.value);
+  const created = createDocument(db, user.id, finalTitle, body.value);
 
   revalidateMarkdown();
   return { ok: true, document: created };

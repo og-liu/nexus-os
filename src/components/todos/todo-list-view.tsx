@@ -53,7 +53,11 @@ export function TodoListView({ initialBoard }: TodoListViewProps) {
   const [leaving, setLeaving] = useState<ReadonlySet<number>>(
     () => new Set<number>(),
   );
-  const [expanded, setExpanded] = useState(false);
+  /**
+   * 已完成区展开状态。**默认展开**（2026-11-04 联调改的）：
+   * 默认收起时，做完的事要再点一下才看得见，取消勾选、回头核对都得多一步。
+   */
+  const [expanded, setExpanded] = useState(true);
   const [confirmingDeleteId, setConfirmingDeleteId] = useState<number | null>(
     null,
   );

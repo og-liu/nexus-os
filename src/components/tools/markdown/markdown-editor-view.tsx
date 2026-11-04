@@ -9,6 +9,7 @@ import {
   createDocumentAction,
   deleteDocumentAction,
   deleteDocumentsAction,
+  importDocumentAction,
   openDocumentAction,
 } from "@/lib/markdown/actions";
 import type { MdDocument, MdDocumentSummary } from "@/lib/markdown/documents";
@@ -19,6 +20,7 @@ import { DocumentList } from "./document-list";
 import { DocumentListOverlays } from "./document-list-overlays";
 import { EditorPane } from "./editor-pane";
 import { EditorTopBar } from "./editor-top-bar";
+import type { ImportCandidate } from "./import-menu";
 import { PreviewPane } from "./preview-pane";
 import { TagBar } from "./tag-bar";
 import { UNTAGGED_KEY } from "./tag-filter-select";
@@ -51,6 +53,17 @@ interface MarkdownEditorViewProps {
   initialTags: MdTag[];
 }
 
+/** 列表行只留摘要（正文留在编辑区，不进列表）。 */
+function toSummary(document: MdDocument): MdDocumentSummary {
+  return {
+    id: document.id,
+    title: document.title,
+    createdAt: document.createdAt,
+    updatedAt: document.updatedAt,
+    tags: document.tags,
+  };
+}
+
 export function MarkdownEditorView({
   initialDocuments,
   initialDocument,
@@ -63,6 +76,14 @@ export function MarkdownEditorView({
 
   const [documents, setDocuments] = useState<MdDocumentSummary[]>(initialDocuments);
   const [activeId, setActiveId] = useState<number | null>(initialDocument?.id ?? null);
+  /**
+   * 导入循环是异步的，要读「此刻打开的是哪篇」——闭包里的 `activeId` 是导入开始那一刻的
+   * 旧值（用户中途可能已经点了别的文档），用 ref 跟住最新值。
+   */
+  const activeIdRef = useRef(activeId);
+  useEffect(() => {
+    activeIdRef.current = activeId;
+  }, [activeId]);
   const [title, setTitle] = useState(initialDocument?.title ?? "");
   const [body, setBody] = useState(initialDocument?.body ?? "");
   const [query, setQuery] = useState("");
@@ -96,6 +117,10 @@ export function MarkdownEditorView({
   const [checkedIds, setCheckedIds] = useState<Set<number>>(() => new Set());
   const [bulkDeleteOpen, setBulkDeleteOpen] = useState(false);
   const [busy, startTransition] = useTransition();
+  /** 导入进度（`null` = 没在导）：左栏顶行换成「导入中 3 / 12」。 */
+  const [importState, setImportState] = useState<{ done: number; total: number } | null>(null);
+  /** 防重入：导入循环跑着的时候，按钮虽然被替换掉了，文件对话框仍可能已经开着。 */
+  const importingRef = useRef(false);
 
   const tags = useDocumentTags({
     documents,
@@ -129,14 +154,10 @@ export function MarkdownEditorView({
 
   /** 保存成功后只更新列表里那一行并提到最前：重拉整个列表会让正在编辑的行重挂（§七）。 */
   const handleSaved = useCallback((document: MdDocument) => {
-    const summary: MdDocumentSummary = {
-      id: document.id,
-      title: document.title,
-      createdAt: document.createdAt,
-      updatedAt: document.updatedAt,
-      tags: document.tags,
-    };
-    setDocuments((current) => [summary, ...current.filter((row) => row.id !== document.id)]);
+    setDocuments((current) => [
+      toSummary(document),
+      ...current.filter((row) => row.id !== document.id),
+    ]);
   }, []);
 
   const autosave = useAutosave({ documentId: activeId, title, body, onSaved: handleSaved });
@@ -216,6 +237,75 @@ export function MarkdownEditorView({
       });
     });
   }, [autosave, toast]);
+
+  /**
+   * 导入（《功能/Markdown编辑器》§2.8）：`ImportMenu` 已经把文件读成文本，
+   * 这里负责一篇篇入库、报进度、把结果并进列表。
+   *
+   * **逆序入库**：每篇的 `updated_at` 是各自入库那一刻、递增的，而列表按它倒序——
+   * 反着导，列表顶部正好是「文件顺序的第一篇」。
+   */
+  const importFiles = useCallback(
+    (candidates: ImportCandidate[]) => {
+      if (candidates.length === 0) {
+        toast.error("没有可导入的 .md 文件");
+        return;
+      }
+      if (importingRef.current) return;
+      importingRef.current = true;
+
+      // 客户端预检已经标了错的（文件太大 / 读取失败 / 超过 10 万字）不进循环
+      const ready = candidates.filter((item) => item.error === undefined);
+      const skipped: ImportCandidate[] = candidates.filter((item) => item.error !== undefined);
+
+      void autosave.flush().then(async () => {
+        try {
+          if (ready.length > 0) setImportState({ done: 0, total: ready.length });
+
+          const imported: MdDocument[] = [];
+          let done = 0;
+
+          for (let index = ready.length - 1; index >= 0; index -= 1) {
+            const item = ready[index];
+            const result = await importDocumentAction(item.title, item.body);
+            if (result.ok) {
+              // 逆序导，补回数组时再翻正：`imported` 最终是文件顺序
+              imported.unshift(result.document);
+            } else {
+              skipped.push({ ...item, error: result.error });
+            }
+            done += 1;
+            setImportState({ done, total: ready.length });
+          }
+
+          if (imported.length > 0) {
+            setDocuments((current) => [...imported.map(toSummary), ...current]);
+            // 空库：自动打开文件顺序的第一篇；用户中途点过别的就尊重他的选择
+            const first = imported[0];
+            if (first && activeIdRef.current === null) loadDocument(first);
+          }
+
+          const detail = skipped
+            .slice(0, 2)
+            .map((item) => `${item.fileName}（${item.error}）`)
+            .join("、");
+          const more = skipped.length > 2 ? ` 等 ${skipped.length} 个` : "";
+
+          if (skipped.length === 0) {
+            toast.success(`已导入 ${imported.length} 篇`);
+          } else if (imported.length === 0) {
+            toast.error(`一篇都没导入：${detail}${more}`);
+          } else {
+            toast.warn(`已导入 ${imported.length} 篇，${skipped.length} 篇跳过：${detail}${more}`);
+          }
+        } finally {
+          setImportState(null);
+          importingRef.current = false;
+        }
+      });
+    },
+    [autosave, loadDocument, toast],
+  );
 
   const confirmDelete = useCallback(() => {
     const target = deleteTarget;
@@ -435,6 +525,8 @@ export function MarkdownEditorView({
             onToggleAll={toggleAll}
             onDeleteChecked={() => setBulkDeleteOpen(true)}
             busy={busy}
+            importing={importState}
+            onImportFiles={importFiles}
           />
         </aside>
 
@@ -556,6 +648,8 @@ export function MarkdownEditorView({
           onToggleAll={toggleAll}
           onDeleteChecked={() => setBulkDeleteOpen(true)}
           busy={busy}
+          importing={importState}
+          onImportFiles={importFiles}
         />
       </div>
 
