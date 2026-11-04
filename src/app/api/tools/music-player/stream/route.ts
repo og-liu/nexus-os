@@ -52,8 +52,11 @@ function fail(code: string, message: string, status: number): Response {
  * 128kbps 的歌本身只要 **16KB/s**，给到 100KB/s 是六倍余量——播放不会卡，
  * 省下的带宽留给页面导航（RSC / JS）。3M 上行实测：不限制时播放中跳转要 10 秒，
  * 限制后能降到几百毫秒。
+ *
+ * 带宽更好的部署可以调高：`MUSIC_STREAM_BYTES_PER_SECOND=524288`（512KB/s）。
  */
-const STREAM_BYTES_PER_SECOND = 100 * 1024;
+const STREAM_BYTES_PER_SECOND =
+  Number(process.env.MUSIC_STREAM_BYTES_PER_SECOND) || 100 * 1024;
 
 function toWebStream(nodeStream: Readable, signal: AbortSignal): ReadableStream<Uint8Array> {
   let done = false;

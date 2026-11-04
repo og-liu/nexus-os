@@ -199,6 +199,14 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
    * `audio.load()` 会触发 `loadstart` → `setPosition(0)`，位置当场就没了——先记下来。
    */
   const reloadSeekRef = useRef<number | null>(null);
+  /**
+   * 这次 `loadstart` 是不是「补加载」自己触发的。
+   *
+   * 补加载会先设 `reloadSeekRef` 再 `load()`，而 `load()` 又触发 `loadstart`——
+   * 如果不区分，`loadstart` 里清理会把刚记下的目标抹掉；反过来，用户真正切歌时
+   * 又必须把它清掉，否则新歌 `loadedmetadata` 会被 seek 到上一首的位置。
+   */
+  const pendingReloadRef = useRef(false);
   const pathname = usePathname();
   /**
    * 只有播放器页才预取音频元数据。
@@ -483,6 +491,13 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
     const onLoadStart = () => {
       setPosition(0);
       setDuration(0);
+      // 补加载自己触发的 loadstart：保留刚记下的 seek 目标
+      if (pendingReloadRef.current) {
+        pendingReloadRef.current = false;
+        return;
+      }
+      // 真正切歌：上一次补加载的 seek 目标作废，别把新歌 seek 到旧位置
+      reloadSeekRef.current = null;
     };
     const onPlay = () => {
       // 播起来了：恢复意图已兑现，之后正常记录
@@ -529,6 +544,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
     if (!audio || !isPlayerPage || currentId === null) return;
     if (audio.readyState === 0) {
       reloadSeekRef.current = position > 0 ? position : null;
+      pendingReloadRef.current = true;
       audio.load();
     }
   }, [isPlayerPage, currentId, position]);
