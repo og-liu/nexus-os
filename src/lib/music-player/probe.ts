@@ -96,3 +96,54 @@ export async function probeAudioFile(filePath: string): Promise<AudioProbe> {
     artist: tags.artist,
   };
 }
+
+/** faststart 重排的硬超时：46MB 重排约 1 秒，卡住说明磁盘或文件有问题。 */
+const FASTSTART_TIMEOUT_MS = 60_000;
+
+/**
+ * 把 MP4 系容器的元数据（`moov`）挪到**文件开头**（`-movflags +faststart`）。
+ *
+ * **为什么必须做**（2026-11-04 线上事故）：M4A 的 `moov`（时长、seek 表）默认在
+ * **文件末尾**。46MB 的音频，浏览器要下完整个文件才知道多长、能不能 seek——
+ * 线上实测 7 秒只下了 532KB，`readyState` 一直是 0：位置恢复不了、歌也播不起来。
+ * 把 `moov` 提到文件头之后，浏览器下几 KB 就能拿到时长并直接从任意位置取流。
+ *
+ * `-c copy` **不转码**，只重排 atom（体积几乎不变），符合「原样存」的原则。
+ * 失败不抛给调用方——用它返回 false，调用方退回原文件（能播，只是大文件 seek 慢）。
+ */
+export function faststartCopy(inputPath: string, outputPath: string): Promise<boolean> {
+  return new Promise((resolve) => {
+    const child = spawn(
+      ffmpegPath,
+      [
+        "-hide_banner",
+        "-nostdin",
+        "-y",
+        "-i",
+        inputPath,
+        "-c",
+        "copy",
+        // 输出名是 `<临时文件名>.faststart`，没有 `.m4a` 后缀——ffmpeg 猜不出容器，
+        // 会报 "Unable to find a suitable output format" 然后我们静默退回原文件。
+        // 显式点名 ipod（M4A 的 muxer）最稳。
+        "-f",
+        "ipod",
+        "-movflags",
+        "+faststart",
+        outputPath,
+      ],
+      { stdio: ["ignore", "ignore", "ignore"] },
+    );
+
+    const timer = setTimeout(() => child.kill("SIGKILL"), FASTSTART_TIMEOUT_MS);
+
+    child.on("error", () => {
+      clearTimeout(timer);
+      resolve(false);
+    });
+    child.on("close", (code) => {
+      clearTimeout(timer);
+      resolve(code === 0);
+    });
+  });
+}
