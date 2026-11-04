@@ -23,6 +23,7 @@ const TOOL_TAB_SLUGS = new Set([
   "vault",
   "image-compress",
   "markdown-editor",
+  "html-editor",
   "audio-extract",
   "douyin-download",
   "music-player",
