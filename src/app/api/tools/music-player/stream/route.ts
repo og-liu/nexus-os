@@ -38,16 +38,51 @@ function fail(code: string, message: string, status: number): Response {
  * `ERR_INVALID_STATE: Controller is already closed`（uncaughtException），
  * 而且这个请求会一直挂着：页面的 `load` 事件迟迟不来（实测刷新要等 15 秒）。
  *
- * 这里做三件事：
+ * 这里做四件事：
  * 1. 客户端断开（`request.signal` abort）或流被取消 → **立刻 destroy 文件流**；
  * 2. 往已关闭的 controller 写入时不再上抛——那一次丢掉的 chunk 本来也没人读了；
- * 3. `desiredSize` 见底时暂停读文件，避免把整个大文件一口气读进内存。
+ * 3. `desiredSize` 见底时暂停读文件，避免把整个大文件一口气读进内存；
+ * 4. **限制发送速率**（见 `STREAM_BYTES_PER_SECOND`）：播放中 Chrome 会持续预缓冲，
+ *    不设上限它就一路把上行吃满，用户点导航就是「点不动」（2026-11-04）。
  */
+
+/**
+ * 音频流的发送速率上限（字节/秒）。
+ *
+ * 128kbps 的歌本身只要 **16KB/s**，给到 100KB/s 是六倍余量——播放不会卡，
+ * 省下的带宽留给页面导航（RSC / JS）。3M 上行实测：不限制时播放中跳转要 10 秒，
+ * 限制后能降到几百毫秒。
+ */
+const STREAM_BYTES_PER_SECOND = 100 * 1024;
+
 function toWebStream(nodeStream: Readable, signal: AbortSignal): ReadableStream<Uint8Array> {
   let done = false;
+  /** 浏览器那边不想要（背压）时不能硬塞 */
+  let wantsMore = true;
+  /** 限速窗口：windowStart 起算，windowBytes 是这一窗里已经发出去的量 */
+  let windowStart = 0;
+  let windowBytes = 0;
+  /** 限速暂停后由谁恢复；`true` 表示正被限速压着 */
+  let throttled = false;
+
   const stop = () => {
     done = true;
     nodeStream.destroy();
+  };
+
+  /** 只有「浏览器想要」且「限速窗允许」时才继续读文件 */
+  const maybeResume = () => {
+    if (done || !wantsMore) return;
+    if (throttled) {
+      const due = windowStart + (windowBytes / STREAM_BYTES_PER_SECOND) * 1000;
+      const wait = due - Date.now();
+      if (wait > 0) {
+        setTimeout(maybeResume, Math.min(wait + 1, 200));
+        return;
+      }
+      throttled = false;
+    }
+    nodeStream.resume();
   };
 
   if (signal.aborted) stop();
@@ -55,6 +90,7 @@ function toWebStream(nodeStream: Readable, signal: AbortSignal): ReadableStream<
 
   return new ReadableStream<Uint8Array>({
     start(controller) {
+      windowStart = Date.now();
       nodeStream.on("data", (chunk: Buffer) => {
         if (done) return;
         try {
@@ -64,7 +100,25 @@ function toWebStream(nodeStream: Readable, signal: AbortSignal): ReadableStream<
           stop();
           return;
         }
-        if ((controller.desiredSize ?? 0) <= 0) nodeStream.pause();
+
+        // 背压：浏览器读得慢，先停
+        if ((controller.desiredSize ?? 0) <= 0) {
+          wantsMore = false;
+          nodeStream.pause();
+          return;
+        }
+
+        // 限速：这一窗发得太快了就停一会儿，把带宽让给页面导航
+        windowBytes += chunk.length;
+        const elapsed = Date.now() - windowStart;
+        if (elapsed > 1000) {
+          windowStart = Date.now();
+          windowBytes = 0;
+        } else if (windowBytes / (elapsed / 1000 || 1) > STREAM_BYTES_PER_SECOND) {
+          throttled = true;
+          nodeStream.pause();
+          maybeResume();
+        }
       });
 
       nodeStream.on("end", () => {
@@ -88,8 +142,9 @@ function toWebStream(nodeStream: Readable, signal: AbortSignal): ReadableStream<
       });
     },
     pull() {
-      // 下游消费完一波，继续读文件
-      if (!done) nodeStream.resume();
+      // 下游消费完一波：背压解除 + 限速窗可能已经过去
+      wantsMore = true;
+      maybeResume();
     },
     cancel() {
       stop();
