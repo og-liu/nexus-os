@@ -93,6 +93,10 @@ export function Sidebar({
               <Link
                 key={item.href}
                 href={item.href}
+                // 不预取：侧边栏有七八个入口，Next 会对全部路由发 `_rsc` 预取。
+                // 线上 3M 上行实测 14 个预取请求要跑 4.8 秒，把带宽占满，
+                // 首屏反而更慢（2026-11-04）。点进去现取只要 100–200ms。
+                prefetch={false}
                 onClick={() => handleClick(item.href)}
                 className={cn(
                   "group relative flex items-center gap-3 overflow-hidden rounded-[2px] px-4 py-3 text-[15px] text-black transition-colors duration-200",
@@ -143,6 +147,7 @@ export function Sidebar({
               key={item.href}
               href={item.href}
               title={item.label}
+              prefetch={false}
               onClick={() => handleClick(item.href)}
               className={cn(
                 "group relative flex items-center justify-center overflow-hidden rounded-xl px-4 py-4 text-lg text-black transition-colors duration-200",
