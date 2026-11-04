@@ -10,6 +10,7 @@ import {
   useState,
 } from "react";
 import type { ReactNode } from "react";
+import { usePathname } from "next/navigation";
 import type { PlaylistWithTracks } from "@/lib/music-player/playlists";
 import type { PlaybackState } from "@/lib/music-player/playback";
 import type { Track, TrackList } from "@/lib/music-player/tracks";
@@ -192,6 +193,21 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
   const [currentId, setCurrentId] = useState<number | null>(null);
   const [playing, setPlaying] = useState(false);
   const [position, setPosition] = useState(0);
+  /**
+   * 回播放器页补加载时要 seek 到的位置。
+   *
+   * `audio.load()` 会触发 `loadstart` → `setPosition(0)`，位置当场就没了——先记下来。
+   */
+  const reloadSeekRef = useRef<number | null>(null);
+  const pathname = usePathname();
+  /**
+   * 只有播放器页才预取音频元数据。
+   *
+   * 别的页面加载它纯粹是抢带宽：46MB 的歌 `moov` 有 510KB，实测会占住上行
+   * 一秒多，期间点侧边栏导航就得排队（2026-11-04「点不动」的最后一环）。
+   * 正在播放时 `preload` 本来就不影响，所以这里只对「暂停 + 不在播放器页」生效。
+   */
+  const isPlayerPage = pathname === "/tools/music-player";
   const [duration, setDuration] = useState(0);
   const [volume, setVolumeState] = useState(1);
   const [mode, setMode] = useState<PlayMode>("order");
@@ -451,6 +467,17 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
       // 无论有没有要 seek，恢复到这里都结束了，可以开始上报
       // （顺序不能反：先 seek 再放开。`positionMs = 0` 的恢复也要放开，否则永远不上报）
       restoringRef.current = false;
+
+      // 回播放器页补加载：位置来自 state，不是首屏恢复
+      if (reloadSeekRef.current !== null) {
+        const target = reloadSeekRef.current;
+        reloadSeekRef.current = null;
+        if (target > 0) {
+          const max = Number.isFinite(audio.duration) ? audio.duration : target;
+          audio.currentTime = Math.min(target, max);
+          setPosition(audio.currentTime);
+        }
+      }
     };
     // 新歌一开始加载就把进度归零：切歌那一刻进度条不该还停在上一首的位置
     const onLoadStart = () => {
@@ -489,6 +516,22 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
       audio.removeEventListener("error", onError);
     };
   }, []);
+
+  /**
+   * 回到播放器页时把音频补加载上。
+   *
+   * 别的页面用 `preload="none"` 根本不加载；`preload` 属性变化不会让浏览器重新拉数据，
+   * 得显式 `load()`。`load()` 会把 `currentTime` 归零，所以先把位置记进 `reloadSeekRef`，
+   * 由 `loadedmetadata` 里 seek 回来。
+   */
+  useEffect(() => {
+    const audio = audioRef.current;
+    if (!audio || !isPlayerPage || currentId === null) return;
+    if (audio.readyState === 0) {
+      reloadSeekRef.current = position > 0 ? position : null;
+      audio.load();
+    }
+  }, [isPlayerPage, currentId, position]);
 
   const playPlaylist = useCallback(
     (playlistId: number, startId?: number) => {
@@ -841,7 +884,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
       <audio
         ref={audioRef}
         src={currentId === null ? undefined : streamUrl(currentId)}
-        preload="metadata"
+        preload={isPlayerPage ? "metadata" : "none"}
         className="hidden"
       />
     </PlayerContext.Provider>
