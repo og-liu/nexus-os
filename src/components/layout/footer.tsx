@@ -11,6 +11,7 @@ export function BeianLink() {
   return (
     <Link
       href="https://beian.miit.gov.cn/"
+      prefetch={false}
       target="_blank"
       rel="noopener noreferrer"
       className="transition-colors hover:text-[#000000]"

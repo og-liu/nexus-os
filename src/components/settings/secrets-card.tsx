@@ -50,6 +50,7 @@ export function SecretsCard({ configured, activeGroup }: SecretsCardProps) {
             <Link
               key={group.id}
               href={`/settings?tab=${group.id}`}
+              prefetch={false}
               scroll={false}
               aria-current={isActive ? "page" : undefined}
               className={cn(
