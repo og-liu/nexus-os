@@ -73,6 +73,7 @@ export function ResultCard({
           missingKey ? (
             <Link
               href="/settings"
+              prefetch={false}
               className="mt-1 cursor-pointer text-xs text-[#000000] underline underline-offset-4"
             >
               去设置里填 Key

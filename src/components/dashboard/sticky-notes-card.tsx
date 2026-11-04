@@ -26,6 +26,7 @@ export function StickyNotesCard({ notes }: { notes: StickyNote[] }) {
         </h2>
         <Link
           href="/tools/sticky-notes"
+          prefetch={false}
           className="flex cursor-pointer items-center gap-0.5 text-xs text-[#8A8A8A] transition-colors hover:text-[#000000]"
         >
           管理
@@ -38,6 +39,7 @@ export function StickyNotesCard({ notes }: { notes: StickyNote[] }) {
           <p className="text-[13px] text-[#999999]">还没有便签</p>
           <Link
             href="/tools/sticky-notes"
+            prefetch={false}
             className="mt-1 inline-block text-[13px] text-[#000000] underline underline-offset-2"
           >
             写一条 →
@@ -51,6 +53,7 @@ export function StickyNotesCard({ notes }: { notes: StickyNote[] }) {
               // 点到哪一条就打开哪一条：带 id 深链过去，工具页会直接弹出这条的编辑弹窗
               // （只跳列表的话，便签一多就找不到刚点的是哪条）
               href={`/tools/sticky-notes?note=${note.id}`}
+              prefetch={false}
               className="block cursor-pointer rounded-[2px] bg-[#F5F5F5] px-3 py-2.5 transition-colors hover:bg-[#ECECEC]"
             >
               {/* 一条一行：正文单行截断，时间（精确到分钟）挪到正文右侧——时间在下面会把每条撑成两行 */}

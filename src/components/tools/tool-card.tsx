@@ -18,6 +18,7 @@ export function ToolCard({ tool }: { tool: Tool }) {
   return (
     <Link
       href={`/tools/${tool.slug}`}
+      prefetch={false}
       className="group flex cursor-pointer items-center gap-3 rounded-[2px] bg-[#F5F5F5] p-4 no-underline transition-all hover:-translate-y-0.5 hover:bg-white hover:shadow-[0_4px_12px_rgba(0,0,0,0.08)]"
     >
       <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-[2px] bg-[#ECECEC] transition-colors group-hover:bg-[#000000]">

@@ -46,6 +46,7 @@ export function QuickToolsCard() {
         </h2>
         <Link
           href="/tools"
+          prefetch={false}
           className="flex cursor-pointer items-center gap-1 text-xs text-[#8A8A8A] transition-colors hover:text-[#000000]"
         >
           查看全部
@@ -58,6 +59,7 @@ export function QuickToolsCard() {
           <Link
             key={slug}
             href={`/tools/${slug}`}
+            prefetch={false}
             className="group flex items-center gap-2 rounded-[2px] bg-[#F5F5F5] p-2 transition-colors hover:bg-[#ECECEC]"
           >
             {/* 图标块：白底 → hover 黑底，图标跟着翻白 */}
