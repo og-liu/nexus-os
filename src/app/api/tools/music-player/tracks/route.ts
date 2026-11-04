@@ -12,7 +12,7 @@ import {
   extensionOf,
   isAcceptedExtension,
 } from "@/lib/music-player/formats";
-import { probeAudioFile } from "@/lib/music-player/probe";
+import { faststartCopy, probeAudioFile } from "@/lib/music-player/probe";
 import {
   TrackTooLargeError,
   removeTrackFile,
@@ -227,6 +227,18 @@ export async function POST(request: Request) {
     if (!container) {
       await removeTrackFile(tempPath);
       return fail("unsupported", `不支持 ${probe.codec.toUpperCase()} 编码`, 415);
+    }
+
+    // MP4 系容器（m4a）：把 moov 挪到文件头。默认它在文件末尾——46MB 的音频
+    // 浏览器要下完整个文件才知道时长、才能 seek，大文件就成了「永远播不起来」。
+    // 失败就用原文件：还能播，只是大文件 seek 慢。
+    if (container.ext === "m4a") {
+      const fixedPath = `${tempPath}.faststart`;
+      if (await faststartCopy(tempPath, fixedPath)) {
+        await rename(fixedPath, tempPath);
+      } else {
+        await removeTrackFile(fixedPath).catch(() => undefined);
+      }
     }
 
     const fileName = `${id}.${container.ext}`;
