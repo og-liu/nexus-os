@@ -29,6 +29,74 @@ function fail(code: string, message: string, status: number): Response {
   return Response.json({ code, error: message }, { status });
 }
 
+/**
+ * Node 的 `Readable` → Web 的 `ReadableStream`，**必须能安全收尾**。
+ *
+ * **不能直接用 `Readable.toWeb`**（2026-11-04 线上事故）：`<audio preload="metadata">`
+ * 只关心文件头，浏览器拿完前几 KB **就断开连接**，而 `createReadStream` 还在继续读——
+ * adapter 把数据往已关闭的 controller 里写，Node 抛
+ * `ERR_INVALID_STATE: Controller is already closed`（uncaughtException），
+ * 而且这个请求会一直挂着：页面的 `load` 事件迟迟不来（实测刷新要等 15 秒）。
+ *
+ * 这里做三件事：
+ * 1. 客户端断开（`request.signal` abort）或流被取消 → **立刻 destroy 文件流**；
+ * 2. 往已关闭的 controller 写入时不再上抛——那一次丢掉的 chunk 本来也没人读了；
+ * 3. `desiredSize` 见底时暂停读文件，避免把整个大文件一口气读进内存。
+ */
+function toWebStream(nodeStream: Readable, signal: AbortSignal): ReadableStream<Uint8Array> {
+  let done = false;
+  const stop = () => {
+    done = true;
+    nodeStream.destroy();
+  };
+
+  if (signal.aborted) stop();
+  else signal.addEventListener("abort", stop, { once: true });
+
+  return new ReadableStream<Uint8Array>({
+    start(controller) {
+      nodeStream.on("data", (chunk: Buffer) => {
+        if (done) return;
+        try {
+          controller.enqueue(new Uint8Array(chunk));
+        } catch {
+          // controller 已关闭：浏览器不要后面这段了，停掉文件流
+          stop();
+          return;
+        }
+        if ((controller.desiredSize ?? 0) <= 0) nodeStream.pause();
+      });
+
+      nodeStream.on("end", () => {
+        if (done) return;
+        done = true;
+        try {
+          controller.close();
+        } catch {
+          // 已经关了，忽略
+        }
+      });
+
+      nodeStream.on("error", () => {
+        if (done) return;
+        done = true;
+        try {
+          controller.error(new Error("读取音频文件失败"));
+        } catch {
+          // 已经关了，忽略
+        }
+      });
+    },
+    pull() {
+      // 下游消费完一波，继续读文件
+      if (!done) nodeStream.resume();
+    },
+    cancel() {
+      stop();
+    },
+  });
+}
+
 export async function GET(request: Request) {
   const user = await getCurrentUser();
   if (!user) return fail("unauthorized", "请先登录", 401);
@@ -63,14 +131,14 @@ export async function GET(request: Request) {
 
   if (!range) {
     const stream = createReadStream(filePath);
-    return new Response(Readable.toWeb(stream) as ReadableStream, {
+    return new Response(toWebStream(stream, request.signal), {
       status: 200,
       headers: { ...headers, "Content-Length": String(size) },
     });
   }
 
   const stream = createReadStream(filePath, { start: range.start, end: range.end });
-  return new Response(Readable.toWeb(stream) as ReadableStream, {
+  return new Response(toWebStream(stream, request.signal), {
     status: 206,
     headers: {
       ...headers,
