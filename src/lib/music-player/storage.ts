@@ -107,10 +107,10 @@ export async function removeTrackFile(filePath: string): Promise<void> {
 }
 
 /** 文件是否存在、多大。找不到返回 null（库里有一行但文件没了，界面该显示异常而不是崩）。 */
-export async function statTrackFile(filePath: string): Promise<{ size: number } | null> {
+export async function statTrackFile(filePath: string): Promise<{ size: number; mtimeMs: number } | null> {
   try {
     const info = await stat(filePath);
-    return info.isFile() ? { size: info.size } : null;
+    return info.isFile() ? { size: info.size, mtimeMs: info.mtimeMs } : null;
   } catch {
     return null;
   }
