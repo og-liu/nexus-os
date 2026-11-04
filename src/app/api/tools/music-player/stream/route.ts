@@ -121,12 +121,21 @@ export async function GET(request: Request) {
   if (!info) return fail("missing", "这首歌的文件不在服务器上", 404);
 
   const size = info.size;
-  const range = parseRange(request.headers.get("range"), size);
+  const lastModified = new Date(info.mtimeMs).toUTCString();
+  // `If-Range` 对不上 = 文件已经换了（比如上传时 faststart 重排过）：按规范回整个
+  // 文件，绝不能拿旧缓存的位置去拼新文件——那是花屏/放不出声的来源。
+  const ifRange = request.headers.get("if-range");
+  const range = ifRange && ifRange !== lastModified ? null : parseRange(request.headers.get("range"), size);
   const headers: Record<string, string> = {
     "Content-Type": container.mime,
     // private：允许浏览器缓存（拖动更顺），但不许中间代理缓存别人的歌
-    "Cache-Control": "private, max-age=3600",
+    // `no-cache` 不是「不缓存」，而是「每次用之前问一下」：Range 请求会带
+    // `If-Range`（Last-Modified），文件没变就 304/206 继续用缓存，文件变了才重下。
+    // 之前是 `max-age=3600`——上传重排（faststart）后浏览器还抱着旧的 46MB 不放，
+    // 表现就是「文件已经修好了，页面还是卡在 readyState 0」。
+    "Cache-Control": "private, no-cache",
     "Accept-Ranges": "bytes",
+    "Last-Modified": lastModified,
   };
 
   if (!range) {
