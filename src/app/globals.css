@@ -14,7 +14,18 @@
 @custom-variant dark (&:is(.dark *));
 
 @theme inline {
-  --font-sans: var(--font-noto-sans-sc), var(--font-geist-sans), sans-serif;
+  /*
+   * 字体栈（《界面设计规范》§4.1）：
+   * - 西文先走 Geist（自托管 latin 子集，几十 KB）；
+   * - 中文交给系统：苹方（macOS/iOS）/ 微软雅黑（Windows）/ 思源黑体（Linux）。
+   *
+   * **不要在这里塞自托管的中文字体**：2026-11-04 之前用的是 17MB 的 NotoSansSC，
+   * 服务器上行 3Mbps 时首屏要下 45 秒，每次部署 hash 一变又要重下。
+   */
+  --font-sans:
+    var(--font-geist-sans), -apple-system, BlinkMacSystemFont, "PingFang SC",
+    "Hiragino Sans GB", "Microsoft YaHei", "Noto Sans CJK SC", "Source Han Sans SC",
+    sans-serif;
   --font-mono: var(--font-geist-mono);
   --font-heading: var(--font-sans);
 
