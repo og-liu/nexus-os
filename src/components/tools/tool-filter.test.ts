@@ -3,8 +3,8 @@ import { TOOLS, TOOL_CATEGORIES, findToolBySlug } from "./tool-catalog";
 import { filterTools, groupTools } from "./tool-filter";
 
 describe("tool-catalog（《功能/工具中心》数据）", () => {
-  it("只收真能用的工具：9 个，名称不重复", () => {
-    expect(TOOLS).toHaveLength(9);
+  it("只收真能用的工具：10 个，名称不重复", () => {
+    expect(TOOLS).toHaveLength(10);
     const names = TOOLS.map((tool) => tool.name);
     expect(new Set(names).size).toBe(names.length);
   });
@@ -17,11 +17,12 @@ describe("tool-catalog（《功能/工具中心》数据）", () => {
     }
   });
 
-  it("九个真工具的 slug 一个不少", () => {
+  it("十个真工具的 slug 一个不少", () => {
     expect(TOOLS.map((tool) => tool.slug).sort()).toEqual([
       "attendance-calendar",
       "audio-extract",
       "douyin-download",
+      "html-editor",
       "image-compress",
       "markdown-editor",
       "music-player",
@@ -73,9 +74,10 @@ describe("filterTools（搜索 + 分类过滤）", () => {
     for (const category of TOOL_CATEGORIES) {
       expect(filterTools(TOOLS, "", category).length).toBeGreaterThan(0);
     }
-    // 「开发」这一格只有 Markdown 编辑器（《功能/工具中心》验收 1）
+    // 「开发」这一格是 Markdown 编辑器 + HTML 编辑器（《功能/工具中心》验收 1）
     expect(filterTools(TOOLS, "", "开发").map((tool) => tool.slug)).toEqual([
       "markdown-editor",
+      "html-editor",
     ]);
   });
 
@@ -108,7 +110,7 @@ describe("groupTools（分类分组）", () => {
     expect(groups["图片"]).toHaveLength(1);
     expect(groups["文本"]).toHaveLength(2);
     expect(groups["生活"]).toHaveLength(2);
-    expect(groups["开发"]).toHaveLength(1);
+    expect(groups["开发"]).toHaveLength(2);
     expect(groups["媒体"]).toHaveLength(3);
   });
 

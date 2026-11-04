@@ -139,6 +139,38 @@ CREATE TABLE IF NOT EXISTS md_document_tags (
 -- 反查「这个标签下有哪些文档」要按 tag_id 找，外键不自动建索引
 CREATE INDEX IF NOT EXISTS idx_md_document_tags_tag ON md_document_tags(tag_id);
 
+-- HTML 编辑器（《功能/HTML编辑器》§三）。结构与 md_* 三张表逐字段相同，
+-- **独立成表**：两个工具的生命周期互不牵连，标签也各管各的（《功能/HTML编辑器》§四）。
+CREATE TABLE IF NOT EXISTS html_documents (
+  id         INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id    INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  title      TEXT    NOT NULL,             -- 独立一列，不从正文推导
+  body       TEXT    NOT NULL DEFAULT '',  -- HTML 源码，不存渲染结果
+  created_at INTEGER NOT NULL,             -- 毫秒时间戳；保存不动它
+  updated_at INTEGER NOT NULL              -- 毫秒时间戳；每次保存都刷新，列表排序唯一依据
+);
+
+CREATE INDEX IF NOT EXISTS idx_html_documents_user_id ON html_documents(user_id);
+
+CREATE TABLE IF NOT EXISTS html_tags (
+  id         INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id    INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  name       TEXT    NOT NULL,             -- 展示用：保留大小写与「/」（「工作/周报」表示层级）
+  name_key   TEXT    NOT NULL,             -- 归一化（trim + 折叠空白 + 小写）
+  created_at INTEGER NOT NULL,
+  UNIQUE (user_id, name_key)
+);
+
+CREATE INDEX IF NOT EXISTS idx_html_tags_user_id ON html_tags(user_id);
+
+CREATE TABLE IF NOT EXISTS html_document_tags (
+  document_id INTEGER NOT NULL REFERENCES html_documents(id) ON DELETE CASCADE,
+  tag_id      INTEGER NOT NULL REFERENCES html_tags(id) ON DELETE CASCADE,
+  PRIMARY KEY (document_id, tag_id)
+) WITHOUT ROWID;
+
+CREATE INDEX IF NOT EXISTS idx_html_document_tags_tag ON html_document_tags(tag_id);
+
 -- 抖音解析缓存（《功能/抖音下载》§三）。
 -- **不挂 user_id**：这张表是外部接口响应的本地副本，不是用户资产——同一个视频谁解析过都算数，
 -- 按用户存只会多存几份同样的公开数据。将来做收藏夹时另建用户维度的表。
