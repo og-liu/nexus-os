@@ -4,6 +4,7 @@ import { cn } from "@/lib/utils";
 import type { MdDocumentSummary } from "@/lib/markdown/documents";
 import type { MdTag } from "@/lib/markdown/tags";
 import { DocumentList } from "./document-list";
+import type { ImportCandidate } from "./import-menu";
 
 /**
  * 左栏（文档列表）的两种浮层形态：< 1280 时左栏不在布局里，靠它们出现
@@ -48,6 +49,9 @@ interface DocumentListOverlaysProps {
   onToggleAll: () => void;
   onDeleteChecked: () => void;
   busy: boolean;
+  /** 导入：选中文件后交给页面入库（浮层不关，用户能看着进度走）。 */
+  importing: { done: number; total: number } | null;
+  onImportFiles: (candidates: ImportCandidate[]) => void;
 }
 
 export function DocumentListOverlays({
@@ -76,6 +80,8 @@ export function DocumentListOverlays({
   onToggleAll,
   onDeleteChecked,
   busy,
+  importing,
+  onImportFiles,
 }: DocumentListOverlaysProps) {
   // 浮层里「选一篇 / 新建一篇」之后要把自己收起来；≥ xl 的左栏是常驻列，走的是同一套回调，
   // 但它不该被收起——所以这层包装只放在浮层里
@@ -112,6 +118,8 @@ export function DocumentListOverlays({
     emptyTitle,
     emptyHint,
     busy,
+    importing,
+    onImportFiles,
   } as const;
 
   return (

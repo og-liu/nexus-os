@@ -1,4 +1,5 @@
 import type { Db } from "@/lib/auth/db";
+import { nextAvailableTitle } from "./import";
 import { tagsByDocument, type MdDocumentTag } from "./tags";
 import { UNTITLED } from "./validate";
 
@@ -189,4 +190,23 @@ export function nextUntitledTitle(
   let suffix = 2;
   while (used.has(`${UNTITLED} ${suffix}`)) suffix += 1;
   return `${UNTITLED} ${suffix}`;
+}
+
+/**
+ * 导入时用的最终标题：文件名叫什么就起什么，**撞了补序号**（`周报` → `周报 2`）。
+ *
+ * 为什么导入的撞名要补、而用户自己起的名字不补：导入是机器起名，同一个文件夹里
+ * 两个 `README.md`、或者同一批文件导两次，列表里出现两行一模一样的字就没法区分。
+ * 用户手打的标题不在此列——那是他的表达，不改。
+ *
+ * 一次把标题读全（几十篇的规模），后面纯函数里比对，不在循环里反复查库。
+ */
+export function uniqueImportTitle(db: Db, userId: number, base: string): string {
+  const rows = db
+    .prepare("SELECT title FROM md_documents WHERE user_id = ?")
+    .all(userId) as { title: string }[];
+  return nextAvailableTitle(
+    base,
+    new Set(rows.map((row) => row.title)),
+  );
 }

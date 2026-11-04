@@ -133,6 +133,14 @@ async function readError(response: Response, fallback: string): Promise<string> 
   return body?.error ?? fallback;
 }
 
+/**
+ * 恢复期间的「上报静默窗口」。
+ *
+ * 正常只要几十毫秒（`loadedmetadata` 一到就放开），这里只是兜底：
+ * 音频一直加载不出来时，不能让上报被永久拦住。
+ */
+const RESTORE_GRACE_MS = 3_000;
+
 export function PlayerProvider({ children }: { children: ReactNode }) {
   const audioRef = useRef<HTMLAudioElement | null>(null);
   /**
@@ -150,6 +158,23 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
    * 进度就丢了。等 `loadedmetadata` 把位置摆好之后再放开。
    */
   const restoringRef = useRef(false);
+  /**
+   * 恢复是从什么时候开始的（`restoringRef` 的兜底）。
+   *
+   * 正常路径：`loadedmetadata` 一响就放开上报。但音频**一直加载不出来**时那个事件不会来，
+   * 上报就被永久拦死（用户切歌、暂停都不会记）。所以再加一条时间线：超过
+   * {@link RESTORE_GRACE_MS} 就不再拦——宁可写一次可能不准的位置，也不要从此不再上报。
+   */
+  const restoreStartedAtRef = useRef(0);
+  /**
+   * 首屏恢复时「上次是不是正在播」（2026-11-04 联调加的）。
+   *
+   * - `null` = 不是恢复（用户点歌 / 切歌），照常播；
+   * - `true` = 上次在播：尝试接着播（浏览器拒绝就静默停在暂停态）；
+   * - `false` = 上次是暂停：**只把歌和进度摆好，不按播放**——
+   *   否则一刷新页面就自己响起来（这就是用户报的那个 bug）。
+   */
+  const resumeAutoPlayRef = useRef<boolean | null>(null);
 
   const [library, setLibrary] = useState<Track[]>([]);
   const [totalBytes, setTotalBytes] = useState(0);
@@ -254,15 +279,19 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
         setTotalBytes(data.totalBytes);
         setPlaylists(data.playlists ?? []);
 
-        // 接着上次播（《功能/音乐播放器》§2.1.6）。只恢复「哪首 + 在哪一摊 + 第几秒」，
-        // **不恢复「是否正在播」**：浏览器不许无手势自动播，`play()` 会被拒（§七第 22 条）。
+        // 接着上次播（《功能/音乐播放器》§2.1.6）。恢复「哪首 + 在哪一摊 + 第几秒」，
+        // 外加**上次是不是正在播**：暂停就不许自己响起来（2026-11-04 修的 bug——
+        // 原来这里不记播放状态，下面的切歌 effect 一挂载就 play()）。
         if (data.resume?.trackId) {
+          resumeAutoPlayRef.current = data.resume.playing;
+          // 恢复期间不许上报：这时 currentTime 还是 0，「暂停就上报」会把进度覆盖成 0
+          restoringRef.current = true;
+          restoreStartedAtRef.current = Date.now();
           setCurrentId(data.resume.trackId);
           if (data.resume.playlistId !== null) {
             setQueueSource({ type: "playlist", id: data.resume.playlistId });
           }
           if (data.resume.positionMs > 0) {
-            restoringRef.current = true;
             pendingSeekRef.current = data.resume.positionMs / 1000;
           }
         }
@@ -288,6 +317,13 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     const audio = audioRef.current;
     if (!audio || currentId === null) return;
+
+    // 首屏恢复出来的**暂停态**：只把歌和进度摆好，不按播放。
+    // 「暂停着刷新，页面自己响起来」就是这里漏了这一个判断（2026-11-04）。
+    const resumePlaying = resumeAutoPlayRef.current;
+    resumeAutoPlayRef.current = null;
+    if (resumePlaying === false) return;
+
     // iOS 上「自动接下一首」可能被拒：静默停在暂停态，不弹错误
     void audio.play().catch(() => setPlaying(false));
   }, [currentId]);
@@ -368,9 +404,10 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
           audio.currentTime = Math.min(seekTo, max);
           setPosition(audio.currentTime);
         }
-        // 位置摆好了，恢复结束，可以开始上报（顺序不能反：先 seek 再放开）
-        restoringRef.current = false;
       }
+      // 无论有没有要 seek，恢复到这里都结束了，可以开始上报
+      // （顺序不能反：先 seek 再放开。`positionMs = 0` 的恢复也要放开，否则永远不上报）
+      restoringRef.current = false;
     };
     // 新歌一开始加载就把进度归零：切歌那一刻进度条不该还停在上一首的位置
     const onLoadStart = () => {
@@ -591,9 +628,15 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
   const savePlayback = useCallback(
     (keepalive = false) => {
       if (currentId === null) return;
-      if (restoringRef.current) return; // 恢复中，别把 0 写回去
+      // 恢复中，别把 0 / 旧位置写回去；但最多拦 RESTORE_GRACE_MS，之后照常上报
+      if (restoringRef.current && Date.now() - restoreStartedAtRef.current < RESTORE_GRACE_MS) {
+        return;
+      }
       const audio = audioRef.current;
       const positionMs = audio ? Math.round(audio.currentTime * 1000) : 0;
+      // 用 `<audio>` 的真实状态而不是 React 的 `playing`：「暂停那一刻」的 effect 调这里时，
+      // state 可能还没追上；`audio.paused` 是这一刻的事实
+      const isPlaying = audio ? !audio.paused : false;
 
       void fetch("/api/tools/music-player/state", {
         method: "POST",
@@ -602,6 +645,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
           trackId: currentId,
           playlistId: queueSource.type === "playlist" ? queueSource.id : null,
           positionMs,
+          playing: isPlaying,
         }),
         keepalive,
       }).catch(() => {

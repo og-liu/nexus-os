@@ -225,6 +225,8 @@ CREATE TABLE IF NOT EXISTS music_playback (
   track_id    INTEGER REFERENCES music_tracks(id) ON DELETE SET NULL,
   playlist_id INTEGER REFERENCES playlists(id) ON DELETE SET NULL,
   position_ms INTEGER NOT NULL DEFAULT 0,
+  -- 上次离开时是不是正在播：刷新后据此决定要不要自动按播放（暂停就不许自己响）
+  is_playing  INTEGER NOT NULL DEFAULT 0,
   updated_at  INTEGER NOT NULL
 );
 `;
@@ -237,6 +239,7 @@ export function initSchema(conn: Db): void {
   // 建表之后补列：`CREATE TABLE IF NOT EXISTS` 对已存在的表是空操作，老库不会自动多出列
   migrateStickyNotePinnedAt(conn);
   migrateMusicPosition(conn);
+  migrateMusicPlaying(conn);
   // 建表之后搬数据：新表已经在了，老表还留着行
   migrateAttendanceCycles(conn);
   migrateAttendanceAnchor(conn);
@@ -427,6 +430,22 @@ function migrateMusicPosition(conn: Db): void {
             OR (p2.added_at = playlist_tracks.added_at AND p2.track_id < playlist_tracks.track_id))
       )
     `);
+  }
+}
+
+/**
+ * `music_playback` 补 `is_playing`（2026-11-04，联调反馈）。
+ *
+ * 老库补列的默认值是 **0（暂停）**：升级后第一次刷新「不记得就按暂停算」，
+ * 不会突然响起来——宁可少播一次，也不要吓人一跳。
+ */
+function migrateMusicPlaying(conn: Db): void {
+  const columns = conn
+    .prepare("PRAGMA table_info(music_playback)")
+    .all() as { name: string }[];
+  // 新库：表是 SCHEMA 刚建的，已经带这一列
+  if (columns.length > 0 && !columns.some((column) => column.name === "is_playing")) {
+    conn.exec("ALTER TABLE music_playback ADD COLUMN is_playing INTEGER NOT NULL DEFAULT 0");
   }
 }
 
