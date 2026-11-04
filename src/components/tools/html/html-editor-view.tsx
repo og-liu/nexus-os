@@ -104,8 +104,8 @@ export function HtmlEditorView({
     if (wide) setColumnOpen((open) => !open);
     else setOverlayOpen((open) => !open);
   }, []);
-  /** 版式：仅编辑器 / 编辑器 + 预览 / 仅预览。**默认「仅编辑器」**（联调定：一进来先给写作面）。 */
-  const [viewMode, setViewMode] = useState<ViewMode>("editor");
+  /** 版式：仅编辑器 / 编辑器 + 预览 / 仅预览。**默认「编辑器 + 预览」**（2026-11-04 主人定：两个编辑器统一先给「边写边看」）。 */
+  const [viewMode, setViewMode] = useState<ViewMode>("split");
   /** 「编辑器 + 预览」里编辑区占的比例（拖动分割条改它）。不持久化，刷新回 1:1。 */
   const [splitRatio, setSplitRatio] = useState(0.5);
   /** 两栏那一行：分割条靠它量宽度、算指针位置。 */
