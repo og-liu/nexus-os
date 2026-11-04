@@ -41,6 +41,7 @@ export function AttendanceCard({ year, month, days }: AttendanceCardProps) {
         <Link
           // 带上卡片当前显示的月份：跨月之后再点进来，落在的还是卡上那个月（§七「首页卡点进去月份不对」）
           href={`/tools/attendance-calendar?ym=${monthKey(year, month)}`}
+          prefetch={false}
           className="flex cursor-pointer items-center gap-0.5 text-xs text-[#666666] transition-colors hover:text-[#000000]"
         >
           管理

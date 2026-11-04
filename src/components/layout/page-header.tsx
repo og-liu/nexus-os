@@ -60,6 +60,7 @@ export function PageHeader({
         {backHref ? (
           <Link
             href={backHref}
+            prefetch={false}
             aria-label="返回"
             className="flex h-10 w-10 shrink-0 items-center justify-center rounded-[2px] text-[#1F1F1F] transition-colors hover:bg-[#ECECEC]"
           >

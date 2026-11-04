@@ -42,6 +42,7 @@ export function MusicCard() {
     return (
       <Link
         href="/tools/music-player"
+        prefetch={false}
         className="block rounded-[2px] bg-white p-5 transition-colors hover:bg-[#FAFAFA]"
       >
         <div className="flex items-center justify-between">
@@ -159,6 +160,7 @@ export function MusicCard() {
 
         <Link
           href="/tools/music-player"
+          prefetch={false}
           className="mt-3 text-[10px] text-[#A0A8B4] transition-colors hover:text-[#000000]"
         >
           管理曲库 →

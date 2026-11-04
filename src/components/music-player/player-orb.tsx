@@ -104,6 +104,7 @@ export function PlayerOrb() {
               </p>
               <Link
                 href="/tools/music-player"
+                prefetch={false}
                 onClick={close}
                 className="mt-1 inline-block text-xs text-[#8A8A8A] underline-offset-2 transition-colors hover:text-[#000000] hover:underline"
               >
@@ -199,6 +200,7 @@ export function PlayerOrb() {
 
               <Link
                 href="/tools/music-player"
+                prefetch={false}
                 onClick={close}
                 className="mt-2 block border-t border-[#F0F0F0] pt-2 text-[10px] text-[#A0A8B4] transition-colors hover:text-[#000000]"
               >
