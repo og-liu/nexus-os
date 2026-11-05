@@ -5,8 +5,8 @@ import type { ReactNode } from "react";
 import { Footer } from "@/components/layout/footer";
 import { Sidebar } from "@/components/layout/sidebar";
 import { TabBar } from "@/components/layout/tab-bar";
-import { PlayerOrb } from "@/components/music-player/player-orb";
-import { PlayerProvider } from "@/components/music-player/player-provider";
+import { PlayerOrb } from "@/features/music-player/client/player-orb";
+import { PlayerProvider } from "@/features/music-player/client/player-provider";
 
 /**
  * 应用外壳（《界面设计规范》§5.1）。
@@ -62,7 +62,7 @@ export function AppShell({
       {/*
         播放器包在最外层：整个应用只渲染一个 <audio>，它比任何页面都活得久。
         切页面时页面组件会卸载重建，这一层不会——歌因此不会断
-        （《功能/音乐播放器》§四第 3 条）。
+        （features/music-player/README.md §四「播放器放在哪」）。
       */}
       <PlayerProvider>
         {/* 桌面布局：整页禁止横向滚动，只有主内容区纵向滚动 */}

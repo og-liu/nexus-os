@@ -1,34 +1,34 @@
 import type { Metadata } from "next";
-import { AttendanceCard } from "@/components/attendance/attendance-card";
+import { AttendanceCard } from "@/features/attendance-calendar/server/attendance-card";
 import { DatetimePanel } from "@/components/dashboard/datetime-panel";
-import { MusicCard } from "@/components/dashboard/music-card";
+import { MusicCard } from "@/features/music-player/client/music-card";
 import { QuickToolsCard } from "@/components/dashboard/quick-tools-card";
 import { QuoteCard } from "@/components/dashboard/quote-card";
-import { StickyNotesCard } from "@/components/dashboard/sticky-notes-card";
+import { StickyNotesCard } from "@/features/sticky-notes/server/sticky-notes-card";
 import { PageHeader } from "@/components/layout/page-header";
-import { TodoCard } from "@/components/todos/todo-card";
+import { TodoCard } from "@/features/todo-list/client/todo-card";
 import {
   getSetting,
   listOverrides,
   overridesToMap,
-} from "@/lib/attendance/data";
-import { buildMonthGrid } from "@/lib/attendance/month-grid";
-import { buildMonthView } from "@/lib/attendance/month-view";
+} from "@/features/attendance-calendar/server/data";
+import { buildMonthGrid } from "@/features/attendance-calendar/shared/month-grid";
+import { buildMonthView } from "@/features/attendance-calendar/shared/month-view";
 import { getDb } from "@/lib/auth/db";
 import { requireUser } from "@/lib/auth/current-user";
 import { getTodaySnapshot } from "@/lib/datetime/today";
 import { shanghaiParts } from "@/lib/datetime/shanghai";
 import { quoteForDateKey } from "@/lib/quote/daily";
-import { listNotes } from "@/lib/sticky-notes/notes";
-import { listTodos } from "@/lib/todos/todos";
+import { listNotes } from "@/features/sticky-notes/server/notes";
+import { listTodos } from "@/features/todo-list/server/todos";
 
 export const metadata: Metadata = {
   title: "总览",
 };
 
 /**
- * 总览（首页，《界面设计规范》§7.17、《功能/便签》§2.2、《功能/待办清单》§2.1、
- * 《功能/日期时间面板》§2.1、《功能/每日一句》§2.1、《功能/工作日历》§2.2）。
+ * 总览（首页，《界面设计规范》§7.17、features/sticky-notes/README.md §2.2、features/todo-list/README.md §2.1、
+ * 《功能/日期时间面板》§2.1、《功能/每日一句》§2.1、features/attendance-calendar/README.md §2.2）。
  *
  * 外壳已落地：登录成功后直接看到应用本身。
  *
