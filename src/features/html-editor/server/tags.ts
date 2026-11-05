@@ -1,0 +1,291 @@
+import "server-only";
+
+import type { Db } from "@/lib/auth/db";
+import {
+  normalizeTagName,
+  normalizeTagNames,
+  tagKey,
+  type HtmlDocumentTag,
+  type HtmlTag,
+} from "../shared/tags";
+
+/**
+ * 文档标签的数据访问（《数据库/HTML标签表》）。
+ *
+ * 为什么是标签而不是「分组」：一篇文档常常同时属于两类（`工作/周报` + `重要`），
+ * 一个 `group_id` 装不下；而且标签可以只建、不用——**文档一个标签都没有是合法状态**。
+ *
+ * **层级靠命名约定**：标签名里带 `/` 就是一层，`工作/周报` 是 `工作` 的子标签。
+ * 筛选 `工作` 时把 `工作/周报` 也算进来（前缀匹配）。这样不用建树表，
+ * 但代价是改名要连带改子标签（见 `renameTag`）。
+ */
+
+// ---------------------------------------------------------------- 查询
+
+/** 左栏的标签 chips：按使用次数从多到少，同次数按名字。 */
+export function listTags(db: Db, userId: number): HtmlTag[] {
+  const rows = db
+    .prepare(
+      `SELECT t.id, t.name,
+              (SELECT COUNT(*) FROM html_document_tags dt
+                JOIN html_documents d ON d.id = dt.document_id
+               WHERE dt.tag_id = t.id AND d.user_id = t.user_id) AS count
+         FROM html_tags t
+        WHERE t.user_id = ?
+        ORDER BY count DESC, t.name`,
+    )
+    .all(userId) as { id: number; name: string; count: number }[];
+  return rows;
+}
+
+/**
+ * 这个人的每篇文档挂了哪些标签 —— 一次查完，避免列表里逐篇查一遍。
+ * 返回 `Map<documentId, HtmlDocumentTag[]>`；没标签的文档不在 Map 里（读的时候兜空数组）。
+ */
+export function tagsByDocument(db: Db, userId: number): Map<number, HtmlDocumentTag[]> {
+  const rows = db
+    .prepare(
+      `SELECT dt.document_id, t.id, t.name
+         FROM html_document_tags dt
+         JOIN html_tags t ON t.id = dt.tag_id
+         JOIN html_documents d ON d.id = dt.document_id
+        WHERE d.user_id = ? AND t.user_id = ?
+        ORDER BY t.name`,
+    )
+    .all(userId, userId) as { document_id: number; id: number; name: string }[];
+
+  const map = new Map<number, HtmlDocumentTag[]>();
+  for (const row of rows) {
+    const bucket = map.get(row.document_id);
+    if (bucket) bucket.push({ id: row.id, name: row.name });
+    else map.set(row.document_id, [{ id: row.id, name: row.name }]);
+  }
+  return map;
+}
+
+/** 某篇文档的标签（按名字排）。 */
+export function listDocumentTags(db: Db, userId: number, documentId: number): HtmlDocumentTag[] {
+  const rows = db
+    .prepare(
+      `SELECT t.id, t.name
+         FROM html_document_tags dt
+         JOIN html_tags t ON t.id = dt.tag_id
+         JOIN html_documents d ON d.id = dt.document_id
+        WHERE dt.document_id = ? AND d.user_id = ? AND t.user_id = ?
+        ORDER BY t.name`,
+    )
+    .all(documentId, userId, userId) as { id: number; name: string }[];
+  return rows;
+}
+
+// ---------------------------------------------------------------- 写入
+
+/**
+ * 单独建一个标签（不带任何文档）——「标签管理」面板里的新建用它。
+ * 重名（只差大小写/空格也算）返回 `"duplicate"`，名字不合法返回 `"invalid"`。
+ */
+export function createTag(
+  db: Db,
+  userId: number,
+  rawName: unknown,
+  now = Date.now(),
+): "ok" | "duplicate" | "invalid" {
+  const name = normalizeTagName(rawName);
+  if (!name) return "invalid";
+
+  const key = tagKey(name);
+  const existing = db
+    .prepare("SELECT 1 AS found FROM html_tags WHERE user_id = ? AND name_key = ?")
+    .get(userId, key) as { found: number } | undefined;
+  if (existing) return "duplicate";
+
+  db.prepare("INSERT INTO html_tags (user_id, name, name_key, created_at) VALUES (?, ?, ?, ?)").run(
+    userId,
+    name,
+    key,
+    now,
+  );
+  return "ok";
+}
+
+/**
+ * 把名字换成标签 id：没有就顺手建出来（用户打一个新词回车，就应该有这个标签）。
+ *
+ * 唯一约束是 `(user_id, name_key)`：两个人（或同一人两次输入大小写不同）会撞在
+ * 同一个键上，所以用 `INSERT OR IGNORE` + 回查，天然幂等。
+ */
+function resolveTagIds(db: Db, userId: number, names: string[], now = Date.now()): number[] {
+  const ids: number[] = [];
+  const insert = db.prepare(
+    `INSERT OR IGNORE INTO html_tags (user_id, name, name_key, created_at) VALUES (?, ?, ?, ?)`,
+  );
+  const find = db.prepare("SELECT id, name FROM html_tags WHERE user_id = ? AND name_key = ?");
+  const update = db.prepare("UPDATE html_tags SET name = ? WHERE id = ? AND user_id = ?");
+
+  for (const name of names) {
+    const key = tagKey(name);
+    if (key === "") continue;
+    insert.run(userId, name, key, now);
+    const row = find.get(userId, key) as { id: number; name: string } | undefined;
+    if (!row) continue;
+    // 用户这次写的大小写/写法与库里不同（`work` vs `Work`）：以最新输入为准
+    if (row.name !== name) update.run(name, row.id, userId);
+    if (!ids.includes(row.id)) ids.push(row.id);
+  }
+  return ids;
+}
+
+/**
+ * 把这篇文档的标签整体换成 `rawNames`（先清空再写，最简单也最不容易出半成品）。
+ * 文档不属于这个人 → 返回 `null`（影响 0 行）。
+ */
+export function setDocumentTags(
+  db: Db,
+  userId: number,
+  documentId: number,
+  rawNames: unknown,
+): HtmlDocumentTag[] | null {
+  const owns = db
+    .prepare("SELECT 1 AS found FROM html_documents WHERE id = ? AND user_id = ?")
+    .get(documentId, userId) as { found: number } | undefined;
+  if (!owns) return null;
+
+  const names = normalizeTagNames(rawNames);
+  const tagIds = resolveTagIds(db, userId, names);
+
+  const replace = db.transaction(() => {
+    db.prepare("DELETE FROM html_document_tags WHERE document_id = ?").run(documentId);
+    const link = db.prepare(
+      "INSERT OR IGNORE INTO html_document_tags (document_id, tag_id) VALUES (?, ?)",
+    );
+    for (const tagId of tagIds) link.run(documentId, tagId);
+  });
+  replace();
+
+  return listDocumentTags(db, userId, documentId);
+}
+
+/**
+ * 重命名标签。同一个人已经有同名标签 → `"duplicate"`；不存在 → `"missing"`；
+ * 改名会把**子标签**撞到别人身上 → `"conflict"`。
+ *
+ * 第三种情况是 2026-10-31 补的：`工作/周报` 与 `生活/周报` 并存时把 `工作` 改名成
+ * `生活`，子标签跟着改成 `生活/周报` 就撞了 `UNIQUE(user_id, name_key)`——
+ * 事务会回滚、数据不会坏，但异常会冒泡成 Server Action 报错。**必须在动手之前查**，
+ * 因为 SQLite 的约束只会在 UPDATE 执行到那一行时才炸，而那时前面几行已经改了
+ * （靠事务回滚能救回来，但用户看到的是一句看不懂的错）。
+ */
+export function renameTag(
+  db: Db,
+  userId: number,
+  tagId: number,
+  rawName: unknown,
+): "ok" | "missing" | "duplicate" | "conflict" {
+  const name = normalizeTagName(rawName);
+  if (!name) return "missing";
+
+  const current = db
+    .prepare("SELECT id, name, name_key FROM html_tags WHERE id = ? AND user_id = ?")
+    .get(tagId, userId) as { id: number; name: string; name_key: string } | undefined;
+  if (!current) return "missing";
+
+  const nextKey = tagKey(name);
+  if (nextKey !== current.name_key) {
+    const clash = db
+      .prepare("SELECT 1 AS found FROM html_tags WHERE user_id = ? AND name_key = ? AND id <> ?")
+      .get(userId, nextKey, tagId) as { found: number } | undefined;
+    if (clash) return "duplicate";
+  }
+
+  // 改键就是「搬走」：子标签要跟着改名，所以先算出它们的新键，跟库里已有的对一遍
+  const children =
+    nextKey === current.name_key
+      ? []
+      : (db
+          .prepare("SELECT id, name, name_key FROM html_tags WHERE user_id = ? AND name_key LIKE ?")
+          .all(userId, `${current.name_key}/%`) as {
+          id: number;
+          name: string;
+          name_key: string;
+        }[]);
+
+  if (children.length > 0) {
+    const planned = children.map((child) => ({
+      id: child.id,
+      nextKey: tagKey(`${name}/${child.name.replace(/^[^/]*\//, "")}`),
+    }));
+    // 自己这一组（父 + 全部子）都会改名，它们的旧键让出来、新键自己占，不算冲突
+    const ownIds = new Set<number>([tagId, ...children.map((child) => child.id)]);
+    const taken = db
+      .prepare(
+        `SELECT id, name_key FROM html_tags
+          WHERE user_id = ? AND name_key IN (${planned.map(() => "?").join(", ")})`,
+      )
+      .all(userId, ...planned.map((item) => item.nextKey)) as {
+      id: number;
+      name_key: string;
+    }[];
+    if (taken.some((row) => !ownIds.has(row.id))) return "conflict";
+  }
+
+  const rename = db.transaction(() => {
+    if (nextKey === current.name_key) {
+      db.prepare("UPDATE html_tags SET name = ? WHERE id = ? AND user_id = ?").run(
+        name,
+        tagId,
+        userId,
+      );
+      return;
+    }
+
+    db.prepare("UPDATE html_tags SET name = ?, name_key = ? WHERE id = ? AND user_id = ?").run(
+      name,
+      nextKey,
+      tagId,
+      userId,
+    );
+
+    for (const child of children) {
+      const suffix = child.name.replace(/^[^/]*\//, "");
+      const childName = `${name}/${suffix}`;
+      db.prepare("UPDATE html_tags SET name = ?, name_key = ? WHERE id = ? AND user_id = ?").run(
+        childName,
+        tagKey(childName),
+        child.id,
+        userId,
+      );
+    }
+  });
+  rename();
+
+  return "ok";
+}
+
+/** 删标签：只解除关联，文档不删（`ON DELETE CASCADE` 只删关联行）。返回是否删掉了。 */
+export function deleteTag(db: Db, userId: number, tagId: number): boolean {
+  const result = db.prepare("DELETE FROM html_tags WHERE id = ? AND user_id = ?").run(tagId, userId);
+  return result.changes > 0;
+}
+
+/** 批量删标签：一条 SQL，`user_id` 兜归属；返回真正删掉的数量。 */
+export function deleteTags(db: Db, userId: number, ids: number[]): number {
+  if (ids.length === 0) return 0;
+  const placeholders = ids.map(() => "?").join(", ");
+  const result = db
+    .prepare(`DELETE FROM html_tags WHERE user_id = ? AND id IN (${placeholders})`)
+    .run(userId, ...ids);
+  return result.changes;
+}
+
+/** 这个标签正在被多少篇文档使用（删除确认框要显示这个数）。 */
+export function countTagDocuments(db: Db, userId: number, tagId: number): number {
+  const row = db
+    .prepare(
+      `SELECT COUNT(*) AS count
+         FROM html_document_tags dt
+         JOIN html_documents d ON d.id = dt.document_id
+        WHERE dt.tag_id = ? AND d.user_id = ?`,
+    )
+    .get(tagId, userId) as { count: number } | undefined;
+  return row?.count ?? 0;
+}
