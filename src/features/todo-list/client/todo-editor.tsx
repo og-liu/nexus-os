@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { formatDateTime } from "@/lib/format";
-import { TODO_TITLE_MAX_LENGTH, charLength } from "@/lib/todos/validate";
+import { TODO_TITLE_MAX_LENGTH, charLength } from "@/features/todo-list/shared/validate";
 
 /**
  * 待办的新建 / 编辑编辑器（两者共用一个弹窗壳）。

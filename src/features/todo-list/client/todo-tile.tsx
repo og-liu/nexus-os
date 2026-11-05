@@ -3,10 +3,10 @@
 import { Check, Trash2 } from "lucide-react";
 import { formatDateTime } from "@/lib/format";
 import { cn } from "@/lib/utils";
-import type { Todo } from "@/lib/todos/todos";
+import type { Todo } from "@/features/todo-list/server/todos";
 
 /**
- * 待办卡片（《功能/待办清单》§2.2 的工具页形态，与便签卡同构）。
+ * 待办卡片（features/todo-list/README.md §2.2 的工具页形态，与便签卡同构）。
  *
  * 布局与便签卡同一套语言：白卡固定高度、hover 出黑描边、时间钉在底部、右上角操作按钮
  * 桌面 hover 才显 / 触屏常显。点卡片本身就是编辑入口——与便签「点卡片打开弹窗」一致。

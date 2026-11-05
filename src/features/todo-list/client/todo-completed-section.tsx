@@ -5,7 +5,7 @@ import { ChevronDown } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 /**
- * 工具页的「已完成」折叠区（《功能/待办清单》§2.2）。
+ * 工具页的「已完成」折叠区（features/todo-list/README.md §2.2）。
  *
  * 用的是全站统一的分组标题形态（黑竖条 + 13px 标题 + 弱化计数，§7.2）：
  * 「未完成」那一组也是同样的标题，两组标题把「工具信息 → 列表」的过渡接上，

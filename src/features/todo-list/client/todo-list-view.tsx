@@ -12,17 +12,17 @@ import {
   toggleTodoAction,
   updateTodoAction,
   type TodosActionResult,
-} from "@/lib/todos/actions";
+} from "@/features/todo-list/server/actions";
 import { cn } from "@/lib/utils";
-import { TODO_LEAVE_ANIMATION_MS, TODO_LEAVE_DELAY_MS } from "@/lib/todos/leave";
-import type { Todo, TodoBoard } from "@/lib/todos/todos";
+import { TODO_LEAVE_ANIMATION_MS, TODO_LEAVE_DELAY_MS } from "@/features/todo-list/shared/leave";
+import type { Todo, TodoBoard } from "@/features/todo-list/server/todos";
 import { TodoCompletedSection } from "./todo-completed-section";
 import { TodoDialog } from "./todo-dialog";
 import { TodoTile } from "./todo-tile";
 import { TodoToolIntro } from "./todo-tool-intro";
 
 /**
- * 待办工具页（《功能/待办清单》§2.2）。
+ * 待办工具页（features/todo-list/README.md §2.2）。
  *
  * 页面骨架与便签页完全同构：无页头 → 移动端导航行（汉堡 + 新建）→ 工具信息条 →
  * 吸顶工具栏 → 卡片网格。新建与编辑都走 `TodoDialog` 弹窗，卡片本身只负责展示与入口。

@@ -12,10 +12,10 @@ import {
   updateTodoTitle,
   type TodoBoard,
 } from "./todos";
-import { validateTodoTitle } from "./validate";
+import { validateTodoTitle } from "../shared/validate";
 
 /**
- * 待办的 Server Actions（《功能/待办清单》）。
+ * 待办的 Server Actions（features/todo-list/README.md）。
  *
  * 两个必须记住的前提：
  * 1. Server Action 是**公开 HTTP 端点**：标题校验与归属校验必须在服务端再做一遍，

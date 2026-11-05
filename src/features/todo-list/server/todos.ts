@@ -1,7 +1,9 @@
+import "server-only";
+
 import type { Db } from "@/lib/auth/db";
 
 /**
- * 待办的数据访问（《数据库/待办表》《功能/待办清单》§三）。
+ * 待办的数据访问（《数据库/待办表》features/todo-list/README.md §三）。
  *
  * 分工：这里只碰数据库，不碰 cookie 与请求上下文；服务端操作在 `actions.ts`。
  * 所有查询都带 `user_id = ?`——归属从第一天就生效，不是「反正只有一个用户」的自觉。

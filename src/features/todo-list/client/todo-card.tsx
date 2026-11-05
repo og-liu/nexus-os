@@ -3,17 +3,17 @@
 import { useEffect, useState, useTransition } from "react";
 import Link from "next/link";
 import { ArrowRight } from "lucide-react";
-import { toggleTodoAction } from "@/lib/todos/actions";
+import { toggleTodoAction } from "@/features/todo-list/server/actions";
 import {
   TODO_LEAVE_ANIMATION_MS,
   TODO_LEAVE_DELAY_MS,
-} from "@/lib/todos/leave";
-import type { Todo, TodoBoard } from "@/lib/todos/todos";
+} from "@/features/todo-list/shared/leave";
+import type { Todo, TodoBoard } from "@/features/todo-list/server/todos";
 import { cn } from "@/lib/utils";
 import { TodoRow } from "./todo-row";
 
 /**
- * 首页「待办清单」常驻卡（《界面设计规范》§7.17、《功能/待办清单》§2.1）。
+ * 首页「待办清单」常驻卡（《界面设计规范》§7.17、features/todo-list/README.md §2.1）。
  *
  * 数据由首页（Server Component）查好传进来——与工具页共用 `listTodos`，只是取未完成的前 3 条。
  * 计数是**全局**的：已完成数 / 全部条数，与卡里显示几条无关。
