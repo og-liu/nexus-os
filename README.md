@@ -52,7 +52,8 @@ Node 22 · pnpm · Next.js 16（App Router）· React 19 · TypeScript 5 · Tail
 | [`docs/数据库/`](docs/数据库/) | 数据库设计：有哪些表、每张表每一列是什么意思 |
 | [`docs/项目目录结构说明.md`](docs/项目目录结构说明.md) | 文件该放在哪 |
 | [`docs/界面设计规范.md`](docs/界面设计规范.md) | 界面长什么样 |
-| [`docs/功能/`](docs/功能/) | 一个功能一份文档：要什么、怎么设计、怎么验收 |
+| [`docs/功能/`](docs/功能/) | **非工具**页面 / 能力的设计文档：要什么、怎么设计、怎么验收 |
+| `src/features/<工具>/README.md` | **工具**的文档（工具页打哪来、三层代码、验收、坑）；10 个工具各一份，与 `client/` `server/` `shared/` 并排 |
 | [`docs/部署方案.md`](docs/部署方案.md) | 怎么上线、怎么回滚 |
 | [`docs/Git协作规范.md`](docs/Git协作规范.md) | 分支怎么开、代码怎么进 `main`、谁在什么时候合并 |
 | [`docs/开发日志.md`](docs/开发日志.md) | 干过什么、为什么、踩了什么 |
