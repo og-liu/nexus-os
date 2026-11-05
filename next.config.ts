@@ -12,7 +12,7 @@ const nextConfig: NextConfig = {
   // 本来想用 `devIndicators: { position: 'top-right' }` 摆开，**实测在 Next 16.3.1 上不生效**
   // （配置合法、重启过、硬刷新过，球始终在左下角）——而左下角正好压住侧边栏底部的
   // 用户菜单。所以干脆关掉：这个指示器只是「编译状态 / 路由信息」，生产环境本来就不渲染，
-  // 而悬浮球的样式是照它复刻的（《功能/音乐播放器》§2.4），视觉上没有损失。
+  // 而悬浮球的样式是照它复刻的（features/music-player/README.md §2.4），视觉上没有损失。
   // 想把它开回来：删掉这一行即可（会回到左下角那颗）。
   devIndicators: false,
 
@@ -26,8 +26,8 @@ const nextConfig: NextConfig = {
 
   // 二进制文件不会因为「有 import」就被打进 standalone 产物（追踪器只跟 JS/JSON），
   // 而线上机器**没有系统 ffmpeg 可兜底**（Alibaba Cloud Linux 3 的源里没有这个包）。
-  // 所以显式把平台二进制包含进这些路由的产物里——《功能/音频提取》§七 第 6 条、
-  // 《功能/音乐播放器》§七（上传时要用 ffmpeg 探编码与时长，同一个坑）。
+  // 所以显式把平台二进制包含进这些路由的产物里——features/audio-extract/README.md §七 第 6 条、
+  // features/music-player/README.md §七（上传时要用 ffmpeg 探编码与时长，同一个坑）。
   //
   // **新增一个 spawn ffmpeg 的路由，就要在这里加一行**；漏了的表现是「本地正常、
   // 线上传歌必失败」，因为开发机的 node_modules 里二进制一直都在。
