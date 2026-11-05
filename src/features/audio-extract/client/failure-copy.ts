@@ -1,9 +1,9 @@
 "use client";
 
-import type { ExtractErrorCode } from "@/lib/audio-extract/constants";
+import type { ExtractErrorCode } from "@/features/audio-extract/shared/constants";
 
 /**
- * 失败文案（《功能/音频提取》§2.3）：一句主句 + 一句该干什么。
+ * 失败文案（features/audio-extract/README.md §2.3）：一句主句 + 一句该干什么。
  *
  * 单文件卡与批量列表共用这一份——同一个失败在两处说两种话，用户会以为是两个问题。
  */

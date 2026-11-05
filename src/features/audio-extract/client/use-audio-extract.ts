@@ -1,13 +1,13 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { rejectionReason, type RejectionCode } from "@/lib/audio-extract/accept";
-import type { ExtractErrorCode } from "@/lib/audio-extract/constants";
+import { rejectionReason, type RejectionCode } from "@/features/audio-extract/shared/accept";
+import type { ExtractErrorCode } from "@/features/audio-extract/shared/constants";
 import { ExtractRequestError, requestExtract } from "./extract-request";
 import { failureOf, type Failure } from "./failure-copy";
 
 /**
- * 单文件提取的状态机（《功能/音频提取》§2.3）。
+ * 单文件提取的状态机（features/audio-extract/README.md §2.3）。
  *
  * 一次提取只有三个阶段：上传（浏览器知道真实百分比）→ 提取（服务器黑盒，
  * 只给已用秒数）→ 结果。三种都塞进同一个 phase，避免「按钮该不该禁用」

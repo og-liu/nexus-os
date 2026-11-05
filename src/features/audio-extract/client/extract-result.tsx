@@ -6,7 +6,7 @@ import type { Failure } from "./failure-copy";
 import type { Outcome } from "./use-audio-extract";
 
 /**
- * 右栏的结果块（《功能/音频提取》§2.3）。
+ * 右栏的结果块（features/audio-extract/README.md §2.3）。
  *
  * 三种状态共用一个位置——空、成功、失败。换位置会让用户每次都要重新找，
  * 而这里本来就只有一件事：结果出来了没有。

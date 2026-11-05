@@ -16,7 +16,7 @@ import { useAudioExtract } from "./use-audio-extract";
 import { useBatchExtract } from "./use-batch-extract";
 
 /**
- * 音频提取工具页的视图层（《功能/音频提取》§2）。
+ * 音频提取工具页的视图层（features/audio-extract/README.md §2）。
  *
  * 版式与图片压缩同构：**左 = 文件（单个 / 列表），右 = 操作 + 结果**。
  * 宽屏（lg 起）两栏并排，平板（md）并排两列，手机单列纵向——

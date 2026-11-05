@@ -1,6 +1,6 @@
 "use client";
 
-import type { ExtractErrorCode } from "@/lib/audio-extract/constants";
+import type { ExtractErrorCode } from "@/features/audio-extract/shared/constants";
 
 /**
  * 一次音频提取请求（单文件与批量共用）。

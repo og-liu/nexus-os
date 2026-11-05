@@ -5,7 +5,7 @@ import { formatBytes } from "@/lib/format-bytes";
 import type { BatchItem, BatchProgress } from "./use-batch-extract";
 
 /**
- * 批量模式的结果区（《功能/音频提取》§2.1 批量，版式对齐图片压缩）。
+ * 批量模式的结果区（features/audio-extract/README.md §2.1 批量，版式对齐图片压缩）。
  *
  * 汇总只看「真正提取成功」的那些：合计原始体积 → 合计输出体积、共几个可下载；
  * 其余（跳过 / 失败）在列表里逐条说明。底部一个动作：下载全部（ZIP）。

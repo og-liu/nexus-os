@@ -1,15 +1,15 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { batchRejectionReason } from "@/lib/audio-extract/batch-rules";
-import type { ExtractErrorCode } from "@/lib/audio-extract/constants";
+import { batchRejectionReason } from "@/features/audio-extract/shared/batch-rules";
+import type { ExtractErrorCode } from "@/features/audio-extract/shared/constants";
 import { buildZip, uniqueName } from "@/lib/zip";
 import { useToast } from "@/components/ui/toast";
 import { ExtractRequestError, requestExtract } from "./extract-request";
 import { FAILURE_COPY } from "./failure-copy";
 
 /**
- * 批量提取的状态机（《功能/音频提取》§2.1 批量）。
+ * 批量提取的状态机（features/audio-extract/README.md §2.1 批量）。
  *
  * - 只有 1 个文件走单文件流程；2 个及以上走这里（和图片压缩一致）；
  * - **串行**提取：每个视频都要完整上传到服务器、服务器只有一个临时文件，

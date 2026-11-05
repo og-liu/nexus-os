@@ -5,7 +5,7 @@ import { Upload } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 /**
- * 音频提取的空态拖入区（《功能/音频提取》§2.1）。
+ * 音频提取的空态拖入区（features/audio-extract/README.md §2.1）。
  *
  * 整块是**一个**入口：拖拽、点击、Tab + Enter 都落在同一个元素上，
  * 里面不再塞「选择文件」——同一件事两个入口，用户会犹豫。

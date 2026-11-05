@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { contentDisposition } from "../content-disposition";
+import { contentDisposition } from "@/lib/content-disposition";
 import { outputFilename, stripExtension } from "./filename";
 
 describe("outputFilename（输出文件名清洗）", () => {

@@ -1,3 +1,5 @@
+import "server-only";
+
 import { spawn } from "node:child_process";
 import { createWriteStream } from "node:fs";
 import { mkdir, readdir, rm, stat } from "node:fs/promises";
@@ -6,15 +8,15 @@ import { join } from "node:path";
 import { Readable, Transform } from "node:stream";
 import { pipeline } from "node:stream/promises";
 import { path as ffmpegPath } from "@ffmpeg-installer/ffmpeg";
-import type { OutputPlan } from "./plan-output";
-import { parseProbe, type ProbeResult } from "./probe";
+import type { OutputPlan } from "../shared/plan-output";
+import { parseProbe, type ProbeResult } from "@/lib/shared/probe";
 import {
   FFMPEG_TIMEOUT_MS,
   MAX_FILE_BYTES,
   TEMP_DIR_NAME,
   TEMP_ORPHAN_MS,
   TRANSCODE_BITRATE,
-} from "./constants";
+} from "../shared/constants";
 
 /**
  * 服务器端的 ffmpeg 操作（只在 Route Handler 里用，客户端不许 import）。
@@ -164,7 +166,7 @@ export async function probeFile(filePath: string): Promise<ProbeResult> {
 /**
  * 提取音频。
  *
- * 参数里每一段都有理由（《功能/音频提取》§七）：
+ * 参数里每一段都有理由（features/audio-extract/README.md §七）：
  * - `-nostdin`：子进程没有 TTY 时 ffmpeg 会去读 stdin 等交互，**永远不返回**；
  * - `-y`：输出文件已存在时直接覆盖，不留交互；
  * - `-vn -sn -dn`：视频、字幕、章节流一律不要，只留音频；

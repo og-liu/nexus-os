@@ -5,7 +5,7 @@ import { formatBytes } from "@/lib/format-bytes";
 import type { BatchItem } from "./use-batch-extract";
 
 /**
- * 批量模式的文件列表（《功能/音频提取》§2.1 批量，版式对齐图片压缩）。
+ * 批量模式的文件列表（features/audio-extract/README.md §2.1 批量，版式对齐图片压缩）。
  *
  * 每行：序号 / 文件名 / 体积 → 输出体积（或状态）/ 右侧下载或状态。
  * 被拒绝的文件也留在列表里并写明原因——比「悄悄少一个」更容易排查。
