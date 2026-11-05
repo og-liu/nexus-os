@@ -7,13 +7,13 @@ import {
   WEEKDAY_HEADER,
   weekdayShortLabel,
   type MonthDayView,
-} from "@/lib/attendance/month-grid";
-import { statusLabel, type DayStatus } from "@/lib/attendance/schedule";
-import type { AttendanceDayResult } from "@/lib/attendance/actions";
+} from "@/features/attendance-calendar/shared/month-grid";
+import { statusLabel, type DayStatus } from "@/features/attendance-calendar/shared/schedule";
+import type { AttendanceDayResult } from "@/features/attendance-calendar/server/actions";
 import { DayDialog } from "./day-dialog";
 
 /**
- * 月历（《界面设计规范》§7.21、《功能/工作日历》§2.2 / §2.3）。
+ * 月历（《界面设计规范》§7.21、features/attendance-calendar/README.md §2.2 / §2.3）。
  *
  * 两档密度、**同一套格子规则**（周一起始 / 7 列 / 固定 42 格 / 白格 + 细网格线）：
  * - `full`：工具页完整月历，格高 76/68/56px，日期 + 农历/节日 + 「休 / 班」角标；

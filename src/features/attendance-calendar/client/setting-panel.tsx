@@ -3,17 +3,17 @@
 import { useEffect, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { cn } from "@/lib/utils";
-import { addDays, parseDayKey, saturdayOfWeek } from "@/lib/attendance/month-grid";
+import { addDays, parseDayKey, saturdayOfWeek } from "@/features/attendance-calendar/shared/month-grid";
 import {
   clearSettingAction,
   saveSaturdayModeAction,
-} from "@/lib/attendance/actions";
+} from "@/features/attendance-calendar/server/actions";
 import {
   DEFAULT_SETTING,
   resolveDayStatus,
   type AttendanceSetting,
   type SaturdayMode,
-} from "@/lib/attendance/schedule";
+} from "@/features/attendance-calendar/shared/schedule";
 
 /**
  * 制度设置面板（§2.5）：选周六算不算上班。

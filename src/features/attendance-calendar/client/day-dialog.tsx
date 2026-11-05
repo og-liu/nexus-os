@@ -7,12 +7,12 @@ import {
   setDayStatusAction,
   type AttendanceActionResult,
   type AttendanceDayResult,
-} from "@/lib/attendance/actions";
-import { weekdayShortLabel, type MonthDayView } from "@/lib/attendance/month-grid";
-import { statusLabel, type OverrideStatus } from "@/lib/attendance/schedule";
+} from "@/features/attendance-calendar/server/actions";
+import { weekdayShortLabel, type MonthDayView } from "@/features/attendance-calendar/shared/month-grid";
+import { statusLabel, type OverrideStatus } from "@/features/attendance-calendar/shared/schedule";
 
 /**
- * 点某一天弹出的状态弹层（《功能/工作日历》§2.4、《界面设计规范》§7.21.3）。
+ * 点某一天弹出的状态弹层（features/attendance-calendar/README.md §2.4、《界面设计规范》§7.21.3）。
  *
  * | 按钮 | 写哪张表 |
  * |---|---|

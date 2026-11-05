@@ -11,7 +11,7 @@ import {
   saveOverride,
   saveSetting,
 } from "./data";
-import { isDayKey, isSaturday } from "./month-grid";
+import { isDayKey, isSaturday } from "../shared/month-grid";
 import {
   isOverrideStatus,
   isSaturdayMode,
@@ -21,10 +21,10 @@ import {
   type AttendanceSetting,
   type OverrideStatus,
   type SaturdayMode,
-} from "./schedule";
+} from "../shared/schedule";
 
 /**
- * 工作日历的 Server Actions（《功能/工作日历》§2.4、§2.5）。
+ * 工作日历的 Server Actions（features/attendance-calendar/README.md §2.4、§2.5）。
  *
  * 两个前提与便签一致：
  * 1. Server Action 是**公开 HTTP 端点**——状态、日期、制度全部在服务端再校验一遍，

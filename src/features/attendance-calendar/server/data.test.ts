@@ -12,7 +12,7 @@ import {
   saveOverride,
   saveSetting,
 } from "./data";
-import { buildMonthView } from "./month-view";
+import { buildMonthView } from "../shared/month-view";
 
 /** 内存库 + 两个用户：归属隔离的用例需要「另外一个人」。 */
 function setup() {

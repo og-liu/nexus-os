@@ -3,12 +3,12 @@
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { ChevronLeft, ChevronRight, Settings2 } from "lucide-react";
-import { addMonths, monthKey } from "@/lib/attendance/month-grid";
-import type { AttendanceSetting } from "@/lib/attendance/schedule";
+import { addMonths, monthKey } from "@/features/attendance-calendar/shared/month-grid";
+import type { AttendanceSetting } from "@/features/attendance-calendar/shared/schedule";
 import { SettingPanel } from "./setting-panel";
 
 /**
- * 工作日历页的工具栏与制度设置（《功能/工作日历》§2.3、§2.5）。
+ * 工作日历页的工具栏与制度设置（features/attendance-calendar/README.md §2.3、§2.5）。
  *
  * 两件事都只在**工具页**出现，首页工作日历卡上没有（§2.1 分工：总览卡只做展示 + 快捷操作）：
  * 1. 年 / 月切换——切月份走 URL（`?ym=2026-11`），服务端算整月，

@@ -4,12 +4,12 @@ import {
   monthKey,
   weekdayShortLabel,
   type MonthDayView,
-} from "@/lib/attendance/month-grid";
-import { statusLabel } from "@/lib/attendance/schedule";
-import { MonthGrid } from "./month-grid";
+} from "../shared/month-grid";
+import { statusLabel } from "../shared/schedule";
+import { MonthGrid } from "../client/month-grid";
 
 /**
- * 首页「工作日历」常驻卡（《功能/工作日历》§2.2、《界面设计规范》§7.17）。
+ * 首页「工作日历」常驻卡（features/attendance-calendar/README.md §2.2、《界面设计规范》§7.17）。
  *
  * **服务端组件**：整月 42 格的状态与「今天上不上班」都是服务端算好的 props，
  * 客户端只有格子点击与弹层（`MonthGrid` 里的那一小块）。
