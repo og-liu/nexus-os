@@ -14,13 +14,13 @@ import {
   DEFAULT_QUALITY,
   MAX_FILE_BYTES,
   QUALITY_MIN,
-} from "@/lib/image-compress/constants";
+} from "@/features/image-compress/shared/constants";
 import {
   isGif,
   isSupportedImage,
   outputFilename,
   type OutputPlan,
-} from "@/lib/image-compress/plan-output";
+} from "@/features/image-compress/shared/plan-output";
 import {
   buildSource,
   disposeSource,
@@ -34,7 +34,7 @@ import type { RejectNotice } from "./compress-dropzone";
 export type { CompressOutcome } from "./image-source";
 
 /**
- * 单张图片压缩的状态机（《功能/图片压缩》§二 / §七）。
+ * 单张图片压缩的状态机（features/image-compress/README.md §二 / §七）。
  *
  * **压缩由「开始压缩」按钮触发**：载入图片、改质量都只更新参数，不自动编码；
  * 参数一变，旧结果立刻作废（数字与滑杆绝不能对不上）。

@@ -5,7 +5,7 @@ import { ImageUp } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 /**
- * 拖入区（《功能/图片压缩》§2.1 空态）。
+ * 拖入区（features/image-compress/README.md §2.1 空态）。
  *
  * 整块是**一个**按钮：拖拽、点击、Tab + Enter 三件事都落在同一个元素上，
  * 里面不再塞「选择文件」按钮——同一件事两个入口，用户会犹豫。

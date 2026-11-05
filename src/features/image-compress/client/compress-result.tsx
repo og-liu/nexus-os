@@ -6,7 +6,7 @@ import { formatBytes, percentSaved } from "@/lib/format-bytes";
 import type { CompressOutcome } from "./image-source";
 
 /**
- * 结果区（《功能/图片压缩》§2.1）：体积对比 + 节省百分比 + 输出尺寸 + 下载。
+ * 结果区（features/image-compress/README.md §2.1）：体积对比 + 节省百分比 + 输出尺寸 + 下载。
  *
  * 三种状态：
  * - 还没载入 / 还没点「开始压缩」：虚线占位块说下一步，不显示数字；

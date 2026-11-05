@@ -5,10 +5,10 @@ import {
   QUALITY_MAX,
   QUALITY_MIN,
   QUALITY_STEP,
-} from "@/lib/image-compress/constants";
+} from "@/features/image-compress/shared/constants";
 
 /**
- * 参数面板（《功能/图片压缩》§2.1）：质量滑杆。
+ * 参数面板（features/image-compress/README.md §2.1）：质量滑杆。
  *
  * 压缩由**「开始压缩」按钮**触发（2026-10-30 联调）：载入图片、拖质量都只改参数，
  * 不会自动编码。所以这里除了滑杆，还有那颗通栏黑底的按钮——它是页面上唯一的

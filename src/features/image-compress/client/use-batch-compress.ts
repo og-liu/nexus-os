@@ -2,13 +2,13 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useToast } from "@/components/ui/toast";
-import { batchRejectionReason } from "@/lib/image-compress/batch-rules";
-import { outputFilename, sourceMime } from "@/lib/image-compress/plan-output";
+import { batchRejectionReason } from "@/features/image-compress/shared/batch-rules";
+import { outputFilename, sourceMime } from "@/features/image-compress/shared/plan-output";
 import { buildZip, uniqueName } from "@/lib/zip";
 import { compressImage } from "./compress-encode";
 
 /**
- * 批量压缩的状态机（《功能/图片压缩》§2.1 批量）。
+ * 批量压缩的状态机（features/image-compress/README.md §2.1 批量）。
  *
  * - 只有 1 个文件走单张流程；2 张及以上走这里；
  * - **串行**压缩：WASM 编码 CPU 密集，并行只会互相拖慢、顶高内存；

@@ -5,7 +5,7 @@ import { formatBytes, percentSaved } from "@/lib/format-bytes";
 import type { BatchItem, BatchProgress } from "./use-batch-compress";
 
 /**
- * 批量模式的结果区（《功能/图片压缩》§2.1 批量）。
+ * 批量模式的结果区（features/image-compress/README.md §2.1 批量）。
  *
  * 汇总只看「真正压成功」的那些张：合计原始体积 → 合计压缩后体积、总节省百分比；
  * 其余（跳过 / 失败 / 压不动）在列表里逐条说明。底部两个动作：下载全部（ZIP）、继续压缩。

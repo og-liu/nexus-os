@@ -6,7 +6,7 @@ import { formatBytes } from "@/lib/format-bytes";
 import { CompressCompare } from "./compress-compare";
 
 /**
- * 已载入的预览区（《功能/图片压缩》§2.1）。
+ * 已载入的预览区（features/image-compress/README.md §2.1）。
  *
  * 顶部状态条：文件名 + `4000 × 3000 · 原图 3.0 MB → 压缩后 1.4 MB` + 右侧「换一张」。
  * 两版数字并排写，是因为出结果后画面上**同时**摆着原图与压缩后（左边/右边），

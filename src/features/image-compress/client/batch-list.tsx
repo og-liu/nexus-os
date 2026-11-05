@@ -5,7 +5,7 @@ import { formatBytes } from "@/lib/format-bytes";
 import type { BatchItem } from "./use-batch-compress";
 
 /**
- * 批量模式的文件列表（《功能/图片压缩》§2.1 批量）。
+ * 批量模式的文件列表（features/image-compress/README.md §2.1 批量）。
  *
  * 每行：序号 / 文件名 / 原始体积 → 压缩后体积（或状态）/ 右侧下载或状态。
  * 被拒绝的文件也留在列表里并写明原因——比「悄悄少一张」更容易排查。

@@ -12,7 +12,7 @@ import {
 import { ChevronsLeftRight } from "lucide-react";
 
 /**
- * 原图 / 压缩后的对比滑块（《功能/图片压缩》§2.1）。
+ * 原图 / 压缩后的对比滑块（features/image-compress/README.md §2.1）。
  *
  * 左边原图、右边压缩后，中间一条竖线 + 中间一个抓手，按住左右拖（AI 绘图工具里
  * 最常见的 before/after 对比）。2026-10-30 联调用来替掉「看原图 / 看压缩后」

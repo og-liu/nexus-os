@@ -1,6 +1,6 @@
 "use client";
 
-import { planOutput, sourceMime, type OutputPlan } from "@/lib/image-compress/plan-output";
+import { planOutput, sourceMime, type OutputPlan } from "@/features/image-compress/shared/plan-output";
 import { compressImage, probeImage } from "./compress-encode";
 
 /**

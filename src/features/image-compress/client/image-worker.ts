@@ -1,7 +1,7 @@
 /// <reference lib="webworker" />
 
 /**
- * 图片编码跑在 Worker 里（《功能/图片压缩》§七）。
+ * 图片编码跑在 Worker 里（features/image-compress/README.md §七）。
  *
  * - **JPG**：mozjpeg（`@jsquash/jpeg`）的 WASM，比浏览器 canvas 自带编码器小 5–15%
  *   （渐进式 + 优化 Huffman + trellis）。**压不小就自动降一档质量重试**，直到比原图小

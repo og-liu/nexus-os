@@ -6,7 +6,7 @@ import { ToolHeader } from "@/components/tools/tool-header";
 import { ToolMobileBar } from "@/components/tools/tool-mobile-bar";
 import { findToolBySlug } from "@/components/tools/tool-catalog";
 import { useToast } from "@/components/ui/toast";
-import { QUALITY_MIN } from "@/lib/image-compress/constants";
+import { QUALITY_MIN } from "@/features/image-compress/shared/constants";
 import { BatchList } from "./batch-list";
 import { BatchSummary } from "./batch-summary";
 import { CompressControls } from "./compress-controls";
@@ -17,7 +17,7 @@ import { useBatchCompress } from "./use-batch-compress";
 import { useImageCompress } from "./use-image-compress";
 
 /**
- * 图片压缩工具页（《功能/图片压缩》§2.1）的视图层：版式 + 组件组合。
+ * 图片压缩工具页（features/image-compress/README.md §2.1）的视图层：版式 + 组件组合。
  *
  * 两种模式：
  * - **单张**（1 个文件）：预览 + 对比滑块 + 结果区，状态机在 `useImageCompress`；
