@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { formatDateTime } from "@/lib/format";
-import { NOTE_BODY_MAX_LENGTH, charLength } from "@/lib/sticky-notes/validate";
+import { NOTE_BODY_MAX_LENGTH, charLength } from "@/features/sticky-notes/shared/validate";
 
 /**
  * 便签的原地编辑器（新建空卡与编辑已有便签共用）。
@@ -18,7 +18,7 @@ import { NOTE_BODY_MAX_LENGTH, charLength } from "@/lib/sticky-notes/validate";
  * - 字数提示只在 ≥ 900 时出现（1000 是上限，按字符数计），与创建时间并列显示。
  *
  * 焦点：挂载时自动聚焦，并把卡片滚到视口中间——移动端键盘弹出会改变视口，
- * 不滚的话输入框容易被顶出屏幕（《功能/便签》已知的坑）。
+ * 不滚的话输入框容易被顶出屏幕（features/sticky-notes/README.md 已知的坑）。
  */
 
 interface NoteEditorProps {

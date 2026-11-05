@@ -11,10 +11,10 @@ import {
   updateNoteBody,
   type StickyNote,
 } from "./notes";
-import { validateNoteBody } from "./validate";
+import { validateNoteBody } from "../shared/validate";
 
 /**
- * 便签的 Server Actions（《功能/便签》）。
+ * 便签的 Server Actions（features/sticky-notes/README.md）。
  *
  * 两个必须记住的前提：
  * 1. Server Action 是**公开 HTTP 端点**：正文校验与归属校验必须在服务端再做一遍，

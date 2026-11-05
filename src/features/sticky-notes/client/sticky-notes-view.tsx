@@ -15,13 +15,13 @@ import {
   togglePinAction,
   updateNoteAction,
   type StickyNotesActionResult,
-} from "@/lib/sticky-notes/actions";
-import type { StickyNote } from "@/lib/sticky-notes/notes";
+} from "@/features/sticky-notes/server/actions";
+import type { StickyNote } from "@/features/sticky-notes/server/notes";
 import { NoteCard } from "./note-card";
 import { NoteDialog } from "./note-dialog";
 
 /**
- * 便签工具页（《功能/便签》§2.1）。
+ * 便签工具页（features/sticky-notes/README.md §2.1）。
  *
  * 列表是「统一缩略图」：卡片固定 80px、正文一行截断。
  * 新建与编辑走 `NoteDialog` 弹窗——不把编辑态塞进卡片里，

@@ -1,10 +1,10 @@
 import Link from "next/link";
 import { ArrowRight } from "lucide-react";
-import { formatNoteTime } from "@/lib/sticky-notes/format";
-import type { StickyNote } from "@/lib/sticky-notes/notes";
+import { formatNoteTime } from "../shared/format";
+import type { StickyNote } from "./notes";
 
 /**
- * 首页主区（≥ xl 时占左 2 列）的便签常驻卡（《功能/便签》§2.2、《界面设计规范》§7.17）。
+ * 首页主区（≥ xl 时占左 2 列）的便签常驻卡（features/sticky-notes/README.md §2.2、《界面设计规范》§7.17）。
  *
  * 数据由首页（Server Component）查好传进来——与工具页共用 `listNotes`，只是 `limit: 3`。
  * 「管理 →」直指便签本身（`/tools/sticky-notes`），不是工具列表：管理的是便签，

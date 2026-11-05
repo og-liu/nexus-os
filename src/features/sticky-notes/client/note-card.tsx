@@ -2,11 +2,11 @@
 
 import { Trash2 } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { formatNoteTime } from "@/lib/sticky-notes/format";
-import type { StickyNote } from "@/lib/sticky-notes/notes";
+import { formatNoteTime } from "@/features/sticky-notes/shared/format";
+import type { StickyNote } from "@/features/sticky-notes/server/notes";
 
 /**
- * 便签卡（《功能/便签》§2.1）。
+ * 便签卡（features/sticky-notes/README.md §2.1）。
  *
  * 统一缩略图：**正方形**（`aspect-square`，宽随网格列宽，高自动等于宽），
  * 正文最多五行（超出省略），底部固定一行：左侧「时间 + 置顶文案」，右侧删除按钮。

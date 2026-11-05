@@ -1,7 +1,9 @@
+import "server-only";
+
 import type { Db } from "@/lib/auth/db";
 
 /**
- * 便签的数据访问（《数据库/便签表》《功能/便签》§三）。
+ * 便签的数据访问（《数据库/便签表》features/sticky-notes/README.md §三）。
  *
  * 分工：这里只碰数据库，不碰 cookie 与请求上下文；服务端操作在 `actions.ts`。
  * 所有查询都带 `user_id = ?`——归属从第一天就生效，不是「反正只有一个用户」的自觉。
@@ -116,7 +118,7 @@ export function updateNoteBody(
  * 因为老库已经有 `pinned`、界面与查询也都在用它，本版不做删列迁移。
  *
  * **不碰 `updated_at`**：否则「更新时间」会变成谎话，
- * 取消置顶后便签还会莫名其妙跳到最前（《功能/便签》已知的坑）。
+ * 取消置顶后便签还会莫名其妙跳到最前（features/sticky-notes/README.md 已知的坑）。
  */
 export function setNotePinned(
   db: Db,
