@@ -4,14 +4,14 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { ChevronDown, Plus } from "lucide-react";
 import { Modal } from "@/components/ui/modal";
 import { cn } from "@/lib/utils";
-import { generatePassword } from "@/lib/vault/password";
-import type { VaultField, VaultGroup, VaultItem } from "@/lib/vault/vault";
-import { UNTITLED } from "@/lib/vault/validate";
+import { generatePassword } from "@/features/vault/shared/password";
+import type { VaultField, VaultGroup, VaultItem } from "@/features/vault/shared/vault";
+import { UNTITLED } from "@/features/vault/shared/validate";
 import { FieldRow, type DraftField } from "./field-row";
 import { useFieldDrag } from "./use-field-drag";
 
 /**
- * 新建 / 编辑条目弹窗（《功能/保险库》§2.5）。新建与编辑共用一份——
+ * 新建 / 编辑条目弹窗（features/vault/README.md §2.5）。新建与编辑共用一份——
  * 差别只有初始值和标题，分两套会出现「两边校验不一样」这种迟早发生的事。
  *
  * **关闭就是关闭**：点「取消」/ `Esc` / 点遮罩一律直接关、改动丢弃。

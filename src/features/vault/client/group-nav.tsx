@@ -9,10 +9,10 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { cn } from "@/lib/utils";
-import type { VaultGroup } from "@/lib/vault/vault";
+import type { VaultGroup } from "@/features/vault/shared/vault";
 
 /**
- * 保险库左栏：所有条目 + 群组（《功能/保险库》§2.2）。
+ * 保险库左栏：所有条目 + 群组（features/vault/README.md §2.2）。
  *
  * 纯展示 + 回调，状态都在 `VaultView` 里——左栏自己不留「哪一行在改」这种状态，
  * 重命名 / 删除弹窗由父组件统一管（同一个时刻只该有一个弹窗）。

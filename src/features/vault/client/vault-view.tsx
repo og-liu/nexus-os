@@ -14,9 +14,9 @@ import {
   updateItemAction,
   type VaultActionResult,
   type VaultSnapshot,
-} from "@/lib/vault/actions";
-import { collectFieldKeys, type VaultGroup, type VaultItem } from "@/lib/vault/vault";
-import type { VaultField } from "@/lib/vault/vault";
+} from "@/features/vault/server/actions";
+import { collectFieldKeys, type VaultGroup, type VaultItem } from "@/features/vault/shared/vault";
+import type { VaultField } from "@/features/vault/shared/vault";
 import { GroupNav, type VaultView } from "./group-nav";
 import { ItemList } from "./item-list";
 import { ItemDetail } from "./item-detail";
@@ -25,7 +25,7 @@ import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { GroupDialog } from "./dialogs";
 
 /**
- * 保险库工具页（《功能/保险库》§二）。
+ * 保险库工具页（features/vault/README.md §二）。
  *
  * 这个组件是整页的**状态中枢**：当前视图（所有条目 / 某个群组）、选中哪一条、
  * 搜索词、勾选了哪几条、哪个弹窗开着。子组件都是纯展示 + 回调——

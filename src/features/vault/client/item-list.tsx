@@ -20,10 +20,10 @@ import {
 import { cn } from "@/lib/utils";
 import { formatDateTime } from "@/lib/format";
 import { useAppShell } from "@/components/layout/app-shell";
-import type { VaultGroup, VaultItem } from "@/lib/vault/vault";
+import type { VaultGroup, VaultItem } from "@/features/vault/shared/vault";
 
 /**
- * 保险库中栏：条目列表（《功能/保险库》§2.3）。
+ * 保险库中栏：条目列表（features/vault/README.md §2.3）。
  *
  * 三点是这个文件的核心：
  * 1. **列头是数据决定的**：`fieldKeys` 由父组件按「当前视图内的字段并集」算好传进来，
@@ -153,7 +153,7 @@ export function ItemList({
 
       {/* 手机上的群组切换：横滑 chip 条。
           为什么不用抽屉：手机上「换群组」是高频动作，抽屉要点两下（开、选），
-          chip 点一下就切，而且当前群组一直看得见（《功能/保险库》§2.6）。 */}
+          chip 点一下就切，而且当前群组一直看得见（features/vault/README.md §2.6）。 */}
       <div className="flex gap-1.5 overflow-x-auto border-b border-[#E8E8E8] px-3 py-2 [scrollbar-width:none] md:hidden">
         <ViewChip active={activeView === "all"} onClick={() => onSelectView("all")}>
           所有条目

@@ -5,7 +5,7 @@ import { Dices, Eye, EyeOff, GripVertical, Trash2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 /**
- * 弹窗里的一行自定义字段（《功能/保险库》§2.5）。
+ * 弹窗里的一行自定义字段（features/vault/README.md §2.5）。
  *
  * 三种控件挤在一行里，各自回答一个问题：
  * - `⋮⋮` 把手：**能不能改顺序**（拖它 / 聚焦后按 ↑↓）

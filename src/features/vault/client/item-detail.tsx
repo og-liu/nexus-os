@@ -3,7 +3,7 @@
 import { ChevronLeft, Copy, Eye, EyeOff, Pencil, Trash2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { formatDateTime } from "@/lib/format";
-import type { VaultGroup, VaultItem } from "@/lib/vault/vault";
+import type { VaultGroup, VaultItem } from "@/features/vault/shared/vault";
 
 /**
  * 右栏遮挡用的固定星号串。
@@ -15,7 +15,7 @@ import type { VaultGroup, VaultItem } from "@/lib/vault/vault";
 const MASK = "************";
 
 /**
- * 保险库右栏：选中条目的全部内容（《功能/保险库》§2.4）。
+ * 保险库右栏：选中条目的全部内容（features/vault/README.md §2.4）。
  *
  * **字段值默认按 `field.hidden` 遮挡**（`***`），点眼睛能临时露出来——这是密码管理器的常规做法：
  * 详情页经常在别人也能瞄到的屏幕上打开，默认露出等于默认泄露。
@@ -207,7 +207,7 @@ function ItemBody({
   );
 }
 
-/** 没有选中任何条目时的右栏（文案见《功能/保险库》§2.4：先说动作，再给备选路径）。 */
+/** 没有选中任何条目时的右栏（文案见 features/vault/README.md §2.4：先说动作，再给备选路径）。 */
 function EmptyDetail({ onBack }: { onBack: () => void }) {
   return (
     <>

@@ -3,6 +3,10 @@ import { createConnection, type Db } from "@/lib/auth/db";
 import { createUser } from "@/lib/auth/user";
 import {
   collectFieldKeys,
+  parseFields,
+  serializeFields,
+} from "../shared/vault";
+import {
   createGroup,
   createItem,
   deleteGroup,
@@ -14,9 +18,7 @@ import {
   listItems,
   moveItems,
   nextUntitledTitle,
-  parseFields,
   renameGroup,
-  serializeFields,
   titleTaken,
   updateItem,
 } from "./vault";

@@ -1,7 +1,7 @@
 import type { VaultField } from "./vault";
 
 /**
- * 保险库的服务端校验（《功能/保险库》§六 验收 20–22）。
+ * 保险库的服务端校验（features/vault/README.md §六 验收 20–22）。
  *
  * **为什么校验要放在这里而不是只放客户端**：Server Action 是公开的 HTTP 端点，
  * 谁都能直接调。弹窗里的 `maxLength` 只是让输入舒服，不是防线。

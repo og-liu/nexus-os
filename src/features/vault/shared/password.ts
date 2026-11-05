@@ -1,5 +1,5 @@
 /**
- * 随机密码生成（《功能/保险库》§二 弹窗的 🎲 按钮）。
+ * 随机密码生成（features/vault/README.md §二 弹窗的 🎲 按钮）。
  *
  * 三条要求决定了实现：
  * 1. **必须用 `crypto.getRandomValues`**，不能用 `Math.random()`——后者是可预测的

@@ -4,7 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import type { KeyboardEvent, PointerEvent } from "react";
 
 /**
- * 自定义字段的拖拽排序（《功能/保险库》§四「字段排序」）。
+ * 自定义字段的拖拽排序（features/vault/README.md §四「字段排序」）。
  *
  * **为什么手写而不引 dnd-kit**：这段排序只服务于弹窗里几行字段，
  * 引入 `@dnd-kit/core` + `@dnd-kit/sortable`（~40KB）换来的能力在这里用不上。

@@ -16,19 +16,17 @@ import {
   nextUntitledTitle,
   renameGroup,
   updateItem,
-  type VaultField,
-  type VaultGroup,
-  type VaultItem,
 } from "./vault";
+import type { VaultField, VaultGroup, VaultItem } from "../shared/vault";
 import {
   UNTITLED,
   validateFields,
   validateGroupName,
   validateTitle,
-} from "./validate";
+} from "../shared/validate";
 
 /**
- * 保险库的 Server Actions（《功能/保险库》）。
+ * 保险库的 Server Actions（features/vault/README.md）。
  *
  * 三个必须记住的前提：
  * 1. Server Action 是**公开 HTTP 端点**：所有校验都要在服务端再做一遍；
