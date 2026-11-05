@@ -1,8 +1,10 @@
+import "server-only";
+
 import type { Db } from "@/lib/auth/db";
 import type { DouyinVideo } from "./client";
 
 /**
- * 解析结果的缓存（《功能/抖音下载》§三）。
+ * 解析结果的缓存（features/douyin-download/README.md §三）。
  *
  * 分工：这里只碰数据库，HTTP 在 `client.ts`，请求上下文在 Route Handler。
  *

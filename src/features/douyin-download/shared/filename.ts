@@ -1,7 +1,7 @@
 import { stripLoneSurrogates } from "@/lib/content-disposition";
 
 /**
- * 下载文件名（《功能/抖音下载》§七第 3 条）。
+ * 下载文件名（features/douyin-download/README.md §七第 3 条）。
  *
  * 抖音的标题天生不适合当文件名：带 `#话题`、带 emoji、偶尔带斜杠和引号
  * （`/` 在 Windows 上是路径分隔符，`*?:"<>|` 直接非法）。这些统一换成 `-`，

@@ -5,11 +5,11 @@ import { Loader2, Menu } from "lucide-react";
 import { useAppShell } from "@/components/layout/app-shell";
 import { findToolBySlug } from "@/components/tools/tool-catalog";
 import { ToolHeader } from "@/components/tools/tool-header";
-import type { DouyinVideo } from "@/lib/douyin/client";
+import type { DouyinVideo } from "@/features/douyin-download/server/client";
 import { ResultCard, type ResultPhase } from "./result-card";
 
 /**
- * 抖音下载工具页的视图层（《功能/抖音下载》§2）。
+ * 抖音下载工具页的视图层（features/douyin-download/README.md §2）。
  *
  * 版式是**一张表单 + 一张结果卡**，不是音频提取那种「左文件右操作」的两栏工作区——
  * 这里没有文件区，照搬两栏会空掉一栏。宽屏只在结果卡内部横向分栏（封面左、信息右）。
@@ -82,7 +82,7 @@ export function DouyinDownloadView() {
     //
     // 之前试过「先 fetch 成 blob 再存」，好处是失败能在页面上报错，代价是几十 MB 的视频
     // 要整块读完才开始写盘——实测一次下载 14–16 秒，期间按钮一直转圈、没有任何进度，
-    // 看起来就是卡死了（《功能/抖音下载》§四）。
+    // 看起来就是卡死了（features/douyin-download/README.md §四）。
     const link = document.createElement("a");
     link.href = `/api/tools/douyin-download/file?id=${encodeURIComponent(video.awemeId)}`;
     link.download = "";

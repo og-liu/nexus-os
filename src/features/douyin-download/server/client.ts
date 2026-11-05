@@ -1,5 +1,5 @@
 /**
- * TikHub 适配器（《功能/抖音下载》§四、§五）。
+ * TikHub 适配器（features/douyin-download/README.md §四、§五）。
  *
  * **全站唯一一处碰 TikHub HTTP 的地方。** 业务代码只调 `resolveVideo()` /
  * `resolveVideoById()`，将来换供应商就只改这个文件。

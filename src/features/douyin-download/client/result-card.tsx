@@ -2,10 +2,10 @@
 
 import Link from "next/link";
 import { Download, Loader2, Link2 } from "lucide-react";
-import type { DouyinVideo } from "@/lib/douyin/client";
+import type { DouyinVideo } from "@/features/douyin-download/server/client";
 
 /**
- * 抖音下载的结果卡（《功能/抖音下载》§2.3）。
+ * 抖音下载的结果卡（features/douyin-download/README.md §2.3）。
  *
  * 四态：空占位 / 解析中 / 成功 / 失败。解析中**保留上一次的结果**——
  * 换一条链接时把已有内容闪成白屏，比多等两秒更难受。
