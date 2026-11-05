@@ -51,3 +51,7 @@ datetime / quote / navigation / toast / shared）。细节与例外登记表见�
 **`server-only` 与单测**：数据访问文件带 `import "server-only"` 之后，它的同目录单测跑在 Node
 下会直接抛错（那个包只在 `react-server` 条件下才是空实现）。`vitest.config.mts` 里已把它别名到
 包自带的 `empty.js`，**别删那条别名**。
+
+**Node 版本必须是 `.nvmrc` 里的 22.23.2**。`better-sqlite3` 是按 Node 22 编译的原生模块，用
+Node 26 跑 `pnpm test` 会报一大片 `NODE_MODULE_VERSION 127 vs 147`、测试全红——看起来像代码坏了，
+其实只是版本不对。跑门禁前先 `node -v` 对一眼。
