@@ -1,7 +1,7 @@
 /**
  * `Content-Disposition` 响应头的值（RFC 5987）。
  *
- * 从《功能/音频提取》的 `filename.ts` 提升到这里：抖音下载也需要给下载下来的
+ * 从 features/audio-extract/README.md 的 `filename.ts` 提升到这里：抖音下载也需要给下载下来的
  * 视频取名，两个功能各写一份迟早会漂移（一个忘了百分号编码，中文名就变成乱码）。
  *
  * 只写 `filename="中文.mp4"` 时，浏览器对非 ASCII 的处理各家不一样，

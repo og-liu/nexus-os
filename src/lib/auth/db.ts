@@ -139,8 +139,8 @@ CREATE TABLE IF NOT EXISTS md_document_tags (
 -- 反查「这个标签下有哪些文档」要按 tag_id 找，外键不自动建索引
 CREATE INDEX IF NOT EXISTS idx_md_document_tags_tag ON md_document_tags(tag_id);
 
--- HTML 编辑器（《功能/HTML编辑器》§三）。结构与 md_* 三张表逐字段相同，
--- **独立成表**：两个工具的生命周期互不牵连，标签也各管各的（《功能/HTML编辑器》§四）。
+-- HTML 编辑器（features/html-editor/README.md §三）。结构与 md_* 三张表逐字段相同，
+-- **独立成表**：两个工具的生命周期互不牵连，标签也各管各的（features/html-editor/README.md §四）。
 CREATE TABLE IF NOT EXISTS html_documents (
   id         INTEGER PRIMARY KEY AUTOINCREMENT,
   user_id    INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -171,7 +171,7 @@ CREATE TABLE IF NOT EXISTS html_document_tags (
 
 CREATE INDEX IF NOT EXISTS idx_html_document_tags_tag ON html_document_tags(tag_id);
 
--- 抖音解析缓存（《功能/抖音下载》§三）。
+-- 抖音解析缓存（features/douyin-download/README.md §三）。
 -- **不挂 user_id**：这张表是外部接口响应的本地副本，不是用户资产——同一个视频谁解析过都算数，
 -- 按用户存只会多存几份同样的公开数据。将来做收藏夹时另建用户维度的表。
 CREATE TABLE IF NOT EXISTS douyin_videos (
@@ -205,7 +205,7 @@ CREATE TABLE IF NOT EXISTS user_secrets (
   PRIMARY KEY (user_id, provider)
 ) WITHOUT ROWID;
 
--- 音乐曲库（《功能/音乐播放器》§三）。
+-- 音乐曲库（features/music-player/README.md §三）。
 -- 磁盘上的文件名叫 <uuid>.<ext>，**不是原文件名**：原名可以是 ../etc/passwd，
 -- 也可能两首歌同名互相覆盖。展示用的歌名单独存在 title 列里。
 -- codec 是 ffmpeg 探出来的真实编码，不是扩展名推的——浏览器能不能播跟的是编码。
@@ -250,7 +250,7 @@ CREATE TABLE IF NOT EXISTS playlist_tracks (
 -- 反查「这首歌在哪些歌单里」；SQLite 不为外键自动建索引
 CREATE INDEX IF NOT EXISTS idx_playlist_tracks_track ON playlist_tracks(track_id);
 
--- 上次播到哪：每人一行。关掉重开 / 刷新页面时接着播（《功能/音乐播放器》§2.1.6）
+-- 上次播到哪：每人一行。关掉重开 / 刷新页面时接着播（features/music-player/README.md §2.1.6）
 CREATE TABLE IF NOT EXISTS music_playback (
   user_id     INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
   -- 歌或歌单被删时置空而不是删整行：位置还留着，下次播同一首还能接上
@@ -287,7 +287,7 @@ export function initSchema(conn: Db): void {
  * 这列建出来却**没有任何写入路径**——弹层里没有备注输入框，`saveOverride` 恒写 NULL，
  * 界面上也不显示。一个永远是 NULL 的列会让读代码的人以为「备注功能是有的」，
  * 而文档里那句「带备注的日子显示小字」根本不成立；空壳比没有这个功能更糟，所以删掉
- * （《功能/工作日历》§三「没有 note 列」）。
+ * （features/attendance-calendar/README.md §三「没有 note 列」）。
  *
  * 用 SQLite 3.35+ 的 `DROP COLUMN`（better-sqlite3 12 内置的版本远高于它）。
  * `note` 既不是主键也不是索引列，删它不影响 `WITHOUT ROWID` 与复合主键。
